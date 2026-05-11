@@ -1,0 +1,29 @@
+node_modules/
+dist/
+parity-output/
+parity-baselines/
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+bun-debug.log*
+
+# TypeScript
+*.tsbuildinfo
