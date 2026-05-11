@@ -179,6 +179,36 @@ function parseIntOrNull(v: string | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Scroll the page from top to bottom in steps to trigger lazy-loaded images,
+ * sections, and analytics. Returns to top at the end so screenshots start
+ * from header (full-page screenshot stitches the whole height regardless).
+ */
+async function scrollFullPage(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve) => {
+      const step = Math.max(window.innerHeight * 0.8, 600);
+      let y = 0;
+      const max = document.documentElement.scrollHeight;
+      const tick = () => {
+        window.scrollTo(0, y);
+        y += step;
+        if (y < max) {
+          setTimeout(tick, 220);
+        } else {
+          // Final scroll to bottom to make sure footer-side lazy loads
+          window.scrollTo(0, max);
+          setTimeout(() => {
+            window.scrollTo(0, 0);
+            resolve();
+          }, 400);
+        }
+      };
+      tick();
+    });
+  });
+}
+
 function isFromHttpCache(resp: Response): boolean {
   // Playwright doesn't expose fromCache directly; infer from CF header or x-cache.
   const h = resp.headers();
@@ -196,10 +226,12 @@ export interface CaptureOptions {
   screenshotPath: string;
   harPath?: string;
   tracePath?: string;
-  /** Settle delay after networkidle, in ms. Default 2000 to let hydration finish. */
+  /** Settle delay after networkidle, in ms. Default 2500 to let hydration finish. */
   settleMs?: number;
   /** Hard timeout for navigation. Default 30s. */
   timeoutMs?: number;
+  /** Auto-scroll page through full height before screenshot to force lazy-loading. Default true. */
+  scrollToLoad?: boolean;
 }
 
 export async function capturePage(page: Page, opts: CaptureOptions): Promise<PageCapture> {
@@ -219,13 +251,18 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
       const headers = response.headers();
       xRobotsTag = headers["x-robots-tag"] ?? null;
     }
-    // wait for networkidle but cap it to avoid hanging on long-polled connections
-    await page
-      .waitForLoadState("networkidle", { timeout: 10_000 })
-      .catch(() => {
-        /* tolerated */
-      });
-    await page.waitForTimeout(opts.settleMs ?? 2_000);
+    // Wait for full load (images, fonts, etc.) — capped
+    await page.waitForLoadState("load", { timeout: 15_000 }).catch(() => undefined);
+    // Then networkidle (background fetches settle)
+    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
+    await page.waitForTimeout(opts.settleMs ?? 2_500);
+
+    // Auto-scroll to trigger lazy-loaded content (images, sections, analytics)
+    if (opts.scrollToLoad !== false) {
+      await scrollFullPage(page).catch(() => undefined);
+      // Brief settle after scrolling back to top
+      await page.waitForTimeout(800);
+    }
   } catch (err) {
     state.console.push({
       type: "error",

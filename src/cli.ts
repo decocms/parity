@@ -4,6 +4,7 @@ import { compareCommand } from "./commands/compare.ts";
 import { explainCommand } from "./commands/explain.ts";
 import { journeyCommand } from "./commands/journey.ts";
 import { learnedStats } from "./commands/learned.ts";
+import { vitalsCommand } from "./commands/vitals.ts";
 import { listCommand } from "./commands/list.ts";
 import { promptCommand } from "./commands/prompt.ts";
 import { reportCommand } from "./commands/report.ts";
@@ -90,6 +91,23 @@ program
   .description("Compare a run against a baseline")
   .action((runId, opts) => {
     process.exit(compareCommand(runId, opts.against, opts.output));
+  });
+
+program
+  .command("vitals")
+  .description(
+    "Crawleia múltiplas páginas (via sitemap.xml ou --urls) e compara Web Vitals prod vs cand em cada uma. Output HTML com top piores/melhores expandidos.",
+  )
+  .requiredOption("--prod <url>", "Production URL (base)")
+  .requiredOption("--cand <url>", "Candidate URL (base)")
+  .option("--urls <list-or-file>", "Comma-separated paths or .txt file (1/line). Overrides sitemap discovery.")
+  .option("--limit <n>", "Max pages discovered from sitemap.xml", (v) => Number(v), 20)
+  .option("--viewports <list>", "mobile,desktop", "mobile")
+  .option("--concurrency <n>", "Parallel workers (1-8)", (v) => Number(v), 4)
+  .option("--output <dir>", "Output directory", "./parity-output")
+  .option("--open", "Open the HTML report when done", false)
+  .action(async (opts) => {
+    process.exit(await vitalsCommand(opts));
   });
 
 program
