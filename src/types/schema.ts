@@ -108,7 +108,7 @@ export const Issue = z.object({
   check: z.string(),
   summary: z.string(),
   details: z.string().optional(),
-  evidence: z.array(EvidenceRef).default([]),
+  evidence: z.array(EvidenceRef).optional(),
   reproduction: z.string().optional(),
   suggestedFix: z.string().optional(),
 });
@@ -121,7 +121,7 @@ export const CheckResult = z.object({
   durationMs: z.number(),
   summary: z.string(),
   data: z.record(z.unknown()).optional(),
-  issues: z.array(Issue).default([]),
+  issues: z.array(Issue),
 });
 export type CheckResult = z.infer<typeof CheckResult>;
 
@@ -153,7 +153,7 @@ export const Run = z.object({
   topIssues: z.array(Issue),
   issues: z.array(Issue),
   checks: z.array(CheckResult),
-  flowCaptures: z.array(FlowCapture).default([]),
+  flowCaptures: z.array(FlowCapture),
   baseline: z
     .object({
       name: z.string(),
