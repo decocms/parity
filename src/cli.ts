@@ -1,4 +1,10 @@
 import { Command } from "commander";
+import { baselineList, baselineSet, baselineUnset } from "./commands/baseline.ts";
+import { compareCommand } from "./commands/compare.ts";
+import { explainCommand } from "./commands/explain.ts";
+import { listCommand } from "./commands/list.ts";
+import { reportCommand } from "./commands/report.ts";
+import { runCommand } from "./commands/run.ts";
 
 const program = new Command();
 
@@ -19,14 +25,15 @@ program
   )
   .option("--viewports <list>", "Comma-separated viewports: mobile,desktop", "mobile,desktop")
   .option("--cep <cep>", "CEP for shipping calculation", "01310-100")
-  .option("--runs <n>", "Repeat each measurement N times (median)", "3")
+  .option("--runs <n>", "Repeat each measurement N times (median)", "1")
   .option("--baseline <name>", "Compare against a saved baseline")
   .option("--output <dir>", "Output directory", "./parity-output")
   .option("--ci", "CI mode: stricter exit codes", false)
   .option("--fail-on <severities>", "Comma-separated severities that cause exit 1", "critical")
-  .action(async (_opts) => {
-    console.log("parity run — not yet implemented (Phase 1+)");
-    process.exit(0);
+  .option("--open", "Open the HTML report after the run completes", false)
+  .action(async (opts) => {
+    const code = await runCommand(opts);
+    process.exit(code);
   });
 
 program
@@ -36,54 +43,57 @@ program
     new Command("set")
       .argument("<runId>", "Run ID to mark as baseline")
       .requiredOption("--name <name>", "Baseline name")
-      .action(async (_runId, _opts) => {
-        console.log("parity baseline set — not yet implemented");
+      .option("--output <dir>", "Output directory", "./parity-output")
+      .action(async (runId, opts) => {
+        process.exit(await baselineSet(runId, opts));
       }),
   )
   .addCommand(
-    new Command("list").action(async () => {
-      console.log("parity baseline list — not yet implemented");
+    new Command("list").action(() => {
+      process.exit(baselineList());
     }),
   )
   .addCommand(
-    new Command("unset")
-      .argument("<name>", "Baseline name to remove")
-      .action(async (_name) => {
-        console.log("parity baseline unset — not yet implemented");
-      }),
+    new Command("unset").argument("<name>", "Baseline name to remove").action((name) => {
+      process.exit(baselineUnset(name));
+    }),
   );
 
 program
   .command("list")
   .description("List saved runs")
-  .action(async () => {
-    console.log("parity list — not yet implemented");
+  .option("--output <dir>", "Output directory", "./parity-output")
+  .action((opts) => {
+    process.exit(listCommand(opts.output));
   });
 
 program
   .command("report")
   .argument("<runId>", "Run ID to open")
   .description("Open the HTML report for a run in the default browser")
-  .action(async (_runId) => {
-    console.log("parity report — not yet implemented");
+  .option("--output <dir>", "Output directory", "./parity-output")
+  .action(async (runId, opts) => {
+    process.exit(await reportCommand(runId, opts.output));
   });
 
 program
   .command("compare")
   .argument("<runId>", "Run ID to compare")
   .requiredOption("--against <name>", "Baseline name to compare against")
+  .option("--output <dir>", "Output directory", "./parity-output")
   .description("Compare a run against a baseline")
-  .action(async (_runId, _opts) => {
-    console.log("parity compare — not yet implemented");
+  .action((runId, opts) => {
+    process.exit(compareCommand(runId, opts.against, opts.output));
   });
 
 program
   .command("explain")
   .argument("<runId>", "Run ID")
   .argument("<issueId>", "Issue ID")
-  .description("LLM deep-dive on a specific issue")
-  .action(async (_runId, _issueId) => {
-    console.log("parity explain — not yet implemented");
+  .option("--output <dir>", "Output directory", "./parity-output")
+  .description("LLM deep-dive on a specific issue (requires ANTHROPIC_API_KEY)")
+  .action(async (runId, issueId, opts) => {
+    process.exit(await explainCommand(runId, issueId, opts.output));
   });
 
 program.parseAsync(process.argv);

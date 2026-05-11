@@ -32,7 +32,7 @@
   ],
   "scripts": {
     "dev": "bun run --hot src/cli.ts",
-    "build": "bun build src/cli.ts --target=node --outfile=dist/cli.js && bun run scripts/postbuild.ts",
+    "build": "bun build src/cli.ts --target=node --outfile=dist/cli.js --packages=external && bun run scripts/postbuild.ts",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
