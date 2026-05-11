@@ -25,20 +25,20 @@ const HASH_PATTERNS = [
 
 export function stripTimestamps(input: string): string {
   let out = input;
-  for (const p of TIMESTAMP_PATTERNS) out = out.replace(p, "<TS>");
+  for (const p of TIMESTAMP_PATTERNS) out = out.replace(p, "__TS__");
   return out;
 }
 
 export function stripDynamicIds(input: string): string {
   let out = input;
-  for (const p of DYNAMIC_ID_PATTERNS) out = out.replace(p, "<DYN>");
+  for (const p of DYNAMIC_ID_PATTERNS) out = out.replace(p, "__DYN__");
   return out;
 }
 
 export function stripHashes(input: string): string {
   let out = input;
   for (const p of HASH_PATTERNS) {
-    out = out.replace(p, (_m, ext) => `.<HASH>.${ext}`);
+    out = out.replace(p, (_m, ext) => `.__HASH__.${ext}`);
   }
   return out;
 }
