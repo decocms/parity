@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { baselineList, baselineSet, baselineUnset } from "./commands/baseline.ts";
 import { compareCommand } from "./commands/compare.ts";
 import { explainCommand } from "./commands/explain.ts";
+import { journeyCommand } from "./commands/journey.ts";
 import { learnedStats } from "./commands/learned.ts";
 import { listCommand } from "./commands/list.ts";
 import { promptCommand } from "./commands/prompt.ts";
@@ -89,6 +90,25 @@ program
   .description("Compare a run against a baseline")
   .action((runId, opts) => {
     process.exit(compareCommand(runId, opts.against, opts.output));
+  });
+
+program
+  .command("journey")
+  .description(
+    "CI-friendly: roda só o purchase-journey (home → PLP → PDP → frete → carrinho → frete carrinho → checkout) e compara prod vs cand step-by-step",
+  )
+  .requiredOption("--prod <url>", "Production URL")
+  .requiredOption("--cand <url>", "Candidate URL")
+  .option("--viewports <list>", "mobile,desktop", "mobile")
+  .option("--cep <cep>", "CEP for shipping calc", "01310-100")
+  .option("--output <dir>", "Output directory for runs/<id>/", "./parity-output")
+  .option("--junit <file>", "Write JUnit XML to this path")
+  .option("--github", "Emit GitHub Actions annotations (::error, ::warning) for failures")
+  .option("--json", "Emit a one-line JSON status object to stdout (machine-readable)")
+  .option("--no-report", "Skip writing report.html / report.json")
+  .option("--no-auto-selectors", "Skip LLM-based selector discovery")
+  .action(async (opts) => {
+    process.exit(await journeyCommand(opts));
   });
 
 program
