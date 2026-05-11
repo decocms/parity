@@ -222,6 +222,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       screenshotPath: homeCap.screenshotPath,
     });
     reportEnd(1, "visit-home", step1Status, homeCap.durationMs);
+    steps[steps.length - 1]!.actionDescription = `Navegou pra home \`${ctx.baseUrl}\` (HTTP ${homeCap.status})`;
     if (homeCap.status >= 400 || homeCap.status === 0) {
       return { pages, steps };
     }
@@ -258,6 +259,9 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       usedSelector: plpHit.selector,
     });
     reportEnd(2, "navigate-plp", step2Status, Date.now() - t2);
+    // Annotate step with what we did
+    steps[steps.length - 1]!.actionDescription = `Navegou pra categoria \`${plpHit.url}\` (via \`${plpHit.selector}\`)`;
+    steps[steps.length - 1]!.beforeUrl = ctx.baseUrl;
 
     // Step 3: enter PDP
     reportStart(3, "enter-pdp");
@@ -289,12 +293,17 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       usedSelector: pdpHit.selector,
     });
     reportEnd(3, "enter-pdp", step3Status, Date.now() - t3);
+    steps[steps.length - 1]!.actionDescription = `Abriu PDP \`${pdpHit.url}\` (via \`${pdpHit.selector}\`)`;
+    steps[steps.length - 1]!.beforeUrl = plpHit.url;
 
     // Step 4 (conditional): shipping calc on PDP
     reportStart(4, "shipping-calc-pdp");
     const cepInputPdp = await firstVisible(page, selFor(ctx, "cepInputPdp"));
     if (cepInputPdp) {
       const t4 = Date.now();
+      const beforeUrl4 = page.url();
+      const spBefore4 = screenshotPath(ctx, "pj-4-shipping-pdp-before");
+      await page.screenshot({ path: spBefore4, fullPage: false }).catch(() => undefined);
       const ok = await fillCep(page, cepInputPdp, ctx.rc.cep);
       const sp = screenshotPath(ctx, "pj-4-shipping-pdp");
       await page.screenshot({ path: sp, fullPage: false }).catch(() => undefined);
@@ -306,7 +315,11 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         viewport: ctx.viewport,
         status: step4Status,
         durationMs: Date.now() - t4,
+        url: page.url(),
         screenshotPath: sp,
+        screenshotBeforePath: spBefore4,
+        beforeUrl: beforeUrl4,
+        actionDescription: `Preencheu CEP '${ctx.rc.cep}' no input \`${cepInputPdp}\` e disparou cálculo de frete`,
         detail: { cepUsed: ctx.rc.cep },
         selectorKey: "cepInputPdp",
         usedSelector: cepInputPdp,
@@ -335,6 +348,10 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       return { pages, steps };
     }
     const t5 = Date.now();
+    const beforeUrl5 = page.url();
+    const spBefore5 = screenshotPath(ctx, "pj-5-add-cart-before");
+    await page.screenshot({ path: spBefore5, fullPage: false }).catch(() => undefined);
+    const buyText = await buyHit.locator.innerText().catch(() => "");
     await buyHit.locator.click({ timeout: 5_000 }).catch(() => undefined);
     await page.waitForTimeout(2_000);
     const sp5 = screenshotPath(ctx, "pj-5-add-cart");
@@ -346,7 +363,11 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       viewport: ctx.viewport,
       status: "ok",
       durationMs: Date.now() - t5,
+      url: page.url(),
       screenshotPath: sp5,
+      screenshotBeforePath: spBefore5,
+      beforeUrl: beforeUrl5,
+      actionDescription: `Clicou no botão${buyText ? ` '${buyText.slice(0, 40).trim()}'` : ""} (\`${buyHit.selector}\`)${buyRecovered ? " — selector veio de recovery LLM" : ""}`,
       selectorKey: "buyButton",
       usedSelector: buyHit.selector,
       recoveredByLlm: buyRecovered || undefined,
@@ -356,6 +377,9 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     // Step 6: open minicart
     reportStart(6, "open-minicart");
     const t6 = Date.now();
+    const beforeUrl6 = page.url();
+    const spBefore6 = screenshotPath(ctx, "pj-6-minicart-before");
+    await page.screenshot({ path: spBefore6, fullPage: false }).catch(() => undefined);
     let miniHit = await firstVisibleLocator(page, selFor(ctx, "minicartTrigger"));
     let miniRecovered = false;
     if (!miniHit && recoveryBudget > 0) {
@@ -366,7 +390,9 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         recoveryBudget--;
       }
     }
+    let miniText = "";
     if (miniHit) {
+      miniText = await miniHit.locator.innerText().catch(() => "");
       await miniHit.locator.click({ timeout: 3_000 }).catch(() => undefined);
       await page.waitForTimeout(1_500);
     }
@@ -379,7 +405,13 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       viewport: ctx.viewport,
       status: "ok",
       durationMs: Date.now() - t6,
+      url: page.url(),
       screenshotPath: sp6,
+      screenshotBeforePath: spBefore6,
+      beforeUrl: beforeUrl6,
+      actionDescription: miniHit
+        ? `Clicou no trigger do minicart${miniText ? ` '${miniText.slice(0, 30).trim()}'` : ""} (\`${miniHit.selector}\`)${miniRecovered ? " — selector via recovery LLM" : ""}`
+        : "Minicart já aberto após add-to-cart (drawer/popup)",
       selectorKey: miniHit ? "minicartTrigger" : undefined,
       usedSelector: miniHit?.selector,
       recoveredByLlm: miniRecovered || undefined,
@@ -391,6 +423,9 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     const cepInputCart = await firstVisible(page, selFor(ctx, "cepInputCart"));
     if (cepInputCart) {
       const t7 = Date.now();
+      const beforeUrl7 = page.url();
+      const spBefore7 = screenshotPath(ctx, "pj-7-shipping-cart-before");
+      await page.screenshot({ path: spBefore7, fullPage: false }).catch(() => undefined);
       const ok = await fillCep(page, cepInputCart, ctx.rc.cep);
       const sp7 = screenshotPath(ctx, "pj-7-shipping-cart");
       await page.screenshot({ path: sp7, fullPage: false }).catch(() => undefined);
@@ -402,7 +437,11 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         viewport: ctx.viewport,
         status: step7Status,
         durationMs: Date.now() - t7,
+        url: page.url(),
         screenshotPath: sp7,
+        screenshotBeforePath: spBefore7,
+        beforeUrl: beforeUrl7,
+        actionDescription: `Preencheu CEP '${ctx.rc.cep}' no carrinho (\`${cepInputCart}\`)`,
         detail: { cepUsed: ctx.rc.cep },
         selectorKey: "cepInputCart",
         usedSelector: cepInputCart,
@@ -431,6 +470,10 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       return { pages, steps };
     }
     const t8 = Date.now();
+    const beforeUrl8 = page.url();
+    const spBefore8 = screenshotPath(ctx, "pj-8-checkout-before");
+    await page.screenshot({ path: spBefore8, fullPage: false }).catch(() => undefined);
+    const checkoutText = await checkoutHit.locator.innerText().catch(() => "");
     await Promise.all([
       page.waitForURL(/checkout/i, { timeout: 10_000 }).catch(() => undefined),
       checkoutHit.locator.click({ timeout: 5_000 }).catch(() => undefined),
@@ -450,6 +493,9 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       durationMs: Date.now() - t8,
       url: checkoutUrl,
       screenshotPath: sp8,
+      screenshotBeforePath: spBefore8,
+      beforeUrl: beforeUrl8,
+      actionDescription: `Clicou em${checkoutText ? ` '${checkoutText.slice(0, 30).trim()}'` : ""} (\`${checkoutHit.selector}\`); URL final: ${checkoutUrl}${reachedCheckout ? " ✓ atingiu /checkout" : " ✗ não foi pra checkout"}`,
       selectorKey: "checkoutButton",
       usedSelector: checkoutHit.selector,
       recoveredByLlm: checkoutRecovered || undefined,

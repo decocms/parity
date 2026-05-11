@@ -498,8 +498,19 @@ h2{font-size:13px;font-weight:600;margin:32px 0 12px 0;text-transform:uppercase;
 .state-pill.fail{background:rgba(229,72,77,0.15);color:var(--red)}
 .state-pill.skipped{background:rgba(245,166,35,0.15);color:var(--yellow)}
 .state-pill.missing{background:rgba(138,147,166,0.15);color:var(--muted)}
-.step-meta{font-size:12px;color:var(--muted);margin-top:8px}
+.step-meta{font-size:12px;color:var(--muted);margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.step-meta code{font-size:11px;color:var(--fg);background:var(--elev);padding:1px 6px;border-radius:3px}
+.step-action{font-size:13px;color:var(--fg);background:var(--elev);padding:8px 12px;border-radius:6px;margin-top:10px;border-left:3px solid var(--prod)}
 .step-note{font-size:12px;color:var(--yellow);margin-top:6px}
+.step-before{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}
+.step-before summary{cursor:pointer;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:600;list-style:none;padding:4px 0}
+.step-before summary::-webkit-details-marker{display:none}
+.step-before summary::before{content:"▶";color:var(--muted);font-size:9px;margin-right:8px;display:inline-block;transition:transform .15s}
+.step-before[open] summary::before{transform:rotate(90deg)}
+.shots-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:600;margin-top:12px;margin-bottom:6px}
+.traces-note{font-size:11px;color:var(--muted);background:var(--elev);padding:8px 12px;border-radius:6px;margin-bottom:12px}
+.traces-note code{color:var(--fg);background:var(--bg);padding:1px 6px;border-radius:3px}
+.traces-note a{color:var(--prod)}
 .shots{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
 .shot{position:relative;background:var(--elev);border:1px solid var(--border);border-radius:8px;overflow:hidden}
 .shot .label{position:absolute;top:8px;left:8px;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;text-transform:uppercase;letter-spacing:0.05em;z-index:1;color:white;backdrop-filter:blur(8px)}
@@ -529,7 +540,10 @@ h2{font-size:13px;font-weight:600;margin:32px 0 12px 0;text-transform:uppercase;
 ${viewports
   .map((vp) => {
     const vrows = rows.filter((r) => r.viewport === vp);
-    return `<h2>${vp}</h2>${vrows.map((r) => renderStepCard(r)).join("")}`;
+    const tracesNote = `<div class="traces-note">
+      Playwright traces (debug profundo): abra <code>traces/${vp}-prod.zip</code> ou <code>traces/${vp}-cand.zip</code> em <a href="https://trace.playwright.dev" target="_blank" rel="noreferrer">trace.playwright.dev</a> (arrasta o arquivo na página)
+    </div>`;
+    return `<h2>${vp}</h2>${tracesNote}${vrows.map((r) => renderStepCard(r)).join("")}`;
   })
   .join("")}
 ${renderSummaryBlock(rows, failures)}
@@ -554,6 +568,12 @@ function renderStepCard(r: StepRow): string {
   const note = r.cand?.note ?? r.prod?.note ?? "";
   const prodDur = r.prod?.durationMs ?? 0;
   const candDur = r.cand?.durationMs ?? 0;
+  // Prefer cand's action description (typically same as prod's in shape, both ran the same script)
+  const actionDescription = r.cand?.actionDescription ?? r.prod?.actionDescription ?? "";
+  const hasBefore = !!(r.prod?.screenshotBeforePath || r.cand?.screenshotBeforePath);
+  const beforeUrl = r.cand?.beforeUrl ?? r.prod?.beforeUrl;
+  const afterUrl = r.cand?.url ?? r.prod?.url;
+
   return `<div class="step">
     <div class="step-head">
       <span class="step-num">${escapeHtml(label.split(".")[0] ?? "?")}</span>
@@ -563,8 +583,14 @@ function renderStepCard(r: StepRow): string {
         <span class="state-pill ${candStatus}">cand · ${escapeHtml(candStatus)}</span>
       </span>
     </div>
-    <div class="step-meta">prod ${(prodDur / 1000).toFixed(1)}s · cand ${(candDur / 1000).toFixed(1)}s${r.prod?.url || r.cand?.url ? ` · URL: <code>${escapeHtml((r.cand?.url ?? r.prod?.url) ?? "")}</code>` : ""}</div>
+    ${actionDescription ? `<div class="step-action">▶ ${escapeHtml(actionDescription)}</div>` : ""}
+    <div class="step-meta">
+      ${beforeUrl && afterUrl && beforeUrl !== afterUrl ? `<div>📍 <code>${escapeHtml(beforeUrl)}</code> → <code>${escapeHtml(afterUrl)}</code></div>` : afterUrl ? `<div>📍 <code>${escapeHtml(afterUrl)}</code></div>` : ""}
+      <div>⏱ prod ${(prodDur / 1000).toFixed(1)}s · cand ${(candDur / 1000).toFixed(1)}s</div>
+    </div>
     ${note ? `<div class="step-note">${escapeHtml(note)}</div>` : ""}
+    ${hasBefore ? `<details class="step-before"><summary>Estado ANTES da ação</summary><div class="shots">${renderShot("prod", r.prod?.screenshotBeforePath, "before")}${renderShot("cand", r.cand?.screenshotBeforePath, "before")}</div></details>` : ""}
+    <div class="shots-label">Estado APÓS a ação</div>
     <div class="shots">
       ${renderShot("prod", r.prod?.screenshotPath)}
       ${renderShot("cand", r.cand?.screenshotPath)}
@@ -572,14 +598,14 @@ function renderStepCard(r: StepRow): string {
   </div>`;
 }
 
-function renderShot(side: "prod" | "cand", path: string | undefined): string {
+function renderShot(side: "prod" | "cand", path: string | undefined, when: "before" | "after" = "after"): string {
   if (!path) {
     return `<div class="shot missing"><span class="label" style="position:static;background:var(--muted)">${side}</span>&nbsp;sem screenshot</div>`;
   }
-  // Path is absolute (or relative to runDir); we are running from runDir so it's already screenshots/...
   const rel = path.split("/screenshots/").pop();
   const src = rel ? `screenshots/${rel}` : path;
-  return `<div class="shot ${side}"><span class="label">${side}</span><img src="${escapeHtml(src)}" alt="${side}" loading="lazy"/></div>`;
+  const labelText = when === "before" ? `${side} antes` : side;
+  return `<div class="shot ${side}"><span class="label">${labelText}</span><img src="${escapeHtml(src)}" alt="${labelText}" loading="lazy"/></div>`;
 }
 
 function renderSummaryBlock(rows: StepRow[], failures: JourneyFailure[]): string {

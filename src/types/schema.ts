@@ -87,6 +87,14 @@ export const StepCapture = z.object({
   usedSelector: z.string().optional(),
   /** True when the selector came from LLM recovery (so it gets promoted explicitly) */
   recoveredByLlm: z.boolean().optional(),
+  /** Human-readable description of what was executed (for trace display) */
+  actionDescription: z.string().optional(),
+  /** URL the page was on BEFORE this step ran */
+  beforeUrl: z.string().optional(),
+  /** Screenshot taken BEFORE the action (only for interactive steps) */
+  screenshotBeforePath: z.string().optional(),
+  /** Path to the Playwright trace .zip for this flow */
+  tracePath: z.string().optional(),
 });
 export type StepCapture = z.infer<typeof StepCapture>;
 
