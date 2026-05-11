@@ -367,6 +367,60 @@ export const REPORT_CSS = `
     user-select: text;
   }
 
+  /* Issue card v2 — collapsible sections, copy buttons */
+  .issue-tags .tag-mono { font-family: "SF Mono", Menlo, Monaco, Consolas, monospace; text-transform: none; }
+  .issue-tags .tag-page { background: rgba(79,125,243,0.15); color: #88aaff; }
+  .issue-section { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+  .issue-section summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; list-style: none; padding: 4px 0; }
+  .issue-section summary::-webkit-details-marker { display: none; }
+  .issue-section summary::before { content: "▶"; color: var(--fg-muted); font-size: 9px; margin-right: 8px; display: inline-block; transition: transform .15s; }
+  .issue-section[open] summary::before { transform: rotate(90deg); }
+  .issue-section .section-label { font-size: 11px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; flex: 1; font-weight: 600; }
+  .copy-btn { background: var(--bg-elevated); border: 1px solid var(--border); color: var(--fg-muted); font-size: 10px; padding: 2px 8px; border-radius: 4px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; }
+  .copy-btn:hover { color: var(--fg); border-color: var(--accent); }
+  .copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+  /* Cache hero */
+  .cache-hero .hero-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 12px; }
+  .hero-stat { background: var(--bg-elevated); border-radius: 10px; padding: 16px; text-align: center; }
+  .hero-stat .big-num { font-size: 36px; font-weight: 700; line-height: 1; color: var(--fg); margin-bottom: 4px; }
+  .hero-stat .big-label { font-size: 11px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+  .hero-stat .hero-meta { font-size: 12px; color: var(--fg-muted); margin-top: 6px; }
+
+  /* Network/cache tables */
+  .net-toolbar { display: flex; gap: 8px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
+  .net-input { background: var(--bg-elevated); color: var(--fg); border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px; font-size: 12px; min-width: 140px; }
+  .net-input:focus { outline: 1px solid var(--accent); }
+  .net-count { font-size: 11px; color: var(--fg-muted); margin-left: auto; }
+  .net-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+  .net-table th, .net-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+  .net-table th { color: var(--fg-muted); font-weight: 500; cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--bg-card); z-index: 1; }
+  .net-table th:hover { color: var(--fg); }
+  .net-table th.sort-asc::after { content: " ▲"; color: var(--accent); font-size: 9px; }
+  .net-table th.sort-desc::after { content: " ▼"; color: var(--accent); font-size: 9px; }
+  .net-table td.num, .net-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .net-table tr.opp-row td { background: rgba(229,72,77,0.04); }
+  .url-cell { max-width: 540px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .url-cell a { color: var(--accent); text-decoration: none; }
+  .url-cell a:hover { text-decoration: underline; }
+  .net-cat { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; background: var(--bg-elevated); color: var(--fg-muted); }
+  .net-cat.cat-document { background: rgba(79,125,243,0.15); color: #88aaff; }
+  .net-cat.cat-static-asset { background: rgba(46,194,126,0.15); color: var(--green); }
+  .net-cat.cat-image { background: rgba(245,166,35,0.15); color: var(--yellow); }
+  .net-cat.cat-font { background: rgba(184,110,255,0.15); color: #b86eff; }
+  .net-cat.cat-api { background: rgba(54,179,255,0.15); color: #36b3ff; }
+  .net-cat.cat-third-party { background: rgba(138,147,166,0.15); color: var(--fg-muted); }
+  .net-cat.cat-other { background: var(--bg-elevated); color: var(--fg-muted); }
+  .net-cache { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+  .cache-hit { background: rgba(46,194,126,0.15); color: var(--green); }
+  .cache-miss { background: rgba(229,72,77,0.15); color: var(--red); }
+  .cache-bypass { background: rgba(138,147,166,0.15); color: var(--fg-muted); }
+  .cat-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .cat-table th, .cat-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+  .cat-table th { color: var(--fg-muted); font-weight: 500; }
+  .cat-table th.num, .cat-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .dim { color: var(--fg-muted); }
+
   pre, code { font-family: "SF Mono", Menlo, Monaco, Consolas, monospace; font-size: 12px; }
   pre {
     background: var(--bg-elevated);
@@ -400,6 +454,102 @@ export const REPORT_JS = `
     });
     var hash = (location.hash || '#summary').slice(1);
     activate(hash);
+
+    // ---- Generic copy button (works for any [data-copy-target]) ----
+    document.addEventListener('click', function(ev) {
+      var t = ev.target;
+      if (!t || !t.dataset || !t.dataset.copyTarget) return;
+      var src = document.getElementById(t.dataset.copyTarget);
+      if (!src) return;
+      var text = src.textContent || '';
+      var done = function() {
+        var orig = t.textContent;
+        t.classList.add('copied');
+        t.textContent = '✓ copiado';
+        setTimeout(function() {
+          t.textContent = orig;
+          t.classList.remove('copied');
+        }, 1500);
+      };
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(done).catch(done);
+      else done();
+    });
+
+    // ---- Network table: sort + filter + search ----
+    (function() {
+      var table = document.getElementById('net-table');
+      if (!table) return;
+      var tbody = table.querySelector('tbody');
+      var allRows = Array.from(tbody.querySelectorAll('tr'));
+      var search = document.getElementById('net-search');
+      var fCat = document.getElementById('net-filter-cat');
+      var fCache = document.getElementById('net-filter-cache');
+      var count = document.getElementById('net-count');
+      var sortKey = null;
+      var sortDir = 1;
+
+      function applyFilters() {
+        var q = (search && search.value || '').toLowerCase();
+        var cat = fCat ? fCat.value : '';
+        var cache = fCache ? fCache.value : '';
+        var visible = 0;
+        for (var i = 0; i < allRows.length; i++) {
+          var row = allRows[i];
+          var url = row.dataset.url || '';
+          var rCat = row.dataset.cat || '';
+          var rCache = row.dataset.decision || '';
+          var hideQ = q && url.indexOf(q) === -1;
+          var hideCat = cat && rCat !== cat;
+          var hideCache = false;
+          if (cache === 'hit') hideCache = rCache !== 'hit';
+          else if (cache === 'miss') hideCache = rCache !== 'miss' && rCache !== 'unknown';
+          else if (cache === 'bypass') hideCache = rCache !== 'bypass';
+          var hide = hideQ || hideCat || hideCache;
+          row.style.display = hide ? 'none' : '';
+          if (!hide) visible++;
+        }
+        if (count) count.textContent = visible + ' / ' + allRows.length + ' rows';
+      }
+
+      function sortBy(key) {
+        if (sortKey === key) sortDir = -sortDir;
+        else { sortKey = key; sortDir = 1; }
+        var sorted = allRows.slice().sort(function(a, b) {
+          var va, vb;
+          if (key === 'bytes' || key === 'status') {
+            va = Number(a.dataset[key]) || 0;
+            vb = Number(b.dataset[key]) || 0;
+          } else if (key === 'url') {
+            va = a.dataset.url || '';
+            vb = b.dataset.url || '';
+          } else {
+            va = a.dataset[key === 'cat' ? 'cat' : 'decision'] || '';
+            vb = b.dataset[key === 'cat' ? 'cat' : 'decision'] || '';
+          }
+          if (va < vb) return -1 * sortDir;
+          if (va > vb) return 1 * sortDir;
+          return 0;
+        });
+        for (var i = 0; i < sorted.length; i++) tbody.appendChild(sorted[i]);
+        var headers = table.querySelectorAll('th[data-sort]');
+        for (var h = 0; h < headers.length; h++) {
+          headers[h].classList.remove('sort-asc', 'sort-desc');
+          if (headers[h].dataset.sort === key) {
+            headers[h].classList.add(sortDir > 0 ? 'sort-asc' : 'sort-desc');
+          }
+        }
+      }
+
+      var headers = table.querySelectorAll('th[data-sort]');
+      for (var h = 0; h < headers.length; h++) {
+        headers[h].addEventListener('click', function(e) {
+          sortBy(e.currentTarget.dataset.sort);
+        });
+      }
+      if (search) search.addEventListener('input', applyFilters);
+      if (fCat) fCat.addEventListener('change', applyFilters);
+      if (fCache) fCache.addEventListener('change', applyFilters);
+    })();
 
     // ---- LLM Prompt: copy + download ----
     var copyBtn = document.getElementById('prompt-copy');

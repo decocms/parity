@@ -1,5 +1,6 @@
 import { relative } from "node:path";
-import type { Issue, Run } from "../types/schema.ts";
+import { buildCacheReport, type CacheReport, type ClassifiedRequest } from "../diff/cache.ts";
+import type { Issue, NetworkEntry, Run } from "../types/schema.ts";
 import { REPORT_CSS, REPORT_JS } from "./html-template.ts";
 import { buildLlmPrompt } from "./prompt-builder.ts";
 
@@ -45,19 +46,43 @@ function renderIssue(issue: Issue, runDir: string): string {
 
   const pageLabel = issue.page ? humanKey(issue.page) : "";
 
+  const details = issue.details ?? "";
+  const detailsIsList = /\n\s*-\s|^\s*-\s/.test(details) || details.split("\n").length > 4;
+
   return `
   <div class="issue sev-${issue.severity}">
     <div class="issue-tags">
       <span class="tag sev-${issue.severity}">${esc(issue.severity)}</span>
       <span class="tag">${esc(issue.category)}</span>
-      <span class="tag">${esc(issue.check)}</span>
-      ${pageLabel ? `<span class="tag">${esc(pageLabel)}</span>` : ""}
+      <span class="tag tag-mono">${esc(issue.check)}</span>
+      ${pageLabel ? `<span class="tag tag-page">${esc(pageLabel)}</span>` : ""}
     </div>
     <h3>${esc(issue.summary)}</h3>
-    ${issue.details ? `<div class="label">Details</div><div class="details">${esc(issue.details)}</div>` : ""}
-    ${issue.reproduction ? `<div class="label">Reproduction</div><div class="repro">${esc(issue.reproduction)}</div>` : ""}
-    ${issue.suggestedFix ? `<div class="label">Suggested fix</div><div class="fix">${esc(issue.suggestedFix)}</div>` : ""}
-    ${evidenceHtml ? `<div class="ss-pair">${evidenceHtml}</div>` : ""}
+    ${
+      issue.details
+        ? `<details class="issue-section" ${detailsIsList ? "" : "open"}>
+        <summary><span class="section-label">Detalhes</span><button class="copy-btn" data-copy-target="issue-d-${esc(issue.id)}">copiar</button></summary>
+        <pre class="details" id="issue-d-${esc(issue.id)}">${esc(issue.details)}</pre>
+      </details>`
+        : ""
+    }
+    ${
+      issue.reproduction
+        ? `<details class="issue-section">
+        <summary><span class="section-label">Reprodução</span><button class="copy-btn" data-copy-target="issue-r-${esc(issue.id)}">copiar</button></summary>
+        <pre class="repro" id="issue-r-${esc(issue.id)}">${esc(issue.reproduction)}</pre>
+      </details>`
+        : ""
+    }
+    ${
+      issue.suggestedFix
+        ? `<details class="issue-section" open>
+        <summary><span class="section-label">Fix sugerido</span><button class="copy-btn" data-copy-target="issue-f-${esc(issue.id)}">copiar</button></summary>
+        <pre class="fix" id="issue-f-${esc(issue.id)}">${esc(issue.suggestedFix)}</pre>
+      </details>`
+        : ""
+    }
+    ${evidenceHtml ? `<details class="issue-section"><summary><span class="section-label">Screenshots (${(issue.evidence ?? []).length})</span></summary><div class="ss-pair">${evidenceHtml}</div></details>` : ""}
   </div>`;
 }
 
@@ -283,12 +308,214 @@ function renderConsolePanel(run: Run, runDir: string): string {
   return c.issues.map((i) => renderIssue(i, runDir)).join("");
 }
 
-function renderNetworkPanel(run: Run, runDir: string): string {
-  const c = run.checks.find((x) => x.name === "network-summary-delta");
-  if (!c || c.issues.length === 0) {
-    return `<div class="empty">Sem divergência relevante de network.</div>`;
+function renderNetworkPanel(run: Run): string {
+  // Aggregate cand requests across all captures
+  const candEntries: NetworkEntry[] = [];
+  let baseUrl = "";
+  for (const fc of run.flowCaptures) {
+    for (const p of fc.pages) {
+      if (p.side !== "cand") continue;
+      if (!baseUrl) baseUrl = p.url;
+      candEntries.push(...p.network);
+    }
   }
-  return c.issues.map((i) => renderIssue(i, runDir)).join("");
+  if (candEntries.length === 0) {
+    return `<div class="empty">Nenhum request de network capturado.</div>`;
+  }
+  const report = buildCacheReport(candEntries, baseUrl);
+  return renderNetworkTable(report);
+}
+
+function renderNetworkTable(report: CacheReport): string {
+  // Build a single table with all requests, sortable + filterable client-side
+  const rows = report.all.map((r, idx) => {
+    const url = r.entry.url;
+    const sizeKb = r.entry.bytes != null ? (r.entry.bytes / 1024).toFixed(1) : "—";
+    const cacheCls = r.decision === "hit" ? "cache-hit" : r.decision === "miss" || r.decision === "unknown" ? "cache-miss" : "cache-bypass";
+    const cacheLabel = r.decision === "unknown" ? "miss?" : r.decision;
+    return `<tr data-cat="${r.category}" data-decision="${r.decision}" data-status="${r.entry.status}" data-bytes="${r.entry.bytes ?? 0}" data-url="${esc(url.toLowerCase())}" data-idx="${idx}">
+      <td class="url-cell"><a href="${esc(url)}" target="_blank" rel="noreferrer" title="${esc(url)}">${esc(humanizeNetworkUrl(url))}</a></td>
+      <td><span class="net-cat cat-${r.category}">${esc(r.category)}</span></td>
+      <td class="num">${r.entry.status}</td>
+      <td class="num">${sizeKb} KB</td>
+      <td><span class="net-cache ${cacheCls}">${cacheLabel}</span></td>
+    </tr>`;
+  });
+  return `
+  <div class="card">
+    <h2>Network · ${report.total} requests · ${(report.totalBytes / 1024).toFixed(0)} KB</h2>
+    <div class="hint">Hits, misses e categorias de cada request capturado em cand. Click no cabeçalho pra ordenar.</div>
+    <div class="net-toolbar">
+      <input id="net-search" type="search" placeholder="filtrar por URL…" class="net-input"/>
+      <select id="net-filter-cat" class="net-input">
+        <option value="">todas categorias</option>
+        <option value="document">document</option>
+        <option value="static-asset">static-asset</option>
+        <option value="image">image</option>
+        <option value="font">font</option>
+        <option value="api">api</option>
+        <option value="third-party">third-party</option>
+        <option value="other">other</option>
+      </select>
+      <select id="net-filter-cache" class="net-input">
+        <option value="">qualquer cache</option>
+        <option value="hit">só HIT</option>
+        <option value="miss">só MISS/unknown</option>
+        <option value="bypass">só BYPASS</option>
+      </select>
+      <span class="net-count" id="net-count">${rows.length} / ${rows.length} rows</span>
+    </div>
+    <table class="net-table sortable" id="net-table">
+      <thead>
+        <tr>
+          <th data-sort="url">URL</th>
+          <th data-sort="cat">Tipo</th>
+          <th data-sort="status" class="num">Status</th>
+          <th data-sort="bytes" class="num">Bytes</th>
+          <th data-sort="cache">Cache</th>
+        </tr>
+      </thead>
+      <tbody>${rows.join("")}</tbody>
+    </table>
+  </div>`;
+}
+
+function humanizeNetworkUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const path = u.pathname + (u.search ? `${u.search.slice(0, 40)}${u.search.length > 40 ? "…" : ""}` : "");
+    return `${u.hostname}${path}`;
+  } catch {
+    return url.slice(0, 120);
+  }
+}
+
+function renderCachePanel(run: Run): string {
+  const candEntries: NetworkEntry[] = [];
+  let baseUrl = "";
+  let prodHitRate: number | null = null;
+  for (const fc of run.flowCaptures) {
+    for (const p of fc.pages) {
+      if (p.side === "cand") {
+        candEntries.push(...p.network);
+        if (!baseUrl) baseUrl = p.url;
+      }
+    }
+  }
+  if (candEntries.length === 0) {
+    return `<div class="empty">Sem dados de network em cand.</div>`;
+  }
+  const report = buildCacheReport(candEntries, baseUrl);
+  // Prod hit rate (informational only)
+  {
+    const prodEntries: NetworkEntry[] = [];
+    let prodBase = "";
+    for (const fc of run.flowCaptures) {
+      for (const p of fc.pages) {
+        if (p.side === "prod") {
+          prodEntries.push(...p.network);
+          if (!prodBase) prodBase = p.url;
+        }
+      }
+    }
+    if (prodEntries.length > 0) {
+      prodHitRate = buildCacheReport(prodEntries, prodBase).hitRate;
+    }
+  }
+
+  const oppBytes = report.opportunities.reduce((s, r) => s + (r.entry.bytes ?? 0), 0);
+  const hitPct = (report.hitRate * 100).toFixed(0);
+  const deltaText = prodHitRate != null
+    ? prodHitRate > report.hitRate
+      ? `<span class="delta-bad">↓ ${((prodHitRate - report.hitRate) * 100).toFixed(0)}pp vs prod</span>`
+      : `<span class="delta-good">↑ ${((report.hitRate - prodHitRate) * 100).toFixed(0)}pp vs prod</span>`
+    : `<span class="dim">sem comparação prod</span>`;
+
+  return `
+  <div class="card cache-hero">
+    <div class="hero-grid">
+      <div class="hero-stat">
+        <div class="big-num">${hitPct}%</div>
+        <div class="big-label">cache hit rate (cand)</div>
+        <div class="hero-meta">${deltaText}</div>
+      </div>
+      <div class="hero-stat">
+        <div class="big-num">${report.opportunities.length}</div>
+        <div class="big-label">oportunidades</div>
+        <div class="hero-meta">${(oppBytes / 1024).toFixed(0)} KB cacheável que vai MISS</div>
+      </div>
+      <div class="hero-stat">
+        <div class="big-num">${report.total}</div>
+        <div class="big-label">requests analisados</div>
+        <div class="hero-meta">${(report.totalBytes / 1024).toFixed(0)} KB total</div>
+      </div>
+    </div>
+    <div class="hint">Foco em cand — prod (Fresh) é só referência. Oportunidade = static-asset/image/font com hash na URL que está MISS em cand.</div>
+  </div>
+
+  ${renderCategoryBreakdown(report)}
+
+  <details class="card" open>
+    <summary><h2 style="display:inline">❌ Oportunidades — ${report.opportunities.length} requests cacheable em MISS</h2></summary>
+    <div class="hint">Adicionar rule de cache pra essas URLs deve reduzir ${(oppBytes / 1024).toFixed(0)} KB / ${report.opportunities.length} requests.</div>
+    ${renderRequestList(report.opportunities, true)}
+  </details>
+
+  <details class="card">
+    <summary><h2 style="display:inline">✅ Cacheando bem — ${report.byDecision.hit} HITs</h2></summary>
+    ${renderRequestList(report.all.filter((r) => r.decision === "hit").sort((a, b) => (b.entry.bytes ?? 0) - (a.entry.bytes ?? 0)).slice(0, 50), false)}
+  </details>
+
+  <details class="card">
+    <summary><h2 style="display:inline">⊘ Ignorados — third-party e dynamic</h2></summary>
+    <div class="hint">Requests que não devem ou não podem cachear (ads, analytics, APIs com dados dinâmicos).</div>
+    ${renderRequestList(report.all.filter((r) => r.category === "third-party" || r.category === "api").slice(0, 50), false)}
+  </details>`;
+}
+
+function renderCategoryBreakdown(report: CacheReport): string {
+  const rows = (Object.entries(report.byCategory) as Array<[string, { count: number; bytes: number; hitRate: number }]>)
+    .filter(([, info]) => info.count > 0)
+    .sort(([, a], [, b]) => b.bytes - a.bytes)
+    .map(([cat, info]) => {
+      const hr = (info.hitRate * 100).toFixed(0);
+      const hrClass = info.hitRate > 0.8 ? "delta-good" : info.hitRate > 0.4 ? "delta-neutral" : "delta-bad";
+      return `<tr>
+        <td><span class="net-cat cat-${cat}">${cat}</span></td>
+        <td class="num">${info.count}</td>
+        <td class="num">${(info.bytes / 1024).toFixed(0)} KB</td>
+        <td class="num ${hrClass}">${hr}%</td>
+      </tr>`;
+    })
+    .join("");
+  return `
+  <div class="card">
+    <h2>Por categoria</h2>
+    <table class="cat-table">
+      <thead><tr><th>Categoria</th><th class="num">Requests</th><th class="num">Bytes</th><th class="num">Hit rate</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+function renderRequestList(reqs: ClassifiedRequest[], highlightOpportunity: boolean): string {
+  if (reqs.length === 0) {
+    return `<div class="empty">Nenhum request nesta categoria.</div>`;
+  }
+  const rows = reqs.map((r) => {
+    const sizeKb = r.entry.bytes != null ? (r.entry.bytes / 1024).toFixed(1) : "—";
+    const url = r.entry.url;
+    return `<tr ${highlightOpportunity ? 'class="opp-row"' : ""}>
+      <td class="num">${sizeKb} KB</td>
+      <td><span class="net-cat cat-${r.category}">${r.category}</span></td>
+      <td><span class="net-cache ${r.decision === "hit" ? "cache-hit" : "cache-miss"}">${r.decision === "unknown" ? "miss?" : r.decision}</span></td>
+      <td class="url-cell"><a href="${esc(url)}" target="_blank" rel="noreferrer" title="${esc(url)}">${esc(humanizeNetworkUrl(url))}</a></td>
+    </tr>`;
+  });
+  return `<table class="net-table">
+    <thead><tr><th class="num">Size</th><th>Tipo</th><th>Cache</th><th>URL</th></tr></thead>
+    <tbody>${rows.join("")}</tbody>
+  </table>`;
 }
 
 function renderDiffPanel(run: Run, runDir: string): string {
@@ -426,6 +653,7 @@ export function renderHtmlReport(run: Run, runDir: string): string {
       <div class="tab" data-tab="sidebyside">Side-by-side</div>
       <div class="tab" data-tab="issues">Issues <span class="badge">${issueCount}</span></div>
       <div class="tab" data-tab="vitals">Vitals</div>
+      <div class="tab" data-tab="cache">Cache</div>
       <div class="tab" data-tab="checks">Checks <span class="badge">${run.checks.length}</span></div>
       <div class="tab" data-tab="prompt">Prompt LLM</div>
       <div class="tab" data-tab="pages">Páginas</div>
@@ -446,6 +674,9 @@ export function renderHtmlReport(run: Run, runDir: string): string {
     <section class="panel" data-panel="vitals">
       ${renderVitalsPanel(run)}
     </section>
+    <section class="panel" data-panel="cache">
+      ${renderCachePanel(run)}
+    </section>
     <section class="panel" data-panel="checks">
       ${renderChecksTable(run)}
     </section>
@@ -459,7 +690,7 @@ export function renderHtmlReport(run: Run, runDir: string): string {
       ${renderConsolePanel(run, runDir)}
     </section>
     <section class="panel" data-panel="network">
-      ${renderNetworkPanel(run, runDir)}
+      ${renderNetworkPanel(run)}
     </section>
     <section class="panel" data-panel="diff">
       ${renderDiffPanel(run, runDir)}
