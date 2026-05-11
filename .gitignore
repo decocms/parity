@@ -2,6 +2,7 @@ node_modules/
 dist/
 parity-output/
 parity-baselines/
+.parity-cache/
 
 # Playwright
 test-results/

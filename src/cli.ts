@@ -31,6 +31,8 @@ program
   .option("--ci", "CI mode: stricter exit codes", false)
   .option("--fail-on <severities>", "Comma-separated severities that cause exit 1", "critical")
   .option("--open", "Open the HTML report after the run completes", false)
+  .option("--no-auto-selectors", "Disable LLM-based selector discovery (uses defaults instead)")
+  .option("--refresh-selectors", "Bypass selector cache and re-run discovery", false)
   .action(async (opts) => {
     const code = await runCommand(opts);
     process.exit(code);

@@ -11,6 +11,7 @@ import { runFlow } from "../engine/flows.ts";
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
 import { aggregateIssues } from "../llm/aggregate-issues.ts";
 import { isLlmAvailable } from "../llm/client.ts";
+import { discoverSelectorsFromUrl } from "../llm/discover-selectors.ts";
 import { renderHtmlReport } from "../report/render.ts";
 import { compareToBaseline, loadBaseline } from "../storage/baselines.ts";
 import {
@@ -43,6 +44,10 @@ export interface RunOptions {
   ci: boolean;
   failOn: string;
   open?: boolean;
+  /** When false, skip LLM-based selector discovery (default: true if API key set) */
+  autoSelectors?: boolean;
+  /** Force discovery to re-run even if a cached entry exists */
+  refreshSelectors?: boolean;
 }
 
 const SEVERITY_RANK: Record<Issue["severity"], number> = {
@@ -63,6 +68,40 @@ export async function runCommand(opts: RunOptions): Promise<number> {
   const rc = loadParityRc();
   rc.cep = opts.cep || rc.cep;
   const ignore = loadParityIgnore();
+
+  // LLM-based selector discovery (auto, but user .parityrc.json overrides always win)
+  const wantsAutoSelectors = opts.autoSelectors !== false && isLlmAvailable();
+  if (wantsAutoSelectors) {
+    const discoverSpinner = ora("Descobrindo seletores via LLM (analisando home prod)…").start();
+    try {
+      const html = await fetchHomeHtml(opts.prod);
+      if (html) {
+        const discovered = await discoverSelectorsFromUrl(opts.prod, html, {
+          noCache: opts.refreshSelectors === true,
+        });
+        if (discovered) {
+          const before = rc.selectors;
+          rc.selectors = {
+            categoryLink: before.categoryLink ?? discovered.categoryLink,
+            productCard: before.productCard ?? discovered.productCard,
+            buyButton: before.buyButton ?? discovered.buyButton,
+            minicartTrigger: before.minicartTrigger ?? discovered.minicartTrigger,
+            cepInputPdp: before.cepInputPdp ?? discovered.cepInputPdp,
+            cepInputCart: before.cepInputCart ?? discovered.cepInputCart,
+            checkoutButton: before.checkoutButton ?? discovered.checkoutButton,
+          };
+          const added = Object.entries(discovered).filter(([_k, v]) => v).length;
+          discoverSpinner.succeed(`${added} seletor(es) inferido(s) pelo LLM`);
+        } else {
+          discoverSpinner.warn("LLM não retornou seletores; usando defaults");
+        }
+      } else {
+        discoverSpinner.warn("Falha ao baixar HTML da home prod; usando defaults");
+      }
+    } catch (err) {
+      discoverSpinner.warn(`Discovery falhou: ${(err as Error).message}`);
+    }
+  }
 
   const runId = newRunId();
   const paths = createRunDir(opts.output, runId);
@@ -250,6 +289,24 @@ function computeVerdict(checks: CheckResult[], issues: Issue[]): Verdict {
     checksFailed,
     checksSkipped,
   };
+}
+
+async function fetchHomeHtml(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+      },
+      redirect: "follow",
+    });
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
 }
 
 function printSummary(run: Run, htmlPath: string): void {
