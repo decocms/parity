@@ -1,6 +1,7 @@
 import { relative } from "node:path";
 import type { Issue, Run } from "../types/schema.ts";
 import { REPORT_CSS, REPORT_JS } from "./html-template.ts";
+import { buildLlmPrompt } from "./prompt-builder.ts";
 
 function esc(s: string | number | null | undefined): string {
   if (s == null) return "";
@@ -304,6 +305,23 @@ function renderDiffPanel(run: Run, runDir: string): string {
   </div>`;
 }
 
+function renderPromptPanel(run: Run): string {
+  const md = buildLlmPrompt(run, { limit: 20 });
+  const charCount = md.length;
+  return `
+  <div class="card">
+    <h2>Prompt para LLM</h2>
+    <div class="hint">Pronto pra colar em Claude / ChatGPT / qualquer chat. Lista issues ranqueadas + contexto da migração + instruções específicas pra diagnose e fix.</div>
+    <div class="prompt-toolbar">
+      <button id="prompt-copy">📋 Copiar markdown</button>
+      <button class="secondary" id="prompt-download">⬇ Download .md</button>
+      <span class="feedback" id="prompt-feedback"></span>
+      <div class="right">${charCount.toLocaleString("en-US")} chars · ${(charCount / 1024).toFixed(1)} KB</div>
+    </div>
+    <div class="prompt-md" id="prompt-md">${esc(md)}</div>
+  </div>`;
+}
+
 interface SbsPair {
   label: string;
   prodUrl: string;
@@ -409,6 +427,7 @@ export function renderHtmlReport(run: Run, runDir: string): string {
       <div class="tab" data-tab="issues">Issues <span class="badge">${issueCount}</span></div>
       <div class="tab" data-tab="vitals">Vitals</div>
       <div class="tab" data-tab="checks">Checks <span class="badge">${run.checks.length}</span></div>
+      <div class="tab" data-tab="prompt">Prompt LLM</div>
       <div class="tab" data-tab="pages">Páginas</div>
       <div class="tab" data-tab="console">Console</div>
       <div class="tab" data-tab="network">Network</div>
@@ -429,6 +448,9 @@ export function renderHtmlReport(run: Run, runDir: string): string {
     </section>
     <section class="panel" data-panel="checks">
       ${renderChecksTable(run)}
+    </section>
+    <section class="panel" data-panel="prompt">
+      ${renderPromptPanel(run)}
     </section>
     <section class="panel" data-panel="pages">
       ${renderPagesTable(run)}

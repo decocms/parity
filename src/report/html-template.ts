@@ -318,6 +318,55 @@ export const REPORT_CSS = `
     font-size: 13px;
   }
 
+  /* LLM Prompt panel */
+  .prompt-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .prompt-toolbar button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .prompt-toolbar button:hover { opacity: 0.9; }
+  .prompt-toolbar button.secondary {
+    background: var(--bg-elevated);
+    color: var(--fg);
+    border: 1px solid var(--border);
+  }
+  .prompt-toolbar .feedback {
+    font-size: 12px;
+    color: var(--green);
+    margin-left: 8px;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .prompt-toolbar .feedback.show { opacity: 1; }
+  .prompt-toolbar .right { margin-left: auto; font-size: 12px; color: var(--fg-muted); }
+  .prompt-md {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    max-height: 75vh;
+    overflow-y: auto;
+    font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--fg);
+    white-space: pre-wrap;
+    word-break: break-word;
+    user-select: text;
+  }
+
   pre, code { font-family: "SF Mono", Menlo, Monaco, Consolas, monospace; font-size: 12px; }
   pre {
     background: var(--bg-elevated);
@@ -351,6 +400,45 @@ export const REPORT_JS = `
     });
     var hash = (location.hash || '#summary').slice(1);
     activate(hash);
+
+    // ---- LLM Prompt: copy + download ----
+    var copyBtn = document.getElementById('prompt-copy');
+    var dlBtn = document.getElementById('prompt-download');
+    var promptEl = document.getElementById('prompt-md');
+    var feedback = document.getElementById('prompt-feedback');
+    if (copyBtn && promptEl) {
+      copyBtn.addEventListener('click', function() {
+        var text = promptEl.textContent || '';
+        var done = function() {
+          feedback.textContent = '✓ copiado!';
+          feedback.classList.add('show');
+          setTimeout(function() { feedback.classList.remove('show'); }, 2000);
+        };
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(text).then(done).catch(function() {
+            // Fallback: select+execCommand
+            var range = document.createRange();
+            range.selectNodeContents(promptEl);
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            try { document.execCommand('copy'); done(); } catch (e) {}
+            sel.removeAllRanges();
+          });
+        }
+      });
+    }
+    if (dlBtn && promptEl) {
+      dlBtn.addEventListener('click', function() {
+        var text = promptEl.textContent || '';
+        var blob = new Blob([text], { type: 'text/markdown' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'parity-prompt.md';
+        a.click();
+        setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
+      });
+    }
 
     // ---- Side-by-side iframe controller ----
     var sbsState = window.__parity_sbs || {};
