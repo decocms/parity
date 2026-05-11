@@ -90,7 +90,12 @@ Optional `.parityignore` to suppress known noise:
 
 ## LLM (optional)
 
-Set `ANTHROPIC_API_KEY` to enable issue aggregation, root-cause explanation, and suggested-fix generation. Without an API key, the CLI still runs and outputs raw check results — only the smart-aggregator step is skipped.
+Set **one** of the following environment variables to enable the LLM features (issue aggregation, root-cause explanation, selector discovery, semantic visual diff, PLP picker, PDP matcher, step recovery):
+
+- `ANTHROPIC_API_KEY` — calls the Anthropic API directly with Claude Sonnet 4.6 (preferred; supports prompt caching)
+- `OPENROUTER_API_KEY` — routes through OpenRouter with `anthropic/claude-sonnet-4.5` by default (override with `PARITY_OPENROUTER_MODEL`)
+
+If neither is set, the CLI still runs and outputs raw check results — only the smart-aggregator / discovery / vision steps are skipped (deterministic fallbacks always apply).
 
 ## Development
 

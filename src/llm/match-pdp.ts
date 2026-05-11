@@ -1,5 +1,5 @@
 import { extractJsonLd } from "../diff/jsonld.ts";
-import { LLM_MODEL, getLlmClient } from "./client.ts";
+import { callTool } from "./client.ts";
 
 export interface PdpFingerprint {
   name: string | null;
@@ -98,53 +98,28 @@ function levenshtein(a: string, b: string): number {
   return dp[n]!;
 }
 
-const MATCH_PDP_TOOL = {
-  name: "classify_pdp_match",
-  description: "Classify whether two PDPs show the same product",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      verdict: { type: "string", enum: ["same", "similar", "different"] },
-      reasoning: { type: "string" },
-    },
-    required: ["verdict"],
-  },
-};
-
 async function llmMatch(prod: PdpFingerprint, cand: PdpFingerprint): Promise<MatchVerdict | null> {
-  const client = getLlmClient();
-  if (!client) return null;
-  try {
-    const response = await client.messages.create({
-      model: LLM_MODEL,
-      max_tokens: 200,
-      system: [
-        {
-          type: "text",
-          text:
-            "Você classifica se duas páginas de produto (PDPs) mostram o mesmo produto. 'same' = mesmo SKU/produto idêntico. 'similar' = variação (mesma família, cor diferente, embalagem diferente). 'different' = produtos distintos.",
-          cache_control: { type: "ephemeral" },
+  const input = await callTool<{ verdict?: string }>({
+    systemPrompt:
+      "Você classifica se duas páginas de produto (PDPs) mostram o mesmo produto. 'same' = mesmo SKU/produto idêntico. 'similar' = variação (mesma família, cor diferente, embalagem diferente). 'different' = produtos distintos.",
+    userText: `prod: ${JSON.stringify(prod)}\ncand: ${JSON.stringify(cand)}`,
+    maxTokens: 200,
+    tool: {
+      name: "classify_pdp_match",
+      description: "Classify whether two PDPs show the same product",
+      inputSchema: {
+        type: "object",
+        properties: {
+          verdict: { type: "string", enum: ["same", "similar", "different"] },
+          reasoning: { type: "string" },
         },
-      ],
-      tools: [MATCH_PDP_TOOL],
-      tool_choice: { type: "tool", name: "classify_pdp_match" },
-      messages: [
-        {
-          role: "user",
-          content: `prod: ${JSON.stringify(prod)}\ncand: ${JSON.stringify(cand)}`,
-        },
-      ],
-    });
-    for (const block of response.content) {
-      if (block.type === "tool_use" && block.name === "classify_pdp_match") {
-        const verdict = (block.input as { verdict?: string }).verdict;
-        if (verdict === "same" || verdict === "similar" || verdict === "different") {
-          return verdict;
-        }
-      }
-    }
-  } catch (err) {
-    console.error(`[llm-match-pdp] failed: ${(err as Error).message}`);
+        required: ["verdict"],
+      },
+    },
+  });
+  const verdict = input?.verdict;
+  if (verdict === "same" || verdict === "similar" || verdict === "different") {
+    return verdict;
   }
   return null;
 }

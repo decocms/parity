@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { PNG } from "pngjs";
-import { LLM_MODEL, getLlmClient } from "./client.ts";
+import { callTool } from "./client.ts";
 
 /** Max height to send to Vision (above-the-fold + scroll). Keeps cost predictable. */
 const MAX_HEIGHT = 2500;
@@ -150,9 +150,6 @@ export interface VisualDiffInput {
 export async function visualSemanticDiff(
   input: VisualDiffInput,
 ): Promise<VisualDifference[] | null> {
-  const client = getLlmClient();
-  if (!client) return null;
-
   let prodB64: string;
   let candB64: string;
   try {
@@ -164,52 +161,30 @@ export async function visualSemanticDiff(
   }
 
   const context = `${input.pageContext ?? "a página"}${input.viewport ? ` (${input.viewport})` : ""}`;
-
-  try {
-    const response = await client.messages.create({
-      model: LLM_MODEL,
-      max_tokens: 2000,
-      system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-      tools: [REPORT_VISUAL_DIFFS_TOOL],
-      tool_choice: { type: "tool", name: "report_visual_differences" },
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Compare as duas screenshots de ${context}. 1ª = prod, 2ª = cand.`,
-            },
-            {
-              type: "image",
-              source: { type: "base64", media_type: "image/png", data: prodB64 },
-            },
-            {
-              type: "image",
-              source: { type: "base64", media_type: "image/png", data: candB64 },
-            },
-          ],
-        },
-      ],
-    });
-    for (const block of response.content) {
-      if (block.type === "tool_use" && block.name === "report_visual_differences") {
-        const input = block.input as { differences?: Partial<VisualDifference>[] };
-        return (input.differences ?? [])
-          .filter((d) => d.type && d.region && d.severity && d.description)
-          .map(
-            (d) =>
-              ({
-                type: d.type!,
-                region: d.region!,
-                severity: d.severity!,
-                description: d.description!,
-              }) as VisualDifference,
-          );
-      }
-    }
-  } catch (err) {
-    console.error(`[llm-visual-diff] failed: ${(err as Error).message}`);
-  }
-  return null;
+  const result = await callTool<{ differences?: Partial<VisualDifference>[] }>({
+    systemPrompt: SYSTEM_PROMPT,
+    userText: `Compare as duas screenshots de ${context}. 1ª = prod, 2ª = cand.`,
+    userImages: [
+      { base64: prodB64, mediaType: "image/png" },
+      { base64: candB64, mediaType: "image/png" },
+    ],
+    maxTokens: 2000,
+    tool: {
+      name: REPORT_VISUAL_DIFFS_TOOL.name,
+      description: REPORT_VISUAL_DIFFS_TOOL.description,
+      inputSchema: REPORT_VISUAL_DIFFS_TOOL.input_schema as unknown as Record<string, unknown>,
+    },
+  });
+  if (!result) return null;
+  return (result.differences ?? [])
+    .filter((d) => d.type && d.region && d.severity && d.description)
+    .map(
+      (d) =>
+        ({
+          type: d.type!,
+          region: d.region!,
+          severity: d.severity!,
+          description: d.description!,
+        }) as VisualDifference,
+    );
 }

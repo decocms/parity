@@ -1,13 +1,265 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-export const LLM_MODEL = "claude-sonnet-4-6";
+/** Default Claude model identifier when calling via Anthropic SDK directly. */
+export const LLM_MODEL_ANTHROPIC = "claude-sonnet-4-6";
+/** Default OpenRouter model identifier (override via env PARITY_OPENROUTER_MODEL). */
+export const LLM_MODEL_OPENROUTER = process.env.PARITY_OPENROUTER_MODEL ?? "anthropic/claude-sonnet-4.5";
 
-export function getLlmClient(): Anthropic | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-  return new Anthropic({ apiKey });
+export type Provider = "anthropic" | "openrouter";
+
+export function getProvider(): Provider | null {
+  if (process.env.ANTHROPIC_API_KEY) return "anthropic";
+  if (process.env.OPENROUTER_API_KEY) return "openrouter";
+  return null;
 }
 
 export function isLlmAvailable(): boolean {
-  return !!process.env.ANTHROPIC_API_KEY;
+  return getProvider() !== null;
+}
+
+export function providerLabel(): string {
+  const p = getProvider();
+  if (p === "anthropic") return `Anthropic (${LLM_MODEL_ANTHROPIC})`;
+  if (p === "openrouter") return `OpenRouter (${LLM_MODEL_OPENROUTER})`;
+  return "none";
+}
+
+export interface ImageInput {
+  base64: string;
+  mediaType?: "image/png" | "image/jpeg" | "image/webp";
+}
+
+export interface ToolCallParams {
+  systemPrompt: string;
+  userText: string;
+  userImages?: ImageInput[];
+  tool: {
+    name: string;
+    description: string;
+    inputSchema: Record<string, unknown>;
+  };
+  maxTokens?: number;
+}
+
+/**
+ * Unified tool-call interface across Anthropic SDK and OpenRouter.
+ * Returns the parsed tool input object, or null if no provider is configured
+ * or the call failed.
+ */
+export async function callTool<T = Record<string, unknown>>(
+  params: ToolCallParams,
+): Promise<T | null> {
+  const provider = getProvider();
+  if (provider === "anthropic") return callAnthropicTool<T>(params);
+  if (provider === "openrouter") return callOpenRouterTool<T>(params);
+  return null;
+}
+
+async function callAnthropicTool<T>(params: ToolCallParams): Promise<T | null> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? "" });
+  const userContent: Anthropic.ContentBlockParam[] = [{ type: "text", text: params.userText }];
+  for (const img of params.userImages ?? []) {
+    userContent.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: img.mediaType ?? "image/png",
+        data: img.base64,
+      },
+    });
+  }
+  try {
+    const response = await client.messages.create({
+      model: LLM_MODEL_ANTHROPIC,
+      max_tokens: params.maxTokens ?? 2000,
+      system: [
+        { type: "text", text: params.systemPrompt, cache_control: { type: "ephemeral" } },
+      ],
+      tools: [
+        {
+          name: params.tool.name,
+          description: params.tool.description,
+          input_schema: params.tool.inputSchema as Anthropic.Tool["input_schema"],
+        },
+      ],
+      tool_choice: { type: "tool", name: params.tool.name },
+      messages: [{ role: "user", content: userContent }],
+    });
+    for (const block of response.content) {
+      if (block.type === "tool_use" && block.name === params.tool.name) {
+        return block.input as T;
+      }
+    }
+  } catch (err) {
+    console.error(`[llm-anthropic] failed: ${(err as Error).message}`);
+  }
+  return null;
+}
+
+interface OpenAiContentBlock {
+  type: "text" | "image_url";
+  text?: string;
+  image_url?: { url: string };
+}
+
+async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return null;
+
+  const userContent: OpenAiContentBlock[] = [{ type: "text", text: params.userText }];
+  for (const img of params.userImages ?? []) {
+    userContent.push({
+      type: "image_url",
+      image_url: {
+        url: `data:${img.mediaType ?? "image/png"};base64,${img.base64}`,
+      },
+    });
+  }
+
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/decocms/parity",
+        "X-Title": "parity CLI",
+      },
+      body: JSON.stringify({
+        model: LLM_MODEL_OPENROUTER,
+        max_tokens: params.maxTokens ?? 2000,
+        messages: [
+          { role: "system", content: params.systemPrompt },
+          { role: "user", content: userContent },
+        ],
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: params.tool.name,
+              description: params.tool.description,
+              parameters: params.tool.inputSchema,
+            },
+          },
+        ],
+        tool_choice: { type: "function", function: { name: params.tool.name } },
+      }),
+    });
+    if (!response.ok) {
+      const txt = await response.text().catch(() => "");
+      console.error(`[llm-openrouter] HTTP ${response.status}: ${txt.slice(0, 200)}`);
+      return null;
+    }
+    const json = (await response.json()) as {
+      choices?: Array<{
+        message?: {
+          tool_calls?: Array<{
+            function?: { name: string; arguments: string };
+          }>;
+          content?: string | null;
+        };
+      }>;
+    };
+    const toolCall = json.choices?.[0]?.message?.tool_calls?.[0];
+    if (toolCall?.function?.name === params.tool.name) {
+      try {
+        return JSON.parse(toolCall.function.arguments) as T;
+      } catch (err) {
+        console.error(`[llm-openrouter] failed to parse tool arguments: ${(err as Error).message}`);
+        return null;
+      }
+    }
+    // Some models return tool intent inside content as JSON when tool_choice is enforced loosely
+    const content = json.choices?.[0]?.message?.content;
+    if (typeof content === "string" && content.trim().startsWith("{")) {
+      try {
+        return JSON.parse(content) as T;
+      } catch {
+        /* not parseable, fall through */
+      }
+    }
+  } catch (err) {
+    console.error(`[llm-openrouter] failed: ${(err as Error).message}`);
+  }
+  return null;
+}
+
+export interface MessageCallParams {
+  systemPrompt: string;
+  userText: string;
+  maxTokens?: number;
+}
+
+/**
+ * Free-form text response (no tool-use). Used by `parity explain`.
+ */
+export async function callMessage(params: MessageCallParams): Promise<string | null> {
+  const provider = getProvider();
+  if (provider === "anthropic") return callAnthropicMessage(params);
+  if (provider === "openrouter") return callOpenRouterMessage(params);
+  return null;
+}
+
+async function callAnthropicMessage(params: MessageCallParams): Promise<string | null> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? "" });
+  try {
+    const response = await client.messages.create({
+      model: LLM_MODEL_ANTHROPIC,
+      max_tokens: params.maxTokens ?? 1500,
+      system: [
+        { type: "text", text: params.systemPrompt, cache_control: { type: "ephemeral" } },
+      ],
+      messages: [{ role: "user", content: params.userText }],
+    });
+    const parts: string[] = [];
+    for (const block of response.content) {
+      if (block.type === "text") parts.push(block.text);
+    }
+    return parts.join("\n");
+  } catch (err) {
+    console.error(`[llm-anthropic] failed: ${(err as Error).message}`);
+    return null;
+  }
+}
+
+async function callOpenRouterMessage(params: MessageCallParams): Promise<string | null> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/decocms/parity",
+        "X-Title": "parity CLI",
+      },
+      body: JSON.stringify({
+        model: LLM_MODEL_OPENROUTER,
+        max_tokens: params.maxTokens ?? 1500,
+        messages: [
+          { role: "system", content: params.systemPrompt },
+          { role: "user", content: params.userText },
+        ],
+      }),
+    });
+    if (!response.ok) return null;
+    const json = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    return json.choices?.[0]?.message?.content ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/* ---------- Backwards-compatible exports (used by legacy callers) ---------- */
+
+/** @deprecated prefer callTool / callMessage. Kept for callers still using the SDK directly. */
+export const LLM_MODEL = LLM_MODEL_ANTHROPIC;
+
+/** @deprecated prefer callTool / callMessage. */
+export function getLlmClient(): Anthropic | null {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 }

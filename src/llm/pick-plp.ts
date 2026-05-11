@@ -1,4 +1,4 @@
-import { LLM_MODEL, getLlmClient } from "./client.ts";
+import { callTool } from "./client.ts";
 
 export interface CategoryLinkCandidate {
   text: string;
@@ -60,55 +60,30 @@ function isBlocked(href: string): boolean {
   }
 }
 
-const PICK_PLP_TOOL = {
-  name: "pick_category",
-  description: "Pick the index of the best category link",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      index: { type: "number", description: "Index in the input list (0-based)" },
-      reasoning: { type: "string", description: "1 sentence rationale" },
-    },
-    required: ["index"],
-  },
-};
-
 async function llmPick(
   candidates: CategoryLinkCandidate[],
 ): Promise<CategoryLinkCandidate | null> {
-  const client = getLlmClient();
-  if (!client) return null;
-  try {
-    const response = await client.messages.create({
-      model: LLM_MODEL,
-      max_tokens: 200,
-      system: [
-        {
-          type: "text",
-          text:
-            "Você escolhe links de categoria reais em sites de e-commerce. Categoria real = página que lista produtos à venda. Evite: institucional, atendimento, blog, vale-presente, lojas físicas. Prefira URLs com /c/, /category/, /collections/ ou claramente vinculadas a tipos de produto.",
-          cache_control: { type: "ephemeral" },
+  const input = await callTool<{ index?: number }>({
+    systemPrompt:
+      "Você escolhe links de categoria reais em sites de e-commerce. Categoria real = página que lista produtos à venda. Evite: institucional, atendimento, blog, vale-presente, lojas físicas. Prefira URLs com /c/, /category/, /collections/ ou claramente vinculadas a tipos de produto.",
+    userText: `Candidatos:\n${candidates.map((c, i) => `${i}. "${c.text}" → ${c.href}`).join("\n")}`,
+    maxTokens: 200,
+    tool: {
+      name: "pick_category",
+      description: "Pick the index of the best category link",
+      inputSchema: {
+        type: "object",
+        properties: {
+          index: { type: "number", description: "Index in the input list (0-based)" },
+          reasoning: { type: "string", description: "1 sentence rationale" },
         },
-      ],
-      tools: [PICK_PLP_TOOL],
-      tool_choice: { type: "tool", name: "pick_category" },
-      messages: [
-        {
-          role: "user",
-          content: `Candidatos:\n${candidates.map((c, i) => `${i}. "${c.text}" → ${c.href}`).join("\n")}`,
-        },
-      ],
-    });
-    for (const block of response.content) {
-      if (block.type === "tool_use" && block.name === "pick_category") {
-        const idx = (block.input as { index?: number }).index;
-        if (typeof idx === "number" && idx >= 0 && idx < candidates.length) {
-          return candidates[idx]!;
-        }
-      }
-    }
-  } catch (err) {
-    console.error(`[llm-pick-plp] failed: ${(err as Error).message}`);
+        required: ["index"],
+      },
+    },
+  });
+  const idx = input?.index;
+  if (typeof idx === "number" && idx >= 0 && idx < candidates.length) {
+    return candidates[idx]!;
   }
   return null;
 }

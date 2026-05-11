@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as cheerio from "cheerio";
-import { LLM_MODEL, getLlmClient } from "./client.ts";
+import { callTool } from "./client.ts";
 
 const CACHE_DIR = ".parity-cache";
 
@@ -179,48 +179,30 @@ export async function discoverSelectorsFromUrl(
     }
   }
 
-  const client = getLlmClient();
-  if (!client) return null;
-
   const compacted = compactHtmlForSelectors(html);
-
-  try {
-    const response = await client.messages.create({
-      model: LLM_MODEL,
-      max_tokens: 1500,
-      system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-      tools: [DISCOVER_SELECTORS_TOOL],
-      tool_choice: { type: "tool", name: "report_selectors" },
-      messages: [
-        {
-          role: "user",
-          content: `URL: ${url}\n\nHTML compactado da home:\n\`\`\`html\n${compacted}\n\`\`\``,
-        },
-      ],
-    });
-
-    for (const block of response.content) {
-      if (block.type === "tool_use" && block.name === "report_selectors") {
-        const input = block.input as Record<string, string>;
-        const selectors: DiscoveredSelectors = {
-          categoryLink: emptyToUndef(input.category_link),
-          productCard: emptyToUndef(input.product_card),
-          buyButton: emptyToUndef(input.buy_button),
-          minicartTrigger: emptyToUndef(input.minicart_trigger),
-          cepInputPdp: emptyToUndef(input.cep_input_pdp),
-          cepInputCart: emptyToUndef(input.cep_input_cart),
-          checkoutButton: emptyToUndef(input.checkout_button),
-        };
-        // Persist cache
-        if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
-        writeFileSync(cachePath, `${JSON.stringify(selectors, null, 2)}\n`, "utf8");
-        return selectors;
-      }
-    }
-  } catch (err) {
-    console.error(`[llm-discover] failed: ${(err as Error).message}`);
-  }
-  return null;
+  const input = await callTool<Record<string, string>>({
+    systemPrompt: SYSTEM_PROMPT,
+    userText: `URL: ${url}\n\nHTML compactado da home:\n\`\`\`html\n${compacted}\n\`\`\``,
+    maxTokens: 1500,
+    tool: {
+      name: DISCOVER_SELECTORS_TOOL.name,
+      description: DISCOVER_SELECTORS_TOOL.description,
+      inputSchema: DISCOVER_SELECTORS_TOOL.input_schema as unknown as Record<string, unknown>,
+    },
+  });
+  if (!input) return null;
+  const selectors: DiscoveredSelectors = {
+    categoryLink: emptyToUndef(input.category_link),
+    productCard: emptyToUndef(input.product_card),
+    buyButton: emptyToUndef(input.buy_button),
+    minicartTrigger: emptyToUndef(input.minicart_trigger),
+    cepInputPdp: emptyToUndef(input.cep_input_pdp),
+    cepInputCart: emptyToUndef(input.cep_input_cart),
+    checkoutButton: emptyToUndef(input.checkout_button),
+  };
+  if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
+  writeFileSync(cachePath, `${JSON.stringify(selectors, null, 2)}\n`, "utf8");
+  return selectors;
 }
 
 function emptyToUndef(v: string | undefined): string | undefined {

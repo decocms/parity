@@ -1,5 +1,5 @@
 import * as cheerio from "cheerio";
-import { LLM_MODEL, getLlmClient } from "./client.ts";
+import { callTool } from "./client.ts";
 
 export type RecoveryAction = "click" | "fill" | "press";
 
@@ -10,20 +10,16 @@ export interface RecoverySuggestion {
   reasoning?: string;
 }
 
-const RECOVER_STEP_TOOL = {
-  name: "suggest_recovery",
-  description: "Suggest a selector and action to recover a failed E2E step",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      selector: { type: "string", description: "CSS or Playwright selector that targets the element" },
-      action: { type: "string", enum: ["click", "fill", "press"] },
-      value: { type: "string", description: "For 'fill' or 'press', the text/key to use" },
-      reasoning: { type: "string" },
-    },
-    required: ["selector", "action"],
+const RECOVER_STEP_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    selector: { type: "string", description: "CSS or Playwright selector that targets the element" },
+    action: { type: "string", enum: ["click", "fill", "press"] },
+    value: { type: "string", description: "For 'fill' or 'press', the text/key to use" },
+    reasoning: { type: "string" },
   },
-};
+  required: ["selector", "action"],
+} as const;
 
 /**
  * Compact HTML to just interactive elements for the recovery prompt.
@@ -58,50 +54,30 @@ export interface RecoverInput {
  * Returns null when no API key is set or LLM call fails.
  */
 export async function suggestRecovery(input: RecoverInput): Promise<RecoverySuggestion | null> {
-  const client = getLlmClient();
-  if (!client) return null;
   const compacted = compactHtmlForRecovery(input.html);
-  try {
-    const response = await client.messages.create({
-      model: LLM_MODEL,
-      max_tokens: 400,
-      system: [
-        {
-          type: "text",
-          text:
-            "Você ajuda a recuperar passos de teste E2E (Playwright) que falharam. Receba o nome do step, a ação desejada e o HTML atual da página. Sugira UM seletor e ação ('click' | 'fill' | 'press') que provavelmente funciona. Para 'fill', preferir input visível com label relacionada. Para 'click', preferir botão visível com texto/label que case com a intenção. Use Playwright selectors quando apropriado (`button:has-text('X')`, `[role='button']`). Não invente seletores genéricos; baseie no HTML fornecido.",
-          cache_control: { type: "ephemeral" },
-        },
-      ],
-      tools: [RECOVER_STEP_TOOL],
-      tool_choice: { type: "tool", name: "suggest_recovery" },
-      messages: [
-        {
-          role: "user",
-          content: `Step: ${input.stepName}\nAção desejada: ${input.intendedAction}\n${input.alreadyTried?.length ? `Já tentei: ${input.alreadyTried.join(", ")}\n` : ""}\nHTML compactado:\n\`\`\`html\n${compacted}\n\`\`\``,
-        },
-      ],
-    });
-    for (const block of response.content) {
-      if (block.type === "tool_use" && block.name === "suggest_recovery") {
-        const inp = block.input as {
-          selector?: string;
-          action?: RecoveryAction;
-          value?: string;
-          reasoning?: string;
-        };
-        if (inp.selector && inp.action) {
-          return {
-            selector: inp.selector,
-            action: inp.action,
-            value: inp.value,
-            reasoning: inp.reasoning,
-          };
-        }
-      }
-    }
-  } catch (err) {
-    console.error(`[llm-recover-step] failed: ${(err as Error).message}`);
+  const inp = await callTool<{
+    selector?: string;
+    action?: RecoveryAction;
+    value?: string;
+    reasoning?: string;
+  }>({
+    systemPrompt:
+      "Você ajuda a recuperar passos de teste E2E (Playwright) que falharam. Receba o nome do step, a ação desejada e o HTML atual da página. Sugira UM seletor e ação ('click' | 'fill' | 'press') que provavelmente funciona. Para 'fill', preferir input visível com label relacionada. Para 'click', preferir botão visível com texto/label que case com a intenção. Use Playwright selectors quando apropriado (`button:has-text('X')`, `[role='button']`). Não invente seletores genéricos; baseie no HTML fornecido.",
+    userText: `Step: ${input.stepName}\nAção desejada: ${input.intendedAction}\n${input.alreadyTried?.length ? `Já tentei: ${input.alreadyTried.join(", ")}\n` : ""}\nHTML compactado:\n\`\`\`html\n${compacted}\n\`\`\``,
+    maxTokens: 400,
+    tool: {
+      name: "suggest_recovery",
+      description: "Suggest a selector and action to recover a failed E2E step",
+      inputSchema: RECOVER_STEP_INPUT_SCHEMA,
+    },
+  });
+  if (inp?.selector && inp.action) {
+    return {
+      selector: inp.selector,
+      action: inp.action,
+      value: inp.value,
+      reasoning: inp.reasoning,
+    };
   }
   return null;
 }
