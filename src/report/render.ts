@@ -86,27 +86,148 @@ function renderIssue(issue: Issue, runDir: string): string {
   </div>`;
 }
 
-function renderVerdict(run: Run): string {
+function renderDashboard(run: Run): string {
   const v = run.verdict;
-  const statusLabel = v.status === "pass" ? "✓ PASS" : v.status === "warn" ? "⚠ WARN" : "✗ FAIL";
+  const statusLabel = v.status === "pass" ? "Excelente" : v.status === "warn" ? "Bom, com ressalvas" : "Crítico";
+  const ringColor = v.status === "pass" ? "var(--state-good)" : v.status === "warn" ? "var(--state-warn)" : "var(--state-bad)";
+  const ringDeg = `${Math.round((v.score / 100) * 360)}deg`;
+
+  // Build metric tiles from check results
+  const tiles = buildTiles(run);
+
   return `
-  <div class="verdict-bar">
-    <div class="verdict-status ${v.status}">${statusLabel}</div>
-    <div class="verdict-score">
-      <div class="num">${v.score}<span style="font-size:14px;color:var(--fg-muted);font-weight:400">/100</span></div>
-      <div class="lbl">parity score</div>
+  <div class="dash-hero">
+    <div class="health-score" style="--ring-color:${ringColor};--ring-deg:${ringDeg}">
+      <div class="score-num">${v.score}<small>/100</small></div>
+      <div class="score-label">Health</div>
     </div>
-    <div class="verdict-sep"></div>
-    <div class="verdict-counts">
-      <div class="count-pill"><span class="dot critical"></span><span class="num">${v.critical}</span> critical</div>
-      <div class="count-pill"><span class="dot high"></span><span class="num">${v.high}</span> high</div>
-      <div class="count-pill"><span class="dot medium"></span><span class="num">${v.medium}</span> medium</div>
-      <div class="count-pill"><span class="dot low"></span><span class="num">${v.low}</span> low</div>
+    <div class="dash-hero-info">
+      <div class="verdict-text ${v.status}">${statusLabel}</div>
+      <div class="verdict-sub">${v.critical + v.high} issue${v.critical + v.high !== 1 ? "s" : ""} bloqueante${v.critical + v.high !== 1 ? "s" : ""} ${v.critical > 0 ? `(${v.critical} crítica${v.critical !== 1 ? "s" : ""})` : ""}</div>
+      <div class="verdict-meta">
+        <span><strong>${v.checksPassed}</strong> checks pass</span>
+        <span><strong>${v.checksFailed}</strong> fail</span>
+        <span><strong>${v.checksSkipped}</strong> skipped</span>
+        <span><strong>${(run.durationMs / 1000).toFixed(1)}s</strong> total</span>
+      </div>
     </div>
-    <div class="verdict-checks">
-      <span class="green">${v.checksPassed}</span> pass · <span class="red">${v.checksFailed}</span> fail · ${v.checksSkipped} skipped &nbsp;·&nbsp; ${(run.durationMs / 1000).toFixed(1)}s
-    </div>
-  </div>`;
+  </div>
+
+  <div class="tiles">
+    ${tiles.map((t) => renderTile(t)).join("")}
+  </div>
+
+  ${renderTopIssues(run, "")}`;
+}
+
+interface Tile {
+  icon: string;
+  label: string;
+  value: string;
+  meta: string;
+  state: "pass" | "warn" | "fail" | "info";
+  href?: string;
+}
+
+function buildTiles(run: Run): Tile[] {
+  const tiles: Tile[] = [];
+
+  // Purchase journey
+  const pj = run.checks.find((c) => c.name === "purchase-journey-flow");
+  if (pj) {
+    const data = (pj.data ?? {}) as { totalSteps?: number; failedSteps?: number };
+    const total = data.totalSteps ?? 0;
+    const failed = data.failedSteps ?? 0;
+    tiles.push({
+      icon: "🛒",
+      label: "Jornada",
+      value: total > 0 ? `${total - failed}/${total}` : "—",
+      meta: failed > 0 ? `${failed} step(s) falhou` : "completou em ambos",
+      state: failed > 0 ? "fail" : "pass",
+      href: "#issues",
+    });
+  }
+
+  // Cache
+  const cache = run.checks.find((c) => c.name === "cache-coverage");
+  if (cache) {
+    const data = (cache.data ?? {}) as { hitRate?: number; opportunityCount?: number };
+    tiles.push({
+      icon: "💾",
+      label: "Cache",
+      value: `${((data.hitRate ?? 0) * 100).toFixed(0)}%`,
+      meta: `${data.opportunityCount ?? 0} oportunidades`,
+      state: (data.hitRate ?? 0) > 0.7 ? "pass" : (data.hitRate ?? 0) > 0.4 ? "warn" : "fail",
+      href: "#cache",
+    });
+  }
+
+  // Vitals
+  const vitals = run.checks.find((c) => c.name === "web-vitals-mobile");
+  if (vitals) {
+    tiles.push({
+      icon: "📊",
+      label: "Vitals",
+      value: vitals.status === "pass" ? "✓" : vitals.issues.length.toString(),
+      meta: vitals.status === "pass" ? "sem regressões" : `${vitals.issues.length} regressão(ões)`,
+      state: vitals.status === "pass" ? "pass" : "fail",
+      href: "#vitals",
+    });
+  }
+
+  // SEO
+  const seo = run.checks.find((c) => c.name === "seo-deep-audit");
+  if (seo) {
+    const critical = seo.issues.filter((i) => i.severity === "critical").length;
+    tiles.push({
+      icon: "🔍",
+      label: "SEO",
+      value: critical > 0 ? `${critical} crit` : seo.status === "pass" ? "✓" : seo.issues.length.toString(),
+      meta: critical > 0 ? "noindex / robots regression" : `${seo.issues.length} issue(s)`,
+      state: critical > 0 ? "fail" : seo.status === "pass" ? "pass" : "warn",
+      href: "#issues",
+    });
+  }
+
+  // Console
+  const console_ = run.checks.find((c) => c.name === "console-errors-baseline");
+  if (console_) {
+    tiles.push({
+      icon: "🔧",
+      label: "Console",
+      value: console_.issues.length.toString(),
+      meta: console_.status === "pass" ? "sem erros novos" : "errors em cand",
+      state: console_.status === "pass" ? "pass" : "fail",
+      href: "#console",
+    });
+  }
+
+  // Visual
+  const visual = run.checks.find((c) => c.name === "visual-regression-keyframes");
+  if (visual) {
+    tiles.push({
+      icon: "🖼",
+      label: "Visual",
+      value: visual.issues.length.toString(),
+      meta: visual.status === "pass" ? "sem regressão visual" : "diferenças detectadas",
+      state: visual.status === "pass" ? "pass" : "warn",
+      href: "#issues",
+    });
+  }
+
+  return tiles;
+}
+
+function renderTile(t: Tile): string {
+  const inner = `
+    <div class="tile-icon">${t.icon}</div>
+    <div class="tile-label">${esc(t.label)}</div>
+    <div class="tile-value">${esc(t.value)}</div>
+    <div class="tile-meta">${esc(t.meta)}</div>`;
+  if (t.href) {
+    return `<a class="tile state-${t.state}" href="${esc(t.href)}" onclick="window.dispatchEvent(new HashChangeEvent('hashchange'))">${inner}</a>`;
+  }
+  return `<div class="tile state-${t.state}">${inner}</div>`;
 }
 
 function renderTopIssues(run: Run, runDir: string): string {
@@ -629,10 +750,33 @@ function renderSideBySidePanel(run: Run): string {
   </div>`;
 }
 
+interface NavEntry {
+  tab: string;
+  label: string;
+  icon: string;
+  count?: number;
+}
+
+function buildNav(run: Run): NavEntry[] {
+  return [
+    { tab: "summary", label: "Dashboard", icon: "🏠" },
+    { tab: "sidebyside", label: "Side-by-side", icon: "⇆" },
+    { tab: "issues", label: "Issues", icon: "⚠", count: run.issues.length },
+    { tab: "vitals", label: "Vitals", icon: "📊" },
+    { tab: "cache", label: "Cache", icon: "💾" },
+    { tab: "checks", label: "Checks", icon: "✓", count: run.checks.length },
+    { tab: "prompt", label: "Prompt LLM", icon: "🤖" },
+    { tab: "pages", label: "Páginas", icon: "📄" },
+    { tab: "console", label: "Console", icon: "🔧" },
+    { tab: "network", label: "Network", icon: "🌐" },
+    { tab: "diff", label: "Diff", icon: "📈" },
+  ];
+}
+
 export function renderHtmlReport(run: Run, runDir: string): string {
-  const issueCount = run.issues.length;
+  const nav = buildNav(run);
   return `<!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR" data-theme="dark">
 <head>
   <meta charset="utf-8"/>
   <title>parity — ${esc(run.id)}</title>
@@ -640,61 +784,92 @@ export function renderHtmlReport(run: Run, runDir: string): string {
   <style>${REPORT_CSS}</style>
 </head>
 <body>
-  <header>
-    <div>
-      <h1>parity report · <code>${esc(run.id)}</code></h1>
-      <div class="urls">prod (Fresh): <a href="${esc(run.prodUrl)}" target="_blank" rel="noreferrer">${esc(run.prodUrl)}</a> · cand (TanStack): <a href="${esc(run.candUrl)}" target="_blank" rel="noreferrer">${esc(run.candUrl)}</a></div>
+  <div class="app">
+    <aside class="app-sidebar">
+      <div class="sidebar-brand">
+        <strong>parity</strong>
+        <small>${esc(run.id)}</small>
+      </div>
+      <nav class="sidebar-nav">
+        ${nav
+          .map(
+            (n) => `<div class="nav-item" data-tab="${esc(n.tab)}">
+          <span class="icon">${n.icon}</span>
+          <span class="label">${esc(n.label)}</span>
+          ${n.count != null ? `<span class="count">${n.count}</span>` : ""}
+        </div>`,
+          )
+          .join("")}
+      </nav>
+      <div class="sidebar-footer">
+        flows: ${esc(run.flows.join(", "))}<br/>
+        viewports: ${esc(run.viewports.join(", "))}<br/>
+        CEP: ${esc(run.cep)}
+      </div>
+    </aside>
+    <header class="app-header">
+      <div>
+        <h1>Migration parity</h1>
+        <div class="urls">
+          <span class="url-prod"><a href="${esc(run.prodUrl)}" target="_blank" rel="noreferrer">${esc(run.prodUrl)}</a></span>
+          <span class="url-cand"><a href="${esc(run.candUrl)}" target="_blank" rel="noreferrer">${esc(run.candUrl)}</a></span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="action-btn" id="theme-toggle">☀ Light</button>
+        <button class="action-btn" id="help-btn">? Atalhos</button>
+      </div>
+    </header>
+    <main class="app-main">
+      <section class="panel" data-panel="summary">
+        ${renderDashboard(run)}
+      </section>
+      <section class="panel" data-panel="sidebyside">
+        ${renderSideBySidePanel(run)}
+      </section>
+      <section class="panel" data-panel="issues">
+        ${renderIssuesPanel(run, runDir)}
+      </section>
+      <section class="panel" data-panel="vitals">
+        ${renderVitalsPanel(run)}
+      </section>
+      <section class="panel" data-panel="cache">
+        ${renderCachePanel(run)}
+      </section>
+      <section class="panel" data-panel="checks">
+        ${renderChecksTable(run)}
+      </section>
+      <section class="panel" data-panel="prompt">
+        ${renderPromptPanel(run)}
+      </section>
+      <section class="panel" data-panel="pages">
+        ${renderPagesTable(run)}
+      </section>
+      <section class="panel" data-panel="console">
+        ${renderConsolePanel(run, runDir)}
+      </section>
+      <section class="panel" data-panel="network">
+        ${renderNetworkPanel(run)}
+      </section>
+      <section class="panel" data-panel="diff">
+        ${renderDiffPanel(run, runDir)}
+      </section>
+    </main>
+  </div>
+  <div class="help-modal" id="help-modal">
+    <div class="modal-inner">
+      <h3>Atalhos de teclado</h3>
+      <table>
+        <tbody>
+          <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Navegar entre abas</td></tr>
+          <tr><td><kbd>/</kbd></td><td>Foco no campo de busca da aba ativa</td></tr>
+          <tr><td><kbd>t</kbd></td><td>Alternar tema dark/light</td></tr>
+          <tr><td><kbd>?</kbd></td><td>Mostrar este painel</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Fechar</td></tr>
+        </tbody>
+      </table>
+      <div style="margin-top:16px;text-align:right"><button class="action-btn" id="help-close">Fechar</button></div>
     </div>
-    <div class="meta-right">flows: ${esc(run.flows.join(", "))} · viewports: ${esc(run.viewports.join(", "))} · CEP: ${esc(run.cep)}</div>
-  </header>
-  <div class="layout">
-    <nav class="tabs">
-      <div class="tab" data-tab="summary">Resumo</div>
-      <div class="tab" data-tab="sidebyside">Side-by-side</div>
-      <div class="tab" data-tab="issues">Issues <span class="badge">${issueCount}</span></div>
-      <div class="tab" data-tab="vitals">Vitals</div>
-      <div class="tab" data-tab="cache">Cache</div>
-      <div class="tab" data-tab="checks">Checks <span class="badge">${run.checks.length}</span></div>
-      <div class="tab" data-tab="prompt">Prompt LLM</div>
-      <div class="tab" data-tab="pages">Páginas</div>
-      <div class="tab" data-tab="console">Console</div>
-      <div class="tab" data-tab="network">Network</div>
-      <div class="tab" data-tab="diff">Diff${run.baseline ? "" : " (s/ baseline)"}</div>
-    </nav>
-    <section class="panel" data-panel="summary">
-      ${renderVerdict(run)}
-      ${renderTopIssues(run, runDir)}
-    </section>
-    <section class="panel" data-panel="sidebyside">
-      ${renderSideBySidePanel(run)}
-    </section>
-    <section class="panel" data-panel="issues">
-      ${renderIssuesPanel(run, runDir)}
-    </section>
-    <section class="panel" data-panel="vitals">
-      ${renderVitalsPanel(run)}
-    </section>
-    <section class="panel" data-panel="cache">
-      ${renderCachePanel(run)}
-    </section>
-    <section class="panel" data-panel="checks">
-      ${renderChecksTable(run)}
-    </section>
-    <section class="panel" data-panel="prompt">
-      ${renderPromptPanel(run)}
-    </section>
-    <section class="panel" data-panel="pages">
-      ${renderPagesTable(run)}
-    </section>
-    <section class="panel" data-panel="console">
-      ${renderConsolePanel(run, runDir)}
-    </section>
-    <section class="panel" data-panel="network">
-      ${renderNetworkPanel(run)}
-    </section>
-    <section class="panel" data-panel="diff">
-      ${renderDiffPanel(run, runDir)}
-    </section>
   </div>
   <script>${REPORT_JS}</script>
 </body>

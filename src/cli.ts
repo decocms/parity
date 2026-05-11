@@ -39,6 +39,7 @@ program
   .option("--no-auto-selectors", "Disable LLM-based selector discovery (uses defaults instead)")
   .option("--refresh-selectors", "Bypass selector cache and re-run discovery", false)
   .option("--no-learn", "Don't write to learned-selectors.json (read-only mode)")
+  .option("--vitals-pages <n>", "Extra pages from sitemap to crawl for Vitals coverage (default 10)", (v) => Number(v), 10)
   .action(async (opts) => {
     const code = await runCommand(opts);
     process.exit(code);

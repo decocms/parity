@@ -6,8 +6,9 @@ import type { Browser } from "playwright";
 import { runAllChecks } from "../checks/index.ts";
 import type { CheckContext } from "../checks/index.ts";
 import { launchBrowser, newContext, stopTracing } from "../engine/browser.ts";
-import { installVitalsCollector } from "../engine/collect.ts";
+import { capturePage, installVitalsCollector } from "../engine/collect.ts";
 import { runFlow } from "../engine/flows.ts";
+import { resolveSitemapUrls } from "../diff/sitemap.ts";
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
 import { detectPlatform, type Platform } from "../learned/platform.ts";
 import {
@@ -61,6 +62,8 @@ export interface RunOptions {
   refreshSelectors?: boolean;
   /** When false, don't write to learned-selectors.json (read-only mode) */
   learn?: boolean;
+  /** Extra pages (beyond flows) to crawl just for Web Vitals coverage. Default 10. */
+  vitalsPages?: number;
 }
 
 const SEVERITY_RANK: Record<Issue["severity"], number> = {
@@ -224,6 +227,103 @@ export async function runCommand(opts: RunOptions): Promise<number> {
       saveLearned(learned);
     }
 
+    // Extra vitals coverage: crawl additional pages from sitemap to enrich the Vitals tab
+    const vitalsPagesLimit = opts.vitalsPages ?? 10;
+    if (browser && vitalsPagesLimit > 0) {
+      const extraSpinner = ora("Coletando vitals em páginas extras…").start();
+      try {
+        const allUrls = await resolveSitemapUrls(opts.prod);
+        const visitedPaths = new Set<string>();
+        for (const p of allPageCaptures) {
+          try {
+            visitedPaths.add(new URL(p.url).pathname);
+          } catch {
+            /* skip */
+          }
+        }
+        const buckets = new Map<string, string[]>();
+        for (const u of allUrls) {
+          let p = "/";
+          try {
+            p = new URL(u).pathname || "/";
+          } catch {
+            continue;
+          }
+          if (visitedPaths.has(p)) continue;
+          const seg = p.split("/").filter(Boolean)[0] ?? "_root";
+          const arr = buckets.get(seg) ?? [];
+          arr.push(p);
+          buckets.set(seg, arr);
+        }
+        const extraPaths: string[] = [];
+        const keys = [...buckets.keys()];
+        let idx = 0;
+        while (extraPaths.length < vitalsPagesLimit && keys.some((k) => (buckets.get(k)?.length ?? 0) > 0)) {
+          const k = keys[idx % keys.length]!;
+          const next = buckets.get(k)!.shift();
+          if (next) extraPaths.push(next);
+          idx++;
+        }
+        if (extraPaths.length > 0) {
+          extraSpinner.text = `${extraPaths.length} página(s) extras × 2 sides × ${viewports.length} viewport(s)…`;
+          const mobileOnly = viewports.includes("mobile") ? (["mobile"] as Viewport[]) : viewports;
+          const tasks: Array<{ path: string; viewport: Viewport; side: Side }> = [];
+          for (const viewport of mobileOnly) {
+            for (const path of extraPaths) {
+              for (const side of ["prod", "cand"] as Side[]) {
+                tasks.push({ path, viewport, side });
+              }
+            }
+          }
+          let done = 0;
+          await runWithConcurrency(tasks, 4, async (task) => {
+            const baseUrl = task.side === "prod" ? opts.prod : opts.cand;
+            const fullUrl = new URL(task.path, baseUrl).toString();
+            try {
+              const ctx = await newContext(browser!, { viewport: task.viewport, cohortCookieValue: "control" });
+              await installVitalsCollector(ctx);
+              const page = await ctx.newPage();
+              try {
+                const cap = await capturePage(page, {
+                  url: fullUrl,
+                  side: task.side,
+                  viewport: task.viewport,
+                  screenshotPath: `${paths.screenshotsDir}/extra-${task.path.replace(/[/?&=]+/g, "_")}-${task.viewport}-${task.side}.png`,
+                  settleMs: 1200,
+                  timeoutMs: 20_000,
+                  fast: true,
+                  scrollToLoad: false,
+                  skipScreenshot: true,
+                });
+                allPageCaptures.push(cap);
+                // Also include in a synthetic FlowCapture so the Vitals tab picks it up
+                allFlowCaptures.push({
+                  flow: "homepage",
+                  side: task.side,
+                  viewport: task.viewport,
+                  pages: [cap],
+                  totalDurationMs: cap.durationMs,
+                });
+              } finally {
+                await page.close().catch(() => undefined);
+                await ctx.close().catch(() => undefined);
+              }
+            } catch {
+              /* tolerated */
+            } finally {
+              done++;
+              extraSpinner.text = `[vitals extras] ${done}/${tasks.length} (último: ${task.path})`;
+            }
+          });
+          extraSpinner.succeed(`+${extraPaths.length} página(s) com vitals`);
+        } else {
+          extraSpinner.warn("Nenhuma página extra encontrada no sitemap");
+        }
+      } catch (err) {
+        extraSpinner.warn(`vitals extras pulado: ${(err as Error).message}`);
+      }
+    }
+
     spinner.start("Rodando checks…");
     const checkCtx: CheckContext = {
       prodPages: allPageCaptures.filter((p) => p.side === "prod"),
@@ -358,6 +458,23 @@ function computeVerdict(checks: CheckResult[], issues: Issue[]): Verdict {
     checksFailed,
     checksSkipped,
   };
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  workers: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: workers }, async () => {
+      while (true) {
+        const idx = next++;
+        if (idx >= items.length) break;
+        await fn(items[idx]!);
+      }
+    }),
+  );
 }
 
 async function fetchHomeHtml(url: string): Promise<string | null> {
