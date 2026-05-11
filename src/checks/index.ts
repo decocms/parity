@@ -17,6 +17,7 @@ import { networkSummaryDelta } from "./network-summary.ts";
 import { webVitalsMobile } from "./web-vitals.ts";
 import { imageLoadingHealth } from "./image-health.ts";
 import { lazySectionPresence } from "./lazy-sections.ts";
+import { seoDeepAudit } from "./seo-deep-audit.ts";
 
 export interface CheckContext {
   /** Page captures from prod side, across all flows/viewports */
@@ -48,6 +49,7 @@ export const ALL_CHECKS: Check[] = [
   webVitalsMobile,
   imageLoadingHealth,
   lazySectionPresence,
+  seoDeepAudit,
 ];
 
 export async function runAllChecks(ctx: CheckContext): Promise<CheckResult[]> {

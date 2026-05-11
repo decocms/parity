@@ -208,12 +208,17 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
 
   let response: Response | null = null;
   let finalUrl = opts.url;
+  let xRobotsTag: string | null = null;
   try {
     response = await page.goto(opts.url, {
       waitUntil: "domcontentloaded",
       timeout: opts.timeoutMs ?? 30_000,
     });
     finalUrl = page.url();
+    if (response) {
+      const headers = response.headers();
+      xRobotsTag = headers["x-robots-tag"] ?? null;
+    }
     // wait for networkidle but cap it to avoid hanging on long-polled connections
     await page
       .waitForLoadState("networkidle", { timeout: 10_000 })
@@ -256,5 +261,6 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
     screenshotPath: opts.screenshotPath,
     harPath: opts.harPath,
     tracePath: opts.tracePath,
+    xRobotsTag,
   };
 }

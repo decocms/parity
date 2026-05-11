@@ -66,6 +66,7 @@ export const PageCapture = z.object({
   screenshotPath: z.string(),
   harPath: z.string().optional(),
   tracePath: z.string().optional(),
+  xRobotsTag: z.string().nullable().optional(),
 });
 export type PageCapture = z.infer<typeof PageCapture>;
 
