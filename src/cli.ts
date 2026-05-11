@@ -4,6 +4,7 @@ import { compareCommand } from "./commands/compare.ts";
 import { explainCommand } from "./commands/explain.ts";
 import { learnedStats } from "./commands/learned.ts";
 import { listCommand } from "./commands/list.ts";
+import { promptCommand } from "./commands/prompt.ts";
 import { reportCommand } from "./commands/report.ts";
 import { runCommand } from "./commands/run.ts";
 
@@ -88,6 +89,29 @@ program
   .description("Compare a run against a baseline")
   .action((runId, opts) => {
     process.exit(compareCommand(runId, opts.against, opts.output));
+  });
+
+program
+  .command("prompt")
+  .argument("<runId>", "Run ID")
+  .description("Generate a Markdown prompt of ranked issues ready to paste into any LLM")
+  .option("--output <dir>", "Output directory where runs live", "./parity-output")
+  .option("--out <file>", "Write to file instead of stdout")
+  .option(
+    "--min-severity <sev>",
+    "Only include issues at or above this severity (critical|high|medium|low)",
+    "low",
+  )
+  .option("--limit <n>", "Cap the number of issues included", (v) => Number(v), 20)
+  .action((runId, opts) => {
+    process.exit(
+      promptCommand(runId, {
+        output: opts.output,
+        out: opts.out,
+        minSeverity: opts.minSeverity,
+        limit: opts.limit,
+      }),
+    );
   });
 
 program
