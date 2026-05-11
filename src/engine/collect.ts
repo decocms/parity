@@ -232,6 +232,10 @@ export interface CaptureOptions {
   timeoutMs?: number;
   /** Auto-scroll page through full height before screenshot to force lazy-loading. Default true. */
   scrollToLoad?: boolean;
+  /** Skip the full-page screenshot (saves time when only metrics are needed). Default false. */
+  skipScreenshot?: boolean;
+  /** Skip the heavy waitForLoadState('load'). Default false. Set true for vitals-only / cache-only captures. */
+  fast?: boolean;
 }
 
 export async function capturePage(page: Page, opts: CaptureOptions): Promise<PageCapture> {
@@ -251,17 +255,25 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
       const headers = response.headers();
       xRobotsTag = headers["x-robots-tag"] ?? null;
     }
-    // Wait for full load (images, fonts, etc.) — capped
-    await page.waitForLoadState("load", { timeout: 15_000 }).catch(() => undefined);
-    // Then networkidle (background fetches settle)
-    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
-    await page.waitForTimeout(opts.settleMs ?? 2_500);
+    if (opts.fast) {
+      // Fast path: just settle a bit after DOM is ready, no full load wait, no scroll
+      await page
+        .waitForLoadState("networkidle", { timeout: 4_000 })
+        .catch(() => undefined);
+      await page.waitForTimeout(opts.settleMs ?? 1_200);
+    } else {
+      // Wait for full load (images, fonts, etc.) — capped
+      await page.waitForLoadState("load", { timeout: 12_000 }).catch(() => undefined);
+      // Then networkidle (background fetches settle)
+      await page.waitForLoadState("networkidle", { timeout: 6_000 }).catch(() => undefined);
+      await page.waitForTimeout(opts.settleMs ?? 2_000);
 
-    // Auto-scroll to trigger lazy-loaded content (images, sections, analytics)
-    if (opts.scrollToLoad !== false) {
-      await scrollFullPage(page).catch(() => undefined);
-      // Brief settle after scrolling back to top
-      await page.waitForTimeout(800);
+      // Auto-scroll to trigger lazy-loaded content (images, sections, analytics)
+      if (opts.scrollToLoad !== false) {
+        await scrollFullPage(page).catch(() => undefined);
+        // Brief settle after scrolling back to top
+        await page.waitForTimeout(600);
+      }
     }
   } catch (err) {
     state.console.push({
@@ -274,11 +286,13 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
     .evaluate(() => (window as unknown as { __parity_vitals?: WebVitals }).__parity_vitals)
     .catch(() => null);
 
-  await page
-    .screenshot({ path: opts.screenshotPath, fullPage: true, animations: "disabled" })
-    .catch(() => {
-      /* tolerated; screenshot path may be undefined if URL failed completely */
-    });
+  if (!opts.skipScreenshot) {
+    await page
+      .screenshot({ path: opts.screenshotPath, fullPage: true, animations: "disabled" })
+      .catch(() => {
+        /* tolerated; screenshot path may be undefined if URL failed completely */
+      });
+  }
 
   const html = await page.content().catch(() => "");
 

@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { baselineList, baselineSet, baselineUnset } from "./commands/baseline.ts";
+import { cacheCommand } from "./commands/cache.ts";
 import { compareCommand } from "./commands/compare.ts";
 import { explainCommand } from "./commands/explain.ts";
 import { journeyCommand } from "./commands/journey.ts";
@@ -91,6 +92,24 @@ program
   .description("Compare a run against a baseline")
   .action((runId, opts) => {
     process.exit(compareCommand(runId, opts.against, opts.output));
+  });
+
+program
+  .command("cache")
+  .description(
+    "Análise de cache focada em cand. Crawla N páginas (mais leve que vitals: sem screenshot, sem vitals, sem scroll), agrupa requests por categoria, lista oportunidades de assets MISS.",
+  )
+  .requiredOption("--prod <url>", "Production URL (referência opcional)")
+  .requiredOption("--cand <url>", "Candidate URL (foco)")
+  .option("--urls <list-or-file>", "Comma-separated paths or .txt file (1/line). Overrides sitemap.")
+  .option("--pages <n>", "Max pages to crawl from sitemap", (v) => Number(v), 30)
+  .option("--viewports <list>", "mobile,desktop", "mobile")
+  .option("--concurrency <n>", "Parallel workers (1-8)", (v) => Number(v), 6)
+  .option("--cand-only", "Skip prod entirely (faster, no comparison)", false)
+  .option("--output <dir>", "Output directory", "./parity-output")
+  .option("--open", "Open the HTML report when done", false)
+  .action(async (opts) => {
+    process.exit(await cacheCommand(opts));
   });
 
 program

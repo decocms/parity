@@ -148,8 +148,11 @@ async function captureVitals(
       side,
       viewport,
       screenshotPath: `${screenshotsDir}/${safeName}-${viewport}-${side}.png`,
-      settleMs: 1500,
-      timeoutMs: 25_000,
+      settleMs: 1200,
+      timeoutMs: 20_000,
+      scrollToLoad: false,
+      skipScreenshot: true,
+      fast: true,
     });
     return cap;
   } finally {
