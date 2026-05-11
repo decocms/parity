@@ -3,33 +3,49 @@ import { join } from "node:path";
 import chalk from "chalk";
 import ora from "ora";
 import type { Browser, Page } from "playwright";
-import { buildCacheReport, type CacheReport } from "../diff/cache.ts";
+import { cacheCoverage } from "../checks/cache-coverage.ts";
+import type { CheckContext } from "../checks/index.ts";
 import { resolveSitemapUrls } from "../diff/sitemap.ts";
 import { launchBrowser, newContext } from "../engine/browser.ts";
 import { capturePage } from "../engine/collect.ts";
-import { createRunDir, newRunId, writeRunReportHtml } from "../storage/fs.ts";
-import type { NetworkEntry, Side, Viewport } from "../types/schema.ts";
+import { renderHtmlReport } from "../report/render.ts";
+import {
+  createRunDir,
+  newRunId,
+  writeRunReportHtml,
+  writeRunReportJson,
+} from "../storage/fs.ts";
+import type {
+  CheckResult,
+  FlowCapture,
+  FlowName,
+  Issue,
+  PageCapture,
+  ParityIgnore,
+  ParityRc,
+  Run,
+  Side,
+  Verdict,
+  Viewport,
+} from "../types/schema.ts";
 
 export interface CacheOptions {
   prod: string;
   cand: string;
   urls?: string;
-  /** Pages to crawl (default 30). */
   pages?: number;
   viewports?: string;
   concurrency?: number;
-  /** Skip prod entirely (cand-only mode). Default false (still captures prod for comparison). */
   candOnly?: boolean;
   output: string;
   open?: boolean;
 }
 
-interface PageNetwork {
+interface CaptureTask {
   path: string;
   viewport: Viewport;
   side: Side;
-  entries: NetworkEntry[];
-  durationMs: number;
+  capture?: PageCapture;
   error?: string;
 }
 
@@ -41,6 +57,7 @@ export async function cacheCommand(opts: CacheOptions): Promise<number> {
   const concurrency = Math.max(1, Math.min(opts.concurrency ?? 6, 8));
   const limit = opts.pages ?? 30;
   const candOnly = opts.candOnly ?? false;
+  const t0 = Date.now();
 
   const runId = newRunId();
   const paths = createRunDir(opts.output, runId);
@@ -60,18 +77,17 @@ export async function cacheCommand(opts: CacheOptions): Promise<number> {
   );
 
   const sides: Side[] = candOnly ? ["cand"] : ["prod", "cand"];
-  const tasks: PageNetwork[] = [];
+  const tasks: CaptureTask[] = [];
   for (const viewport of viewports) {
     for (const path of pagePaths) {
       for (const side of sides) {
-        tasks.push({ path, viewport, side, entries: [], durationMs: 0 });
+        tasks.push({ path, viewport, side });
       }
     }
   }
 
   let completed = 0;
   const total = tasks.length;
-  const t0 = Date.now();
   const progress = ora(`0/${total} captures`).start();
 
   let browser: Browser | null = null;
@@ -81,9 +97,7 @@ export async function cacheCommand(opts: CacheOptions): Promise<number> {
     await runWithConcurrency(tasks, concurrency, async (task) => {
       const url = new URL(task.path, task.side === "prod" ? opts.prod : opts.cand).toString();
       try {
-        const cap = await captureLite(browser!, task.viewport, task.side, url);
-        task.entries = cap.entries;
-        task.durationMs = cap.durationMs;
+        task.capture = await captureLite(browser!, task.viewport, task.side, url);
       } catch (err) {
         task.error = (err as Error).message;
       } finally {
@@ -95,19 +109,72 @@ export async function cacheCommand(opts: CacheOptions): Promise<number> {
     });
     progress.succeed(`${total} capture(s) em ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
-    // Aggregate cand entries
-    const candEntries: NetworkEntry[] = [];
-    const prodEntries: NetworkEntry[] = [];
-    for (const t of tasks) {
-      if (t.side === "cand") candEntries.push(...t.entries);
-      else prodEntries.push(...t.entries);
+    // Build canonical Run object using the captures
+    const allPageCaptures: PageCapture[] = tasks
+      .map((t) => t.capture)
+      .filter((c): c is PageCapture => !!c);
+
+    // Group into FlowCaptures by side+viewport for the renderer
+    const flowCaptures: FlowCapture[] = [];
+    for (const viewport of viewports) {
+      for (const side of sides) {
+        const pages = allPageCaptures.filter((p) => p.side === side && p.viewport === viewport);
+        if (pages.length === 0) continue;
+        flowCaptures.push({
+          flow: "homepage" as FlowName,
+          side,
+          viewport,
+          pages,
+          totalDurationMs: pages.reduce((s, p) => s + p.durationMs, 0),
+        });
+      }
     }
 
-    const candReport = buildCacheReport(candEntries, opts.cand);
-    const prodReport = prodEntries.length > 0 ? buildCacheReport(prodEntries, opts.prod) : null;
+    // Run only the cache-coverage check
+    const rc: ParityRc = { cep: "01310-100", selectors: {}, skipSteps: [] };
+    const ignore: ParityIgnore = {
+      ignoreSelectorsVisual: [],
+      ignoreRequestPatterns: [],
+      ignoreConsolePatterns: [],
+      ignoreMetaKeys: [],
+      toleratedDomDrift: {},
+    };
+    const checkCtx: CheckContext = {
+      prodPages: allPageCaptures.filter((p) => p.side === "prod"),
+      candPages: allPageCaptures.filter((p) => p.side === "cand"),
+      prodFlows: flowCaptures.filter((f) => f.side === "prod"),
+      candFlows: flowCaptures.filter((f) => f.side === "cand"),
+      rc,
+      ignore,
+      outDir: paths.runDir,
+      viewports,
+    };
+    const cacheResult: CheckResult = cacheCoverage(checkCtx);
 
-    const html = buildCacheHtml(opts, candReport, prodReport, tasks);
+    const allIssues: Issue[] = cacheResult.issues;
+    const verdict = computeVerdict([cacheResult], allIssues);
+    const run: Run = {
+      schemaVersion: "0.1",
+      id: runId,
+      timestamp: new Date().toISOString(),
+      prodUrl: opts.prod,
+      candUrl: opts.cand,
+      flows: ["homepage" as FlowName],
+      viewports,
+      cep: rc.cep,
+      durationMs: Date.now() - t0,
+      verdict,
+      topIssues: allIssues.slice(0, 10),
+      issues: allIssues,
+      checks: [cacheResult],
+      flowCaptures,
+    };
+
+    writeRunReportJson(paths.runDir, run);
+    const html = renderHtmlReport(run, paths.runDir);
     writeRunReportHtml(paths.runDir, html);
+
+    // Also keep a focused cache.json for CI
     writeFileSync(
       join(paths.runDir, "cache.json"),
       `${JSON.stringify(
@@ -116,12 +183,7 @@ export async function cacheCommand(opts: CacheOptions): Promise<number> {
           prodUrl: opts.prod,
           candUrl: opts.cand,
           pagesAnalyzed: pagePaths.length,
-          candReport: {
-            hitRate: candReport.hitRate,
-            opportunities: candReport.opportunities.length,
-            byCategory: candReport.byCategory,
-          },
-          prodReport: prodReport ? { hitRate: prodReport.hitRate } : null,
+          cacheCheck: cacheResult.data,
         },
         null,
         2,
@@ -129,9 +191,10 @@ export async function cacheCommand(opts: CacheOptions): Promise<number> {
       "utf8",
     );
 
-    printSummary(candReport, prodReport);
+    printSummary(cacheResult);
     console.log("");
     console.log(chalk.dim(`  → ${paths.reportHtml}`));
+    console.log(chalk.dim(`  💡 use 'parity serve ${runId}' pra preview com iframe proxy ativo`));
     console.log("");
 
     if (opts.open) {
@@ -148,9 +211,35 @@ export async function cacheCommand(opts: CacheOptions): Promise<number> {
   }
 }
 
-interface LiteCapture {
-  entries: NetworkEntry[];
-  durationMs: number;
+function computeVerdict(checks: CheckResult[], issues: Issue[]): Verdict {
+  const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const i of issues) counts[i.severity]++;
+  const checksPassed = checks.filter((c) => c.status === "pass").length;
+  const checksFailed = checks.filter((c) => c.status === "fail").length;
+  const checksSkipped = checks.filter((c) => c.status === "skipped").length;
+  const checksWarn = checks.filter((c) => c.status === "warn").length;
+  const score = Math.max(
+    0,
+    100 - counts.critical * 20 - counts.high * 8 - counts.medium * 3 - counts.low * 1,
+  );
+  const status: Verdict["status"] =
+    counts.critical > 0 || checksFailed > 0
+      ? "fail"
+      : counts.high > 0 || checksWarn > 0
+        ? "warn"
+        : "pass";
+  return {
+    status,
+    score,
+    critical: counts.critical,
+    high: counts.high,
+    medium: counts.medium,
+    low: counts.low,
+    checksRun: checks.length,
+    checksPassed,
+    checksFailed,
+    checksSkipped,
+  };
 }
 
 async function captureLite(
@@ -158,7 +247,7 @@ async function captureLite(
   viewport: Viewport,
   side: Side,
   url: string,
-): Promise<LiteCapture> {
+): Promise<PageCapture> {
   const ctx = await newContext(browser, { viewport, cohortCookieValue: "control" });
   const page: Page = await ctx.newPage();
   try {
@@ -173,7 +262,7 @@ async function captureLite(
       skipScreenshot: true,
       fast: true,
     });
-    return { entries: cap.network, durationMs: cap.durationMs };
+    return cap;
   } finally {
     await page.close().catch(() => undefined);
     await ctx.close().catch(() => undefined);
@@ -251,166 +340,18 @@ async function runWithConcurrency<T>(
   );
 }
 
-function printSummary(cand: CacheReport, prod: CacheReport | null): void {
+function printSummary(check: CheckResult): void {
+  const data = (check.data ?? {}) as {
+    hitRate?: number;
+    prodHitRate?: number;
+    opportunityCount?: number;
+    opportunityBytes?: number;
+  };
   console.log("");
   console.log(chalk.bold("  Summary:"));
   console.log(
-    `    ${chalk.green(`${(cand.hitRate * 100).toFixed(0)}%`)} cache hit rate (cand)${prod ? `  ${chalk.dim(`(prod: ${(prod.hitRate * 100).toFixed(0)}%)`)}` : ""}`,
+    `    ${chalk.green(`${((data.hitRate ?? 0) * 100).toFixed(0)}%`)} cache hit rate (cand)${data.prodHitRate != null ? `  ${chalk.dim(`(prod: ${(data.prodHitRate * 100).toFixed(0)}%)`)}` : ""}`,
   );
-  console.log(`    ${chalk.red(cand.opportunities.length)} oportunidades — assets cacheable em MISS`);
-  console.log(`    ${chalk.dim(cand.total)} requests analisados, ${chalk.dim(`${(cand.totalBytes / 1024).toFixed(0)} KB`)}`);
-  if (cand.opportunities.length > 0) {
-    console.log("");
-    console.log(chalk.bold("  Top 5 oportunidades:"));
-    for (const opp of cand.opportunities.slice(0, 5)) {
-      const sizeKb = ((opp.entry.bytes ?? 0) / 1024).toFixed(0);
-      try {
-        const u = new URL(opp.entry.url);
-        console.log(`    ${chalk.red(`${sizeKb} KB`)} ${chalk.dim(`[${opp.category}]`)} ${u.pathname}`);
-      } catch {
-        console.log(`    ${chalk.red(`${sizeKb} KB`)} ${chalk.dim(`[${opp.category}]`)} ${opp.entry.url}`);
-      }
-    }
-  }
-}
-
-function esc(s: string | number | null | undefined): string {
-  if (s == null) return "";
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function buildCacheHtml(
-  opts: CacheOptions,
-  cand: CacheReport,
-  prod: CacheReport | null,
-  tasks: PageNetwork[],
-): string {
-  const hitPct = (cand.hitRate * 100).toFixed(0);
-  const prodHitPct = prod ? (prod.hitRate * 100).toFixed(0) : "—";
-  const oppBytes = cand.opportunities.reduce((s, r) => s + (r.entry.bytes ?? 0), 0);
-  const totalPages = new Set(tasks.map((t) => t.path)).size;
-
-  const oppRows = cand.opportunities
-    .slice(0, 100)
-    .map((o) => {
-      const sizeKb = o.entry.bytes != null ? (o.entry.bytes / 1024).toFixed(1) : "—";
-      const u = o.entry.url;
-      return `<tr>
-        <td class="num">${sizeKb} KB</td>
-        <td><span class="net-cat cat-${o.category}">${o.category}</span></td>
-        <td><span class="net-cache cache-miss">${o.decision === "unknown" ? "miss?" : o.decision}</span></td>
-        <td class="url-cell"><a href="${esc(u)}" target="_blank" rel="noreferrer">${esc(humanizeUrl(u))}</a></td>
-      </tr>`;
-    })
-    .join("");
-
-  const catRows = (
-    Object.entries(cand.byCategory) as Array<[string, { count: number; bytes: number; hitRate: number }]>
-  )
-    .filter(([, i]) => i.count > 0)
-    .sort(([, a], [, b]) => b.bytes - a.bytes)
-    .map(([cat, i]) => {
-      const hr = (i.hitRate * 100).toFixed(0);
-      const cls = i.hitRate > 0.8 ? "good" : i.hitRate > 0.4 ? "neutral" : "bad";
-      return `<tr>
-        <td><span class="net-cat cat-${cat}">${cat}</span></td>
-        <td class="num">${i.count}</td>
-        <td class="num">${(i.bytes / 1024).toFixed(0)} KB</td>
-        <td class="num ${cls === "good" ? "delta-good" : cls === "bad" ? "delta-bad" : "delta-neutral"}">${hr}%</td>
-      </tr>`;
-    })
-    .join("");
-
-  return `<!DOCTYPE html>
-<html lang="pt-BR"><head><meta charset="utf-8"/><title>parity cache</title>
-<style>
-:root{--bg:#0b0e14;--card:#131720;--elev:#1a1f2b;--border:#232a37;--fg:#e6e8eb;--muted:#8a93a6;--green:#2ec27e;--red:#e5484d;--yellow:#f5a623;--accent:#4f7df3}
-*{box-sizing:border-box}
-body{margin:0;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;background:var(--bg);color:var(--fg);padding:24px;max-width:1200px;margin:0 auto;line-height:1.5}
-h1{font-size:20px;margin:0 0 8px 0}
-.urls{color:var(--muted);font-size:13px;margin-bottom:24px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:14px}
-.card h2{font-size:14px;margin:0 0 12px 0;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em}
-.hero-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-.hero-stat{background:var(--elev);border-radius:10px;padding:16px;text-align:center}
-.big-num{font-size:40px;font-weight:700;line-height:1}
-.big-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;font-weight:600;margin-top:6px}
-.hero-meta{font-size:12px;color:var(--muted);margin-top:6px}
-.delta-good{color:var(--green);font-weight:600}
-.delta-bad{color:var(--red);font-weight:600}
-.delta-neutral{color:var(--muted)}
-table{width:100%;border-collapse:collapse;font-size:12px}
-th,td{padding:6px 10px;border-bottom:1px solid var(--border);text-align:left}
-th{color:var(--muted);font-weight:500}
-td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
-.url-cell{max-width:540px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.url-cell a{color:var(--accent);text-decoration:none}
-.url-cell a:hover{text-decoration:underline}
-.net-cat{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;text-transform:uppercase;letter-spacing:0.04em;font-weight:600}
-.cat-document{background:rgba(79,125,243,0.15);color:#88aaff}
-.cat-static-asset{background:rgba(46,194,126,0.15);color:var(--green)}
-.cat-image{background:rgba(245,166,35,0.15);color:var(--yellow)}
-.cat-font{background:rgba(184,110,255,0.15);color:#b86eff}
-.cat-api{background:rgba(54,179,255,0.15);color:#36b3ff}
-.cat-third-party{background:rgba(138,147,166,0.15);color:var(--muted)}
-.cat-other{background:var(--elev);color:var(--muted)}
-.net-cache{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}
-.cache-hit{background:rgba(46,194,126,0.15);color:var(--green)}
-.cache-miss{background:rgba(229,72,77,0.15);color:var(--red)}
-.cache-bypass{background:rgba(138,147,166,0.15);color:var(--muted)}
-.hint{font-size:11px;color:var(--muted);margin-top:8px}
-details>summary{cursor:pointer;list-style:none;padding:4px 0}
-details>summary::-webkit-details-marker{display:none}
-details>summary::before{content:"▶";color:var(--muted);font-size:9px;margin-right:8px;display:inline-block;transition:transform .15s}
-details[open]>summary::before{transform:rotate(90deg)}
-</style></head><body>
-<h1>parity cache</h1>
-<div class="urls"><strong>cand</strong> ${esc(opts.cand)} · ${totalPages} páginas analisadas · ${tasks.length} captures</div>
-
-<div class="card">
-  <div class="hero-grid">
-    <div class="hero-stat">
-      <div class="big-num">${hitPct}%</div>
-      <div class="big-label">cache hit rate (cand)</div>
-      <div class="hero-meta">${prod ? `prod: ${prodHitPct}%` : "sem comparação prod"}</div>
-    </div>
-    <div class="hero-stat">
-      <div class="big-num">${cand.opportunities.length}</div>
-      <div class="big-label">oportunidades</div>
-      <div class="hero-meta">${(oppBytes / 1024).toFixed(0)} KB cacheável que vai MISS</div>
-    </div>
-    <div class="hero-stat">
-      <div class="big-num">${cand.total}</div>
-      <div class="big-label">requests analisados</div>
-      <div class="hero-meta">${(cand.totalBytes / 1024).toFixed(0)} KB total</div>
-    </div>
-  </div>
-  <div class="hint">Foco em cand — prod é só referência. Oportunidade = static-asset/image/font com hash na URL que está MISS em cand.</div>
-</div>
-
-<div class="card">
-  <h2>Por categoria (cand)</h2>
-  <table><thead><tr><th>Categoria</th><th class="num">Requests</th><th class="num">Bytes</th><th class="num">Hit rate</th></tr></thead><tbody>${catRows}</tbody></table>
-</div>
-
-<details class="card" open>
-  <summary><h2 style="display:inline;color:var(--fg)">❌ Top oportunidades — ${cand.opportunities.length} cacheable em MISS</h2></summary>
-  <div class="hint">Adicionar cache rule pra essas reduz ${(oppBytes / 1024).toFixed(0)} KB / ${cand.opportunities.length} requests.</div>
-  <table><thead><tr><th class="num">Size</th><th>Tipo</th><th>Cache</th><th>URL</th></tr></thead><tbody>${oppRows}</tbody></table>
-</details>
-
-</body></html>`;
-}
-
-function humanizeUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    return `${u.hostname}${u.pathname}${u.search ? `${u.search.slice(0, 40)}${u.search.length > 40 ? "…" : ""}` : ""}`;
-  } catch {
-    return url.slice(0, 120);
-  }
+  console.log(`    ${chalk.red(data.opportunityCount ?? 0)} oportunidades — ${((data.opportunityBytes ?? 0) / 1024).toFixed(0)} KB`);
+  console.log(`    ${chalk.dim(check.issues.length)} issue(s) gerada(s)`);
 }
