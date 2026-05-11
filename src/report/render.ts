@@ -408,6 +408,7 @@ export function renderHtmlReport(run: Run, runDir: string): string {
       <div class="tab" data-tab="sidebyside">Side-by-side</div>
       <div class="tab" data-tab="issues">Issues <span class="badge">${issueCount}</span></div>
       <div class="tab" data-tab="vitals">Vitals</div>
+      <div class="tab" data-tab="checks">Checks <span class="badge">${run.checks.length}</span></div>
       <div class="tab" data-tab="pages">Páginas</div>
       <div class="tab" data-tab="console">Console</div>
       <div class="tab" data-tab="network">Network</div>
@@ -416,7 +417,6 @@ export function renderHtmlReport(run: Run, runDir: string): string {
     <section class="panel" data-panel="summary">
       ${renderVerdict(run)}
       ${renderTopIssues(run, runDir)}
-      ${renderChecksTable(run)}
     </section>
     <section class="panel" data-panel="sidebyside">
       ${renderSideBySidePanel(run)}
@@ -426,6 +426,9 @@ export function renderHtmlReport(run: Run, runDir: string): string {
     </section>
     <section class="panel" data-panel="vitals">
       ${renderVitalsPanel(run)}
+    </section>
+    <section class="panel" data-panel="checks">
+      ${renderChecksTable(run)}
     </section>
     <section class="panel" data-panel="pages">
       ${renderPagesTable(run)}
