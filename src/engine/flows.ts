@@ -16,6 +16,10 @@ import { capturePage } from "./collect.ts";
 import { selectorsFor } from "./selectors.ts";
 import type { SelectorKey } from "./selectors.ts";
 
+export type StepProgressEvent =
+  | { phase: "start"; name: string; index: number; total: number }
+  | { phase: "end"; name: string; index: number; total: number; status: StepCapture["status"]; durationMs: number; note?: string };
+
 export interface FlowContext {
   baseUrl: string;
   side: Side;
@@ -30,7 +34,11 @@ export interface FlowContext {
   platform?: Platform;
   /** Max LLM-driven step recoveries per flow */
   recoveryBudget?: number;
+  /** Optional progress callback (each step start/end) */
+  onStep?: (event: StepProgressEvent) => void;
 }
+
+const PURCHASE_JOURNEY_TOTAL_STEPS = 8;
 
 function selFor(ctx: FlowContext, key: SelectorKey): string[] {
   return selectorsFor(key, { rc: ctx.rc, learned: ctx.learned, platform: ctx.platform });
@@ -177,9 +185,24 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
   const steps: StepCapture[] = [];
   const page = await ctx.ctx.newPage();
   let recoveryBudget = ctx.recoveryBudget ?? 3;
+  const total = PURCHASE_JOURNEY_TOTAL_STEPS;
+
+  const reportStart = (idx: number, name: string) => {
+    ctx.onStep?.({ phase: "start", name, index: idx, total });
+  };
+  const reportEnd = (
+    idx: number,
+    name: string,
+    status: StepCapture["status"],
+    durationMs: number,
+    note?: string,
+  ) => {
+    ctx.onStep?.({ phase: "end", name, index: idx, total, status, durationMs, note });
+  };
 
   try {
     // Step 1: home
+    reportStart(1, "visit-home");
     const homeCap = await capturePage(page, {
       url: ctx.baseUrl,
       side: ctx.side,
@@ -187,26 +210,30 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       screenshotPath: screenshotPath(ctx, "pj-1-home"),
     });
     pages.push(homeCap);
+    const step1Status: StepCapture["status"] = homeCap.status >= 200 && homeCap.status < 400 ? "ok" : "failed";
     steps.push({
       step: 1,
       name: "visit-home",
       side: ctx.side,
       viewport: ctx.viewport,
-      status: homeCap.status >= 200 && homeCap.status < 400 ? "ok" : "failed",
+      status: step1Status,
       durationMs: homeCap.durationMs,
       url: homeCap.finalUrl,
       screenshotPath: homeCap.screenshotPath,
     });
+    reportEnd(1, "visit-home", step1Status, homeCap.durationMs);
     if (homeCap.status >= 400 || homeCap.status === 0) {
       return { pages, steps };
     }
 
     // Step 2: navigate to a PLP (with LLM semantic pick)
+    reportStart(2, "navigate-plp");
     const plpHit = ctx.rc.plpUrlHint
       ? { url: new URL(ctx.rc.plpUrlHint, ctx.baseUrl).toString(), selector: "__hint__" }
       : await findCategoryUrl(page, ctx);
     if (!plpHit) {
       steps.push(makeSkipStep(2, "navigate-plp", ctx, "no category link found"));
+      reportEnd(2, "navigate-plp", "skipped", 0, "no category link found");
       return { pages, steps };
     }
     const t2 = Date.now();
@@ -217,23 +244,27 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       screenshotPath: screenshotPath(ctx, "pj-2-plp"),
     });
     pages.push(plpCap);
+    const step2Status: StepCapture["status"] = plpCap.status >= 200 && plpCap.status < 400 ? "ok" : "failed";
     steps.push({
       step: 2,
       name: "navigate-plp",
       side: ctx.side,
       viewport: ctx.viewport,
-      status: plpCap.status >= 200 && plpCap.status < 400 ? "ok" : "failed",
+      status: step2Status,
       durationMs: Date.now() - t2,
       url: plpCap.finalUrl,
       screenshotPath: plpCap.screenshotPath,
       selectorKey: "categoryLink",
       usedSelector: plpHit.selector,
     });
+    reportEnd(2, "navigate-plp", step2Status, Date.now() - t2);
 
     // Step 3: enter PDP
+    reportStart(3, "enter-pdp");
     const pdpHit = await findProductUrl(page, ctx);
     if (!pdpHit) {
       steps.push(makeSkipStep(3, "enter-pdp", ctx, "no product card found"));
+      reportEnd(3, "enter-pdp", "skipped", 0, "no product card found");
       return { pages, steps };
     }
     const t3 = Date.now();
@@ -244,43 +275,50 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       screenshotPath: screenshotPath(ctx, "pj-3-pdp"),
     });
     pages.push(pdpCap);
+    const step3Status: StepCapture["status"] = pdpCap.status >= 200 && pdpCap.status < 400 ? "ok" : "failed";
     steps.push({
       step: 3,
       name: "enter-pdp",
       side: ctx.side,
       viewport: ctx.viewport,
-      status: pdpCap.status >= 200 && pdpCap.status < 400 ? "ok" : "failed",
+      status: step3Status,
       durationMs: Date.now() - t3,
       url: pdpCap.finalUrl,
       screenshotPath: pdpCap.screenshotPath,
       selectorKey: "productCard",
       usedSelector: pdpHit.selector,
     });
+    reportEnd(3, "enter-pdp", step3Status, Date.now() - t3);
 
     // Step 4 (conditional): shipping calc on PDP
+    reportStart(4, "shipping-calc-pdp");
     const cepInputPdp = await firstVisible(page, selFor(ctx, "cepInputPdp"));
     if (cepInputPdp) {
       const t4 = Date.now();
       const ok = await fillCep(page, cepInputPdp, ctx.rc.cep);
       const sp = screenshotPath(ctx, "pj-4-shipping-pdp");
       await page.screenshot({ path: sp, fullPage: false }).catch(() => undefined);
+      const step4Status: StepCapture["status"] = ok ? "ok" : "failed";
       steps.push({
         step: 4,
         name: "shipping-calc-pdp",
         side: ctx.side,
         viewport: ctx.viewport,
-        status: ok ? "ok" : "failed",
+        status: step4Status,
         durationMs: Date.now() - t4,
         screenshotPath: sp,
         detail: { cepUsed: ctx.rc.cep },
         selectorKey: "cepInputPdp",
         usedSelector: cepInputPdp,
       });
+      reportEnd(4, "shipping-calc-pdp", step4Status, Date.now() - t4);
     } else {
       steps.push(makeSkipStep(4, "shipping-calc-pdp", ctx, "no CEP input on PDP"));
+      reportEnd(4, "shipping-calc-pdp", "skipped", 0, "no CEP input on PDP");
     }
 
     // Step 5: add to cart (with LLM recovery)
+    reportStart(5, "add-to-cart");
     let buyHit = await firstVisibleLocator(page, selFor(ctx, "buyButton"));
     let buyRecovered = false;
     if (!buyHit && recoveryBudget > 0) {
@@ -293,6 +331,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     }
     if (!buyHit) {
       steps.push(makeSkipStep(5, "add-to-cart", ctx, "no buy button found (recovery exhausted)"));
+      reportEnd(5, "add-to-cart", "skipped", 0, "no buy button found");
       return { pages, steps };
     }
     const t5 = Date.now();
@@ -312,8 +351,10 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       usedSelector: buyHit.selector,
       recoveredByLlm: buyRecovered || undefined,
     });
+    reportEnd(5, "add-to-cart", "ok", Date.now() - t5);
 
     // Step 6: open minicart
+    reportStart(6, "open-minicart");
     const t6 = Date.now();
     let miniHit = await firstVisibleLocator(page, selFor(ctx, "minicartTrigger"));
     let miniRecovered = false;
@@ -343,31 +384,37 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       usedSelector: miniHit?.selector,
       recoveredByLlm: miniRecovered || undefined,
     });
+    reportEnd(6, "open-minicart", "ok", Date.now() - t6);
 
     // Step 7: shipping calc in cart
+    reportStart(7, "shipping-calc-cart");
     const cepInputCart = await firstVisible(page, selFor(ctx, "cepInputCart"));
     if (cepInputCart) {
       const t7 = Date.now();
       const ok = await fillCep(page, cepInputCart, ctx.rc.cep);
       const sp7 = screenshotPath(ctx, "pj-7-shipping-cart");
       await page.screenshot({ path: sp7, fullPage: false }).catch(() => undefined);
+      const step7Status: StepCapture["status"] = ok ? "ok" : "failed";
       steps.push({
         step: 7,
         name: "shipping-calc-cart",
         side: ctx.side,
         viewport: ctx.viewport,
-        status: ok ? "ok" : "failed",
+        status: step7Status,
         durationMs: Date.now() - t7,
         screenshotPath: sp7,
         detail: { cepUsed: ctx.rc.cep },
         selectorKey: "cepInputCart",
         usedSelector: cepInputCart,
       });
+      reportEnd(7, "shipping-calc-cart", step7Status, Date.now() - t7);
     } else {
       steps.push(makeSkipStep(7, "shipping-calc-cart", ctx, "no CEP input in cart"));
+      reportEnd(7, "shipping-calc-cart", "skipped", 0, "no CEP input in cart");
     }
 
     // Step 8: go to checkout
+    reportStart(8, "go-checkout");
     let checkoutHit = await firstVisibleLocator(page, selFor(ctx, "checkoutButton"));
     let checkoutRecovered = false;
     if (!checkoutHit && recoveryBudget > 0) {
@@ -380,6 +427,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     }
     if (!checkoutHit) {
       steps.push(makeSkipStep(8, "go-checkout", ctx, "no checkout button found (recovery exhausted)"));
+      reportEnd(8, "go-checkout", "skipped", 0, "no checkout button found");
       return { pages, steps };
     }
     const t8 = Date.now();
@@ -392,12 +440,13 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     await page.screenshot({ path: sp8, fullPage: false }).catch(() => undefined);
     const checkoutUrl = page.url();
     const reachedCheckout = /\/checkout/i.test(checkoutUrl);
+    const step8Status: StepCapture["status"] = reachedCheckout ? "ok" : "failed";
     steps.push({
       step: 8,
       name: "go-checkout",
       side: ctx.side,
       viewport: ctx.viewport,
-      status: reachedCheckout ? "ok" : "failed",
+      status: step8Status,
       durationMs: Date.now() - t8,
       url: checkoutUrl,
       screenshotPath: sp8,
@@ -405,6 +454,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       usedSelector: checkoutHit.selector,
       recoveredByLlm: checkoutRecovered || undefined,
     });
+    reportEnd(8, "go-checkout", step8Status, Date.now() - t8);
 
     return { pages, steps };
   } finally {

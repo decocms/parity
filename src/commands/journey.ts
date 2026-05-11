@@ -5,7 +5,7 @@ import ora from "ora";
 import type { Browser } from "playwright";
 import { launchBrowser, newContext, stopTracing } from "../engine/browser.ts";
 import { installVitalsCollector } from "../engine/collect.ts";
-import { runFlow } from "../engine/flows.ts";
+import { runFlow, type StepProgressEvent } from "../engine/flows.ts";
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
 import { detectPlatform, type Platform } from "../learned/platform.ts";
 import { loadLearned } from "../learned/repo.ts";
@@ -139,38 +139,86 @@ export async function journeyCommand(opts: JourneyOptions): Promise<number> {
   let browser: Browser | null = null;
   const flowCaptures: FlowCapture[] = [];
 
+  const stepLabel = (name: string) =>
+    ({
+      "visit-home": "Testing home",
+      "navigate-plp": "Entering category (PLP)",
+      "enter-pdp": "Entering product (PDP)",
+      "shipping-calc-pdp": "Testing shipping calc on PDP",
+      "add-to-cart": "Add to cart",
+      "open-minicart": "Opening minicart",
+      "shipping-calc-cart": "Testing shipping calc on cart",
+      "go-checkout": "Going to checkout",
+    })[name] ?? name;
+
+  const onStepFor = (viewport: Viewport, side: Side) => (event: StepProgressEvent) => {
+    if (opts.json) return; // keep stdout machine-readable
+    const sideTag = side === "prod" ? chalk.cyan("prod") : chalk.magenta("cand");
+    const prefix = `  ${chalk.dim(`[${viewport}/`)}${sideTag}${chalk.dim("]")}`;
+    if (event.phase === "start") {
+      console.log(`${prefix} ${chalk.dim(`${event.index}/${event.total}`)} ▶ ${chalk.bold(stepLabel(event.name))}`);
+    } else {
+      const glyph =
+        event.status === "ok"
+          ? chalk.green("✓")
+          : event.status === "skipped"
+            ? chalk.yellow("○")
+            : chalk.red("✗");
+      const noteText = event.note ? chalk.dim(` (${event.note})`) : "";
+      const time = chalk.dim(`${(event.durationMs / 1000).toFixed(1)}s`);
+      console.log(
+        `${prefix} ${chalk.dim(`${event.index}/${event.total}`)} ${glyph} ${stepLabel(event.name)} ${time}${noteText}`,
+      );
+    }
+  };
+
+  async function runOneSide(
+    browserInstance: Browser,
+    viewport: Viewport,
+    side: Side,
+  ): Promise<FlowCapture> {
+    const baseUrl = side === "prod" ? opts.prod : opts.cand;
+    const tracePath = join(paths.tracesDir, `${viewport}-${side}.zip`);
+    const ctx = await newContext(browserInstance, {
+      viewport,
+      tracesDir: paths.tracesDir,
+      cohortCookieValue: "control",
+    });
+    await installVitalsCollector(ctx);
+    try {
+      const cap = await runFlow("purchase-journey", {
+        baseUrl,
+        side,
+        viewport,
+        rc,
+        ctx,
+        outDir: paths.screenshotsDir,
+        learned,
+        platform,
+        recoveryBudget: 3,
+        onStep: onStepFor(viewport, side),
+      });
+      return cap;
+    } finally {
+      await stopTracing(ctx, tracePath).catch(() => undefined);
+      await ctx.close();
+    }
+  }
+
   try {
     browser = await launchBrowser({ headless: true });
+    spinner?.succeed("Browser pronto");
 
     for (const viewport of viewports) {
-      for (const side of ["prod", "cand"] as Side[]) {
-        if (spinner) spinner.text = `[${viewport}/${side}] purchase-journey…`;
-        const baseUrl = side === "prod" ? opts.prod : opts.cand;
-        const tracePath = join(paths.tracesDir, `${viewport}-${side}.zip`);
-        const ctx = await newContext(browser, {
-          viewport,
-          tracesDir: paths.tracesDir,
-          cohortCookieValue: "control",
-        });
-        await installVitalsCollector(ctx);
-        const cap = await runFlow("purchase-journey", {
-          baseUrl,
-          side,
-          viewport,
-          rc,
-          ctx,
-          outDir: paths.screenshotsDir,
-          learned,
-          platform,
-          recoveryBudget: 3,
-        });
-        flowCaptures.push(cap);
-        await stopTracing(ctx, tracePath).catch(() => undefined);
-        await ctx.close();
-      }
+      if (!opts.json) console.log(chalk.bold(`\n  ── ${viewport} ─────────────────────────────────────────────`));
+      // Run prod and cand in PARALLEL (cuts wall time ~2x)
+      const [prodCap, candCap] = await Promise.all([
+        runOneSide(browser, viewport, "prod"),
+        runOneSide(browser, viewport, "cand"),
+      ]);
+      flowCaptures.push(prodCap, candCap);
     }
-
-    spinner?.succeed("Jornada coletada");
+    if (!opts.json) console.log("");
 
     // Build per-viewport step rows comparing prod vs cand
     const rows: StepRow[] = buildRows(flowCaptures, viewports);
@@ -416,51 +464,146 @@ function buildJourneyHtml(
   rows: StepRow[],
   failures: JourneyFailure[],
 ): string {
-  // Light HTML, no full report dependencies — just step matrix
   const failed = failures.length;
   const headerStatus =
     failures.some((f) => f.critical)
-      ? '<span style="color:#e5484d">FAIL</span>'
+      ? '<span class="status fail">FAIL</span>'
       : failed > 0
-        ? '<span style="color:#f5a623">WARN</span>'
-        : '<span style="color:#2ec27e">PASS</span>';
+        ? '<span class="status warn">WARN</span>'
+        : '<span class="status pass">PASS</span>';
+  void flowCaptures;
+
+  const viewports = [...new Set(rows.map((r) => r.viewport))];
+
   return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"/><title>parity journey</title>
+<html><head><meta charset="utf-8"/><title>parity journey · ${headerStatus.replace(/<[^>]+>/g, "")}</title>
 <style>
-body{margin:0;font-family:-apple-system,sans-serif;background:#0b0e14;color:#e6e8eb;padding:24px}
-h1{font-size:18px;margin:0 0 8px 0}
-.urls{color:#8a93a6;font-size:13px;margin-bottom:24px}
-table{border-collapse:collapse;width:100%;margin-bottom:24px}
-td,th{padding:8px 12px;border-bottom:1px solid #232a37;font-size:13px;text-align:left}
-th{color:#8a93a6;font-weight:500}
-.ok{color:#2ec27e}.fail{color:#e5484d}.skip{color:#f5a623}.missing{color:#8a93a6}
-.reason{font-size:12px;color:#8a93a6}
+:root{--bg:#0b0e14;--card:#131720;--elev:#1a1f2b;--border:#232a37;--fg:#e6e8eb;--muted:#8a93a6;--green:#2ec27e;--yellow:#f5a623;--red:#e5484d;--prod:#36b3ff;--cand:#b86eff}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;background:var(--bg);color:var(--fg);padding:24px;line-height:1.5}
+h1{font-size:20px;margin:0 0 8px 0;display:flex;align-items:center;gap:12px}
+.urls{color:var(--muted);font-size:13px;margin-bottom:24px;word-break:break-all}
+.status{font-size:13px;font-weight:700;padding:4px 10px;border-radius:6px;text-transform:uppercase;letter-spacing:0.05em}
+.status.pass{background:rgba(46,194,126,0.15);color:var(--green)}
+.status.warn{background:rgba(245,166,35,0.15);color:var(--yellow)}
+.status.fail{background:rgba(229,72,77,0.15);color:var(--red)}
+h2{font-size:13px;font-weight:600;margin:32px 0 12px 0;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted)}
+.step{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px}
+.step-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.step-num{font-size:11px;color:var(--muted);font-weight:600;background:var(--elev);padding:2px 8px;border-radius:4px}
+.step-name{font-size:15px;font-weight:600;flex:1}
+.step-state{display:flex;gap:8px}
+.state-pill{font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:0.04em}
+.state-pill.ok{background:rgba(46,194,126,0.15);color:var(--green)}
+.state-pill.fail{background:rgba(229,72,77,0.15);color:var(--red)}
+.state-pill.skipped{background:rgba(245,166,35,0.15);color:var(--yellow)}
+.state-pill.missing{background:rgba(138,147,166,0.15);color:var(--muted)}
+.step-meta{font-size:12px;color:var(--muted);margin-top:8px}
+.step-note{font-size:12px;color:var(--yellow);margin-top:6px}
+.shots{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.shot{position:relative;background:var(--elev);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.shot .label{position:absolute;top:8px;left:8px;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;text-transform:uppercase;letter-spacing:0.05em;z-index:1;color:white;backdrop-filter:blur(8px)}
+.shot.prod .label{background:var(--prod)}
+.shot.cand .label{background:var(--cand)}
+.shot img{display:block;width:100%;height:auto;cursor:zoom-in}
+.shot.missing{display:flex;align-items:center;justify-content:center;height:200px;color:var(--muted);font-size:12px;font-style:italic}
+.summary{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-top:24px;font-size:13px}
+.summary .row{display:flex;justify-content:space-between;padding:4px 0}
+.fail-list{margin-top:12px}
+.fail-list li{margin-bottom:6px;color:var(--fg)}
+.legend{font-size:11px;color:var(--muted);margin-bottom:16px}
+.legend .swatch{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;margin-right:4px}
+.swatch.prod{background:var(--prod)}
+.swatch.cand{background:var(--cand)}
+/* zoom modal */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,0.9);display:none;align-items:flex-start;justify-content:center;padding:24px;z-index:100;cursor:zoom-out;overflow:auto}
+.modal.open{display:flex}
+.modal img{max-width:100%;height:auto;border-radius:8px}
 </style></head><body>
-<h1>parity journey · ${headerStatus}</h1>
-<div class="urls">prod ${escapeHtml(opts.prod)} · cand ${escapeHtml(opts.cand)} · CEP ${escapeHtml(opts.cep)}</div>
-${[...new Set(rows.map((r) => r.viewport))]
+<h1>parity journey ${headerStatus}</h1>
+<div class="urls">
+  <span class="legend"><span class="swatch prod"></span>prod (Fresh): ${escapeHtml(opts.prod)}</span><br/>
+  <span class="legend"><span class="swatch cand"></span>cand (TanStack): ${escapeHtml(opts.cand)}</span><br/>
+  <span style="color:var(--muted);font-size:12px">CEP: ${escapeHtml(opts.cep)}</span>
+</div>
+${viewports
   .map((vp) => {
     const vrows = rows.filter((r) => r.viewport === vp);
-    return `<h2 style="font-size:14px;margin:24px 0 8px 0;text-transform:uppercase">${vp}</h2>
-<table><thead><tr><th>Step</th><th>prod</th><th>cand</th><th>Δ</th><th>Note</th></tr></thead>
-<tbody>${vrows
-      .map((r) => {
-        const noteCand = r.cand?.note ? `<span class="reason">${escapeHtml(r.cand.note)}</span>` : "";
-        const isFail = r.prod?.status === "ok" && r.cand?.status !== "ok";
-        const delta = isFail ? '<span class="fail">FAIL</span>' : "";
-        return `<tr>
-        <td>${escapeHtml(STEP_LABELS[r.name] ?? r.name)}</td>
-        <td class="${cssClass(r.prod?.status)}">${glyph(r.prod?.status)}</td>
-        <td class="${cssClass(r.cand?.status)}">${glyph(r.cand?.status)}</td>
-        <td>${delta}</td>
-        <td>${noteCand}</td>
-      </tr>`;
-      })
-      .join("")}</tbody></table>`;
+    return `<h2>${vp}</h2>${vrows.map((r) => renderStepCard(r)).join("")}`;
   })
   .join("")}
-<p class="urls">${flowCaptures.length} flow capture(s) · ${rows.length} step(s) compared</p>
+${renderSummaryBlock(rows, failures)}
+<div id="zoom" class="modal" onclick="this.classList.remove('open')"><img id="zoomImg" alt=""/></div>
+<script>
+document.querySelectorAll('.shot img').forEach(function(img){
+  img.addEventListener('click', function(){
+    var modal = document.getElementById('zoom');
+    var modalImg = document.getElementById('zoomImg');
+    modalImg.src = img.src;
+    modal.classList.add('open');
+  });
+});
+</script>
 </body></html>`;
+}
+
+function renderStepCard(r: StepRow): string {
+  const label = STEP_LABELS[r.name] ?? r.name;
+  const prodStatus = r.prod?.status ?? "missing";
+  const candStatus = r.cand?.status ?? "missing";
+  const note = r.cand?.note ?? r.prod?.note ?? "";
+  const prodDur = r.prod?.durationMs ?? 0;
+  const candDur = r.cand?.durationMs ?? 0;
+  return `<div class="step">
+    <div class="step-head">
+      <span class="step-num">${escapeHtml(label.split(".")[0] ?? "?")}</span>
+      <span class="step-name">${escapeHtml(label.replace(/^\d+\.\s*/, ""))}</span>
+      <span class="step-state">
+        <span class="state-pill ${prodStatus}">prod · ${escapeHtml(prodStatus)}</span>
+        <span class="state-pill ${candStatus}">cand · ${escapeHtml(candStatus)}</span>
+      </span>
+    </div>
+    <div class="step-meta">prod ${(prodDur / 1000).toFixed(1)}s · cand ${(candDur / 1000).toFixed(1)}s${r.prod?.url || r.cand?.url ? ` · URL: <code>${escapeHtml((r.cand?.url ?? r.prod?.url) ?? "")}</code>` : ""}</div>
+    ${note ? `<div class="step-note">${escapeHtml(note)}</div>` : ""}
+    <div class="shots">
+      ${renderShot("prod", r.prod?.screenshotPath)}
+      ${renderShot("cand", r.cand?.screenshotPath)}
+    </div>
+  </div>`;
+}
+
+function renderShot(side: "prod" | "cand", path: string | undefined): string {
+  if (!path) {
+    return `<div class="shot missing"><span class="label" style="position:static;background:var(--muted)">${side}</span>&nbsp;sem screenshot</div>`;
+  }
+  // Path is absolute (or relative to runDir); we are running from runDir so it's already screenshots/...
+  const rel = path.split("/screenshots/").pop();
+  const src = rel ? `screenshots/${rel}` : path;
+  return `<div class="shot ${side}"><span class="label">${side}</span><img src="${escapeHtml(src)}" alt="${side}" loading="lazy"/></div>`;
+}
+
+function renderSummaryBlock(rows: StepRow[], failures: JourneyFailure[]): string {
+  const byVp = new Map<Viewport, { passed: number; total: number }>();
+  for (const r of rows) {
+    const cur = byVp.get(r.viewport) ?? { passed: 0, total: 0 };
+    cur.total++;
+    if (r.cand?.status === "ok") cur.passed++;
+    byVp.set(r.viewport, cur);
+  }
+  const rowsHtml = [...byVp]
+    .map(([vp, { passed, total }]) => `<div class="row"><span>${vp}</span><span>${passed}/${total} steps em cand</span></div>`)
+    .join("");
+  const failList = failures
+    .map(
+      (f) =>
+        `<li>${f.critical ? '<strong style="color:var(--red)">[critical]</strong>' : '<strong style="color:var(--yellow)">[warn]</strong>'} <code>${f.viewport}</code> · <code>${f.step}</code> — ${escapeHtml(f.reason)}</li>`,
+    )
+    .join("");
+  return `<div class="summary">
+    <strong>Summary</strong>
+    ${rowsHtml}
+    ${failures.length > 0 ? `<ul class="fail-list">${failList}</ul>` : '<div style="color:var(--green);margin-top:8px">✓ jornada completa em cand</div>'}
+  </div>`;
 }
 
 function glyph(s: StepCapture["status"] | undefined): string {
