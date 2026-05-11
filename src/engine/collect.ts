@@ -175,7 +175,7 @@ async function safeBodySize(resp: Response): Promise<number | null> {
 
 function parseIntOrNull(v: string | undefined): number | null {
   if (!v) return null;
-  const n = parseInt(v, 10);
+  const n = Number.parseInt(v, 10);
   return Number.isFinite(n) ? n : null;
 }
 
