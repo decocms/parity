@@ -375,6 +375,9 @@ export const REPORT_CSS = `
   .sbs-frame .frame-title { text-align: center; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
   .sbs-frame .frame-url { text-align: center; font-size: 11px; color: var(--text-muted); margin-bottom: 8px; word-break: break-all; max-width: 375px; }
   .sbs-iframe { width: 375px; height: 78vh; border: 1px solid var(--border-default); border-radius: 12px; background: white; }
+  .sbs-status { font-size: 12px; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; }
+  .sbs-status.ok { background: rgba(46,194,126,0.12); color: var(--state-good); border: 1px solid rgba(46,194,126,0.3); }
+  .sbs-status.warn { background: rgba(245,166,35,0.12); color: var(--state-warn); border: 1px solid rgba(245,166,35,0.3); }
 
   /* LLM Prompt panel */
   .prompt-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
@@ -673,6 +676,15 @@ export const REPORT_JS = `
 
     // ---- Side-by-side iframe controller ----
     var sbsState = window.__parity_sbs || {};
+    var proxyBase = window.__parity_proxy; // set by 'parity serve' on the served page
+    function proxied(u) { return proxyBase ? proxyBase + encodeURIComponent(u) : u; }
+    var statusEl = document.getElementById('sbs-status');
+    if (statusEl) {
+      statusEl.textContent = proxyBase
+        ? '✓ servidor proxy ativo — iframes contornam X-Frame-Options'
+        : '⚠ sem proxy (file://) — sites com X-Frame-Options vão aparecer vazios. Use "parity serve <runId>" pra subir o proxy local.';
+      statusEl.className = proxyBase ? 'sbs-status ok' : 'sbs-status warn';
+    }
     if (sbsState.pairs && sbsState.pairs.length > 0) {
       var current = 0;
       var syncEnabled = true;
@@ -687,8 +699,8 @@ export const REPORT_JS = `
         current = idx;
         var pair = sbsState.pairs[idx];
         if (!pair) return;
-        iframeProd.src = pair.prodUrl;
-        iframeCand.src = pair.candUrl;
+        iframeProd.src = proxied(pair.prodUrl);
+        iframeCand.src = proxied(pair.candUrl);
         urlProdEl.textContent = pair.prodUrl;
         urlCandEl.textContent = pair.candUrl;
         btns.forEach(function(b) {

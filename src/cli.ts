@@ -10,6 +10,7 @@ import { listCommand } from "./commands/list.ts";
 import { promptCommand } from "./commands/prompt.ts";
 import { reportCommand } from "./commands/report.ts";
 import { runCommand } from "./commands/run.ts";
+import { serveCommand } from "./commands/serve.ts";
 
 const program = new Command();
 
@@ -74,6 +75,19 @@ program
   .option("--output <dir>", "Output directory", "./parity-output")
   .action((opts) => {
     process.exit(listCommand(opts.output));
+  });
+
+program
+  .command("serve")
+  .argument("<runId>", "Run ID to serve")
+  .description(
+    "Sobe um HTTP server local que serve o report e faz proxy de iframes externos (remove X-Frame-Options/CSP), tornando a aba Side-by-side funcional pra qualquer site.",
+  )
+  .option("--output <dir>", "Output directory where runs live", "./parity-output")
+  .option("--port <n>", "Fixed port (default: auto-pick free port)", (v) => Number(v))
+  .option("--no-open", "Don't open the browser automatically")
+  .action(async (runId, opts) => {
+    process.exit(await serveCommand(runId, opts));
   });
 
 program

@@ -728,11 +728,12 @@ function renderSideBySidePanel(run: Run): string {
   return `
   <div class="card">
     <h2>Side-by-side mobile</h2>
-    <div class="hint">Compare prod (Fresh, esquerda) com cand (TanStack, direita) em viewport mobile. Scroll sync funciona em iframes same-origin ou quando o site implementa <code>postMessage</code> handler.</div>
+    <div class="hint">Compare prod (Fresh, esquerda) com cand (TanStack, direita) em viewport mobile. Scroll sync funciona quando proxy está ativo OU quando o site implementa <code>postMessage</code> handler.</div>
+    <div id="sbs-status" class="sbs-status warn">carregando…</div>
     <div class="sbs-toolbar">
       ${pairs.map((p, i) => `<button data-sbs-btn="${i}">${esc(p.label)}</button>`).join("")}
       <label class="label"><input type="checkbox" id="sbs-sync" checked/> Scroll sincronizado</label>
-      <div class="toolbar-right">se o site bloquear iframe (X-Frame-Options/CSP), aparecerá frame vazio</div>
+      <div class="toolbar-right">dica: use <code>parity serve &lt;runId&gt;</code> pra contornar X-Frame-Options</div>
     </div>
     <div class="sbs-container">
       <div class="sbs-frame">
