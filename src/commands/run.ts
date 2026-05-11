@@ -9,9 +9,20 @@ import { launchBrowser, newContext, stopTracing } from "../engine/browser.ts";
 import { installVitalsCollector } from "../engine/collect.ts";
 import { runFlow } from "../engine/flows.ts";
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
+import { detectPlatform, type Platform } from "../learned/platform.ts";
+import {
+  type LearnedSelectors,
+  loadLearned,
+  promoteFromLlm,
+  recordFailure,
+  recordSuccess,
+  saveLearned,
+  type SelectorKey,
+} from "../learned/repo.ts";
 import { aggregateIssues } from "../llm/aggregate-issues.ts";
 import { isLlmAvailable } from "../llm/client.ts";
 import { discoverSelectorsFromUrl } from "../llm/discover-selectors.ts";
+import { fingerprintPdp, matchPdps } from "../llm/match-pdp.ts";
 import { renderHtmlReport } from "../report/render.ts";
 import { compareToBaseline, loadBaseline } from "../storage/baselines.ts";
 import {
@@ -48,6 +59,8 @@ export interface RunOptions {
   autoSelectors?: boolean;
   /** Force discovery to re-run even if a cached entry exists */
   refreshSelectors?: boolean;
+  /** When false, don't write to learned-selectors.json (read-only mode) */
+  learn?: boolean;
 }
 
 const SEVERITY_RANK: Record<Issue["severity"], number> = {
@@ -69,12 +82,27 @@ export async function runCommand(opts: RunOptions): Promise<number> {
   rc.cep = opts.cep || rc.cep;
   const ignore = loadParityIgnore();
 
+  // Load learned-selectors library + detect platform from prod home
+  const learned = loadLearned();
+  const learnedBefore = JSON.stringify(learned);
+  let platform: Platform = "custom";
+  const prodHomeHtml = await fetchHomeHtml(opts.prod);
+  if (prodHomeHtml) {
+    platform = detectPlatform({ url: opts.prod, html: prodHomeHtml });
+    if (platform !== "custom") {
+      console.log(chalk.dim(`  Detected platform: ${platform}`));
+    }
+  }
+  const prodHost = hostOf(opts.prod);
+  let promotedCount = 0;
+  let deprecatedCount = 0;
+
   // LLM-based selector discovery (auto, but user .parityrc.json overrides always win)
   const wantsAutoSelectors = opts.autoSelectors !== false && isLlmAvailable();
   if (wantsAutoSelectors) {
     const discoverSpinner = ora("Descobrindo seletores via LLM (analisando home prod)…").start();
     try {
-      const html = await fetchHomeHtml(opts.prod);
+      const html = prodHomeHtml ?? (await fetchHomeHtml(opts.prod));
       if (html) {
         const discovered = await discoverSelectorsFromUrl(opts.prod, html, {
           noCache: opts.refreshSelectors === true,
@@ -144,9 +172,29 @@ export async function runCommand(opts: RunOptions): Promise<number> {
             rc,
             ctx,
             outDir: paths.screenshotsDir,
+            learned,
+            platform,
+            recoveryBudget: 3,
           });
           allFlowCaptures.push(cap);
           for (const p of cap.pages) allPageCaptures.push(p);
+
+          // Promotion loop: update learned-selectors from this flow's outcomes
+          if (opts.learn !== false) {
+            for (const step of cap.steps ?? []) {
+              if (!step.selectorKey || !step.usedSelector) continue;
+              const key = step.selectorKey as SelectorKey;
+              if (step.recoveredByLlm) {
+                promoteFromLlm(learned, platform, key, step.usedSelector, prodHost);
+                promotedCount++;
+              } else if (step.status === "ok") {
+                recordSuccess(learned, platform, key, step.usedSelector, prodHost);
+              } else if (step.status === "failed") {
+                const before = recordFailure(learned, platform, key, step.usedSelector, prodHost);
+                if (before?.deprecated) deprecatedCount++;
+              }
+            }
+          }
         }
 
         await stopTracing(ctx, tracePath).catch(() => undefined);
@@ -154,6 +202,27 @@ export async function runCommand(opts: RunOptions): Promise<number> {
       }
     }
     spinner.succeed("Coleta concluída");
+
+    // LLM PDP cross-site matcher: confirm prod and cand opened the same product
+    if (isLlmAvailable()) {
+      const prodPdp = findPdpCapture(allFlowCaptures, "prod");
+      const candPdp = findPdpCapture(allFlowCaptures, "cand");
+      if (prodPdp && candPdp) {
+        const fpProd = fingerprintPdp(prodPdp.html);
+        const fpCand = fingerprintPdp(candPdp.html);
+        const verdict = await matchPdps(fpProd, fpCand);
+        if (verdict !== "same") {
+          spinner.warn(
+            `PDP cross-site matcher: '${verdict}' (prod="${fpProd.name ?? "?"}" cand="${fpCand.name ?? "?"}")`,
+          );
+        }
+      }
+    }
+
+    // Persist learned-selectors if it changed
+    if (opts.learn !== false && JSON.stringify(learned) !== learnedBefore) {
+      saveLearned(learned);
+    }
 
     spinner.start("Rodando checks…");
     const checkCtx: CheckContext = {
@@ -231,7 +300,7 @@ export async function runCommand(opts: RunOptions): Promise<number> {
     const html = renderHtmlReport(run, paths.runDir);
     writeRunReportHtml(paths.runDir, html);
 
-    printSummary(run, paths.reportHtml);
+    printSummary(run, paths.reportHtml, { promotedCount, deprecatedCount, platform });
 
     if (opts.open) {
       await open(paths.reportHtml).catch(() => undefined);
@@ -309,7 +378,30 @@ async function fetchHomeHtml(url: string): Promise<string | null> {
   }
 }
 
-function printSummary(run: Run, htmlPath: string): void {
+function findPdpCapture(flows: FlowCapture[], side: Side): PageCapture | undefined {
+  for (const fc of flows) {
+    if (fc.side !== side) continue;
+    if (fc.flow !== "purchase-journey" && fc.flow !== "pdp") continue;
+    // PDP is the last page in the flow
+    const last = fc.pages[fc.pages.length - 1];
+    if (last) return last;
+  }
+  return undefined;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
+function printSummary(
+  run: Run,
+  htmlPath: string,
+  meta: { promotedCount: number; deprecatedCount: number; platform: Platform },
+): void {
   const { verdict } = run;
   const emoji = verdict.status === "pass" ? chalk.green("✔") : verdict.status === "warn" ? chalk.yellow("⚠") : chalk.red("✖");
   const score = verdict.status === "pass" ? chalk.green(verdict.score) : verdict.status === "warn" ? chalk.yellow(verdict.score) : chalk.red(verdict.score);
@@ -327,6 +419,14 @@ function printSummary(run: Run, htmlPath: string): void {
       const sev = i.severity === "critical" ? chalk.red(`[${i.severity}]`) : i.severity === "high" ? chalk.yellow(`[${i.severity}]`) : chalk.dim(`[${i.severity}]`);
       console.log(`     ${sev} ${i.summary}`);
     }
+  }
+  if (meta.promotedCount > 0 || meta.deprecatedCount > 0) {
+    console.log("");
+    console.log(
+      chalk.dim(
+        `  📚 learned-selectors [${meta.platform}]: ${chalk.green(`+${meta.promotedCount}`)} promoted · ${chalk.yellow(meta.deprecatedCount)} deprecated`,
+      ),
+    );
   }
   console.log("");
   console.log(chalk.dim(`  → ${htmlPath}`));

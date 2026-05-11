@@ -81,6 +81,12 @@ export const StepCapture = z.object({
   screenshotPath: z.string(),
   note: z.string().optional(),
   detail: z.record(z.unknown()).optional(),
+  /** Selector key that this step used, if applicable (for learned-selectors promotion) */
+  selectorKey: z.string().optional(),
+  /** The actual selector string that worked for this step */
+  usedSelector: z.string().optional(),
+  /** True when the selector came from LLM recovery (so it gets promoted explicitly) */
+  recoveredByLlm: z.boolean().optional(),
 });
 export type StepCapture = z.infer<typeof StepCapture>;
 

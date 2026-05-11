@@ -1,4 +1,8 @@
-import type { BrowserContext, Page } from "playwright";
+import type { BrowserContext, Locator, Page } from "playwright";
+import type { LearnedSelectors } from "../learned/repo.ts";
+import type { Platform } from "../learned/platform.ts";
+import { pickCategoryLink } from "../llm/pick-plp.ts";
+import { suggestRecovery } from "../llm/recover-step.ts";
 import type {
   FlowCapture,
   FlowName,
@@ -20,6 +24,16 @@ export interface FlowContext {
   ctx: BrowserContext;
   /** Output dir for screenshots/HARs of this flow */
   outDir: string;
+  /** Optional learned selectors library (cascade integration) */
+  learned?: LearnedSelectors;
+  /** Optional detected platform for the prod side */
+  platform?: Platform;
+  /** Max LLM-driven step recoveries per flow */
+  recoveryBudget?: number;
+}
+
+function selFor(ctx: FlowContext, key: SelectorKey): string[] {
+  return selectorsFor(key, { rc: ctx.rc, learned: ctx.learned, platform: ctx.platform });
 }
 
 /**
@@ -86,17 +100,17 @@ async function flowPlp(ctx: FlowContext): Promise<PageCapture[]> {
     viewport: ctx.viewport,
     screenshotPath: screenshotPath(ctx, "home"),
   });
-  const plpUrl = ctx.rc.plpUrlHint
-    ? new URL(ctx.rc.plpUrlHint, ctx.baseUrl).toString()
-    : await findCategoryUrl(home, ctx.rc);
+  const plpHit = ctx.rc.plpUrlHint
+    ? { url: new URL(ctx.rc.plpUrlHint, ctx.baseUrl).toString(), selector: "__hint__" }
+    : await findCategoryUrl(home, ctx);
   await home.close();
 
-  if (!plpUrl) return [homeCap];
+  if (!plpHit) return [homeCap];
 
   const plp = await ctx.ctx.newPage();
   try {
     const cap = await capturePage(plp, {
-      url: plpUrl,
+      url: plpHit.url,
       side: ctx.side,
       viewport: ctx.viewport,
       screenshotPath: screenshotPath(ctx, "plp"),
@@ -118,30 +132,30 @@ async function flowPdp(ctx: FlowContext): Promise<PageCapture[]> {
       screenshotPath: screenshotPath(ctx, "home"),
     }),
   );
-  const plpUrl = ctx.rc.plpUrlHint
-    ? new URL(ctx.rc.plpUrlHint, ctx.baseUrl).toString()
-    : await findCategoryUrl(home, ctx.rc);
+  const plpHit = ctx.rc.plpUrlHint
+    ? { url: new URL(ctx.rc.plpUrlHint, ctx.baseUrl).toString(), selector: "__hint__" }
+    : await findCategoryUrl(home, ctx);
   await home.close();
-  if (!plpUrl) return pages;
+  if (!plpHit) return pages;
 
   const plp = await ctx.ctx.newPage();
   pages.push(
     await capturePage(plp, {
-      url: plpUrl,
+      url: plpHit.url,
       side: ctx.side,
       viewport: ctx.viewport,
       screenshotPath: screenshotPath(ctx, "plp"),
     }),
   );
-  const pdpUrl = await findProductUrl(plp, ctx.rc);
+  const pdpHit = await findProductUrl(plp, ctx);
   await plp.close();
-  if (!pdpUrl) return pages;
+  if (!pdpHit) return pages;
 
   const pdp = await ctx.ctx.newPage();
   try {
     pages.push(
       await capturePage(pdp, {
-        url: pdpUrl,
+        url: pdpHit.url,
         side: ctx.side,
         viewport: ctx.viewport,
         screenshotPath: screenshotPath(ctx, "pdp"),
@@ -162,6 +176,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
   const pages: PageCapture[] = [];
   const steps: StepCapture[] = [];
   const page = await ctx.ctx.newPage();
+  let recoveryBudget = ctx.recoveryBudget ?? 3;
 
   try {
     // Step 1: home
@@ -186,17 +201,17 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       return { pages, steps };
     }
 
-    // Step 2: navigate to a PLP
-    const plpUrl = ctx.rc.plpUrlHint
-      ? new URL(ctx.rc.plpUrlHint, ctx.baseUrl).toString()
-      : await findCategoryUrl(page, ctx.rc);
-    if (!plpUrl) {
+    // Step 2: navigate to a PLP (with LLM semantic pick)
+    const plpHit = ctx.rc.plpUrlHint
+      ? { url: new URL(ctx.rc.plpUrlHint, ctx.baseUrl).toString(), selector: "__hint__" }
+      : await findCategoryUrl(page, ctx);
+    if (!plpHit) {
       steps.push(makeSkipStep(2, "navigate-plp", ctx, "no category link found"));
       return { pages, steps };
     }
     const t2 = Date.now();
     const plpCap = await capturePage(page, {
-      url: plpUrl,
+      url: plpHit.url,
       side: ctx.side,
       viewport: ctx.viewport,
       screenshotPath: screenshotPath(ctx, "pj-2-plp"),
@@ -211,17 +226,19 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       durationMs: Date.now() - t2,
       url: plpCap.finalUrl,
       screenshotPath: plpCap.screenshotPath,
+      selectorKey: "categoryLink",
+      usedSelector: plpHit.selector,
     });
 
     // Step 3: enter PDP
-    const pdpUrl = await findProductUrl(page, ctx.rc);
-    if (!pdpUrl) {
+    const pdpHit = await findProductUrl(page, ctx);
+    if (!pdpHit) {
       steps.push(makeSkipStep(3, "enter-pdp", ctx, "no product card found"));
       return { pages, steps };
     }
     const t3 = Date.now();
     const pdpCap = await capturePage(page, {
-      url: pdpUrl,
+      url: pdpHit.url,
       side: ctx.side,
       viewport: ctx.viewport,
       screenshotPath: screenshotPath(ctx, "pj-3-pdp"),
@@ -236,10 +253,12 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       durationMs: Date.now() - t3,
       url: pdpCap.finalUrl,
       screenshotPath: pdpCap.screenshotPath,
+      selectorKey: "productCard",
+      usedSelector: pdpHit.selector,
     });
 
     // Step 4 (conditional): shipping calc on PDP
-    const cepInputPdp = await firstVisible(page, selectorsFor("cepInputPdp", ctx.rc));
+    const cepInputPdp = await firstVisible(page, selFor(ctx, "cepInputPdp"));
     if (cepInputPdp) {
       const t4 = Date.now();
       const ok = await fillCep(page, cepInputPdp, ctx.rc.cep);
@@ -254,19 +273,30 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         durationMs: Date.now() - t4,
         screenshotPath: sp,
         detail: { cepUsed: ctx.rc.cep },
+        selectorKey: "cepInputPdp",
+        usedSelector: cepInputPdp,
       });
     } else {
       steps.push(makeSkipStep(4, "shipping-calc-pdp", ctx, "no CEP input on PDP"));
     }
 
-    // Step 5: add to cart
-    const buyLocator = await firstVisibleLocator(page, selectorsFor("buyButton", ctx.rc));
-    if (!buyLocator) {
-      steps.push(makeSkipStep(5, "add-to-cart", ctx, "no buy button found"));
+    // Step 5: add to cart (with LLM recovery)
+    let buyHit = await firstVisibleLocator(page, selFor(ctx, "buyButton"));
+    let buyRecovered = false;
+    if (!buyHit && recoveryBudget > 0) {
+      const recovery = await attemptRecovery(page, ctx, "add-to-cart", "Clicar no botão de comprar/adicionar ao carrinho", selFor(ctx, "buyButton"));
+      if (recovery) {
+        buyHit = recovery;
+        buyRecovered = true;
+        recoveryBudget--;
+      }
+    }
+    if (!buyHit) {
+      steps.push(makeSkipStep(5, "add-to-cart", ctx, "no buy button found (recovery exhausted)"));
       return { pages, steps };
     }
     const t5 = Date.now();
-    await buyLocator.click({ timeout: 5_000 }).catch(() => undefined);
+    await buyHit.locator.click({ timeout: 5_000 }).catch(() => undefined);
     await page.waitForTimeout(2_000);
     const sp5 = screenshotPath(ctx, "pj-5-add-cart");
     await page.screenshot({ path: sp5, fullPage: false }).catch(() => undefined);
@@ -278,13 +308,25 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       status: "ok",
       durationMs: Date.now() - t5,
       screenshotPath: sp5,
+      selectorKey: "buyButton",
+      usedSelector: buyHit.selector,
+      recoveredByLlm: buyRecovered || undefined,
     });
 
-    // Step 6: open minicart (may already be open after add-to-cart)
+    // Step 6: open minicart
     const t6 = Date.now();
-    const miniTrigger = await firstVisibleLocator(page, selectorsFor("minicartTrigger", ctx.rc));
-    if (miniTrigger) {
-      await miniTrigger.click({ timeout: 3_000 }).catch(() => undefined);
+    let miniHit = await firstVisibleLocator(page, selFor(ctx, "minicartTrigger"));
+    let miniRecovered = false;
+    if (!miniHit && recoveryBudget > 0) {
+      const recovery = await attemptRecovery(page, ctx, "open-minicart", "Abrir o minicart/drawer do carrinho", selFor(ctx, "minicartTrigger"));
+      if (recovery) {
+        miniHit = recovery;
+        miniRecovered = true;
+        recoveryBudget--;
+      }
+    }
+    if (miniHit) {
+      await miniHit.locator.click({ timeout: 3_000 }).catch(() => undefined);
       await page.waitForTimeout(1_500);
     }
     const sp6 = screenshotPath(ctx, "pj-6-minicart");
@@ -297,10 +339,13 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       status: "ok",
       durationMs: Date.now() - t6,
       screenshotPath: sp6,
+      selectorKey: miniHit ? "minicartTrigger" : undefined,
+      usedSelector: miniHit?.selector,
+      recoveredByLlm: miniRecovered || undefined,
     });
 
     // Step 7: shipping calc in cart
-    const cepInputCart = await firstVisible(page, selectorsFor("cepInputCart", ctx.rc));
+    const cepInputCart = await firstVisible(page, selFor(ctx, "cepInputCart"));
     if (cepInputCart) {
       const t7 = Date.now();
       const ok = await fillCep(page, cepInputCart, ctx.rc.cep);
@@ -315,21 +360,32 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         durationMs: Date.now() - t7,
         screenshotPath: sp7,
         detail: { cepUsed: ctx.rc.cep },
+        selectorKey: "cepInputCart",
+        usedSelector: cepInputCart,
       });
     } else {
       steps.push(makeSkipStep(7, "shipping-calc-cart", ctx, "no CEP input in cart"));
     }
 
     // Step 8: go to checkout
-    const checkoutBtn = await firstVisibleLocator(page, selectorsFor("checkoutButton", ctx.rc));
-    if (!checkoutBtn) {
-      steps.push(makeSkipStep(8, "go-checkout", ctx, "no checkout button found"));
+    let checkoutHit = await firstVisibleLocator(page, selFor(ctx, "checkoutButton"));
+    let checkoutRecovered = false;
+    if (!checkoutHit && recoveryBudget > 0) {
+      const recovery = await attemptRecovery(page, ctx, "go-checkout", "Clicar no botão 'Finalizar compra' / 'Ir para o checkout'", selFor(ctx, "checkoutButton"));
+      if (recovery) {
+        checkoutHit = recovery;
+        checkoutRecovered = true;
+        recoveryBudget--;
+      }
+    }
+    if (!checkoutHit) {
+      steps.push(makeSkipStep(8, "go-checkout", ctx, "no checkout button found (recovery exhausted)"));
       return { pages, steps };
     }
     const t8 = Date.now();
     await Promise.all([
       page.waitForURL(/checkout/i, { timeout: 10_000 }).catch(() => undefined),
-      checkoutBtn.click({ timeout: 5_000 }).catch(() => undefined),
+      checkoutHit.locator.click({ timeout: 5_000 }).catch(() => undefined),
     ]);
     await page.waitForTimeout(1_500);
     const sp8 = screenshotPath(ctx, "pj-8-checkout-reached");
@@ -345,6 +401,9 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       durationMs: Date.now() - t8,
       url: checkoutUrl,
       screenshotPath: sp8,
+      selectorKey: "checkoutButton",
+      usedSelector: checkoutHit.selector,
+      recoveredByLlm: checkoutRecovered || undefined,
     });
 
     return { pages, steps };
@@ -371,15 +430,30 @@ function makeSkipStep(
   };
 }
 
-async function findCategoryUrl(page: Page, rc: ParityRc): Promise<string | null> {
-  return await firstVisibleHref(page, selectorsFor("categoryLink", rc));
+async function findCategoryUrl(
+  page: Page,
+  ctx: FlowContext,
+): Promise<{ url: string; selector: string } | null> {
+  const selectors = selFor(ctx, "categoryLink");
+  const candidates = await collectCandidateLinks(page, selectors, 12);
+  if (candidates.length === 0) return null;
+  const picked = await pickCategoryLink(candidates.map((c) => ({ text: c.text, href: c.href })));
+  if (!picked) return null;
+  const original = candidates.find((c) => c.href === picked.href);
+  return original ? { url: original.href, selector: original.selector } : null;
 }
 
-async function findProductUrl(page: Page, rc: ParityRc): Promise<string | null> {
-  return await firstVisibleHref(page, selectorsFor("productCard", rc));
+async function findProductUrl(
+  page: Page,
+  ctx: FlowContext,
+): Promise<{ url: string; selector: string } | null> {
+  return await firstVisibleHref(page, selFor(ctx, "productCard"));
 }
 
-async function firstVisibleHref(page: Page, selectors: string[]): Promise<string | null> {
+async function firstVisibleHref(
+  page: Page,
+  selectors: string[],
+): Promise<{ url: string; selector: string } | null> {
   for (const sel of selectors) {
     try {
       const el = page.locator(sel).first();
@@ -387,7 +461,7 @@ async function firstVisibleHref(page: Page, selectors: string[]): Promise<string
         const href = await el.getAttribute("href");
         if (href) {
           try {
-            return new URL(href, page.url()).toString();
+            return { url: new URL(href, page.url()).toString(), selector: sel };
           } catch {
             return null;
           }
@@ -414,12 +488,15 @@ async function firstVisible(page: Page, selectors: string[]): Promise<string | n
   return null;
 }
 
-async function firstVisibleLocator(page: Page, selectors: string[]) {
+async function firstVisibleLocator(
+  page: Page,
+  selectors: string[],
+): Promise<{ locator: Locator; selector: string } | null> {
   for (const sel of selectors) {
     try {
       const el = page.locator(sel).first();
       if (await el.isVisible({ timeout: 1_000 }).catch(() => false)) {
-        return el;
+        return { locator: el, selector: sel };
       }
     } catch {
       /* try next */
@@ -428,15 +505,78 @@ async function firstVisibleLocator(page: Page, selectors: string[]) {
   return null;
 }
 
+export async function collectCandidateLinks(
+  page: Page,
+  selectors: string[],
+  limit = 12,
+): Promise<{ text: string; href: string; selector: string }[]> {
+  const out: { text: string; href: string; selector: string }[] = [];
+  const seenHrefs = new Set<string>();
+  for (const sel of selectors) {
+    if (out.length >= limit) break;
+    try {
+      const elements = page.locator(sel);
+      const count = await elements.count();
+      for (let i = 0; i < count && out.length < limit; i++) {
+        const el = elements.nth(i);
+        if (!(await el.isVisible({ timeout: 250 }).catch(() => false))) continue;
+        const href = await el.getAttribute("href").catch(() => null);
+        if (!href) continue;
+        let abs = href;
+        try {
+          abs = new URL(href, page.url()).toString();
+        } catch {
+          continue;
+        }
+        if (seenHrefs.has(abs)) continue;
+        seenHrefs.add(abs);
+        const text = (await el.innerText().catch(() => "")).slice(0, 60).trim();
+        out.push({ text, href: abs, selector: sel });
+      }
+    } catch {
+      /* try next */
+    }
+  }
+  return out;
+}
+
 async function fillCep(page: Page, selector: string, cep: string): Promise<boolean> {
   try {
     await page.locator(selector).first().fill(cep, { timeout: 3_000 });
-    // submit: try Enter then surrounding button
     await page.locator(selector).first().press("Enter").catch(() => undefined);
-    // wait for any shipping response
     await page.waitForTimeout(3_000);
     return true;
   } catch {
     return false;
   }
+}
+
+/**
+ * Ask the LLM to recover from a failed selector lookup. Returns a usable
+ * locator + the suggested selector string, or null if the recovery failed.
+ */
+async function attemptRecovery(
+  page: Page,
+  _ctx: FlowContext,
+  stepName: string,
+  intendedAction: string,
+  alreadyTried: string[],
+): Promise<{ locator: Locator; selector: string } | null> {
+  let html = "";
+  try {
+    html = await page.content();
+  } catch {
+    return null;
+  }
+  const suggestion = await suggestRecovery({ stepName, intendedAction, html, alreadyTried });
+  if (!suggestion) return null;
+  try {
+    const el = page.locator(suggestion.selector).first();
+    if (await el.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return { locator: el, selector: suggestion.selector };
+    }
+  } catch {
+    /* selector invalid or not found */
+  }
+  return null;
 }

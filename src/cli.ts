@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { baselineList, baselineSet, baselineUnset } from "./commands/baseline.ts";
 import { compareCommand } from "./commands/compare.ts";
 import { explainCommand } from "./commands/explain.ts";
+import { learnedStats } from "./commands/learned.ts";
 import { listCommand } from "./commands/list.ts";
 import { reportCommand } from "./commands/report.ts";
 import { runCommand } from "./commands/run.ts";
@@ -33,6 +34,7 @@ program
   .option("--open", "Open the HTML report after the run completes", false)
   .option("--no-auto-selectors", "Disable LLM-based selector discovery (uses defaults instead)")
   .option("--refresh-selectors", "Bypass selector cache and re-run discovery", false)
+  .option("--no-learn", "Don't write to learned-selectors.json (read-only mode)")
   .action(async (opts) => {
     const code = await runCommand(opts);
     process.exit(code);
@@ -97,5 +99,16 @@ program
   .action(async (runId, issueId, opts) => {
     process.exit(await explainCommand(runId, issueId, opts.output));
   });
+
+program
+  .command("learned")
+  .description("Inspect the learned-selectors library")
+  .addCommand(
+    new Command("stats")
+      .description("Print learned-selectors stats per platform")
+      .action(() => {
+        process.exit(learnedStats());
+      }),
+  );
 
 program.parseAsync(process.argv);
