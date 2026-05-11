@@ -32,26 +32,35 @@ export async function serveCommand(runId: string, opts: ServeOptions): Promise<n
   console.log(`  ${chalk.green("●")} ${handle.url}`);
   console.log(chalk.dim(`  Servindo: ${paths.runDir}`));
   console.log(chalk.dim(`  Proxy de iframes: ${handle.url}proxy?url=<encoded>`));
-  console.log(chalk.dim("  Ctrl+C pra parar.\n"));
+  console.log(chalk.dim("  Ctrl+C pra parar (2x pra forçar saída).\n"));
 
   if (opts.open !== false) {
     const { default: open } = await import("open");
     await open(handle.url).catch(() => undefined);
   }
 
-  // Keep alive
-  await new Promise<void>((resolve) => {
-    const shutdown = async () => {
-      console.log(chalk.dim("\n  parando servidor…"));
-      await handle.close();
-      resolve();
-    };
-    process.on("SIGINT", () => {
-      void shutdown();
-    });
-    process.on("SIGTERM", () => {
-      void shutdown();
-    });
+  // Keep alive; SIGINT/SIGTERM exit the process immediately.
+  // The default Node SIGINT handler is removed once we register our own, so we
+  // must call process.exit() explicitly.
+  let shuttingDown = false;
+  const onSignal = () => {
+    if (shuttingDown) {
+      // 2nd Ctrl+C → force exit instantly
+      process.stderr.write("\n  forçando saída.\n");
+      process.exit(130);
+    }
+    shuttingDown = true;
+    process.stderr.write("\n  parando servidor…\n");
+    // Fire-and-forget close, then exit on a short deadline regardless
+    handle.close().catch(() => undefined);
+    setTimeout(() => process.exit(0), 300);
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+
+  // Block forever — only signal exits this command
+  await new Promise<never>(() => {
+    /* never resolves */
   });
   return 0;
 }

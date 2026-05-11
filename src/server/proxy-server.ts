@@ -83,7 +83,17 @@ export async function startProxyServer(
     url: `http://${host}:${port}/`,
     close: () =>
       new Promise<void>((resolve) => {
+        // Drop keep-alive / in-flight connections immediately so close() resolves
+        // instead of waiting for browsers to release their iframe sockets.
+        try {
+          server.closeAllConnections?.();
+          server.closeIdleConnections?.();
+        } catch {
+          /* older node */
+        }
         server.close(() => resolve());
+        // Safety net: if close() doesn't resolve within 1s, force exit anyway
+        setTimeout(() => resolve(), 1000);
       }),
   };
 }
