@@ -1,7 +1,6 @@
 import { join } from "node:path";
 import chalk from "chalk";
 import ora from "ora";
-import open from "open";
 import type { Browser } from "playwright";
 import { runAllChecks } from "../checks/index.ts";
 import type { CheckContext } from "../checks/index.ts";
@@ -26,6 +25,7 @@ import { isLlmAvailable } from "../llm/client.ts";
 import { discoverSelectorsFromUrl } from "../llm/discover-selectors.ts";
 import { fingerprintPdp, matchPdps } from "../llm/match-pdp.ts";
 import { renderHtmlReport } from "../report/render.ts";
+import { serveRunAndBlock } from "./serve.ts";
 import { compareToBaseline, loadBaseline } from "../storage/baselines.ts";
 import {
   createRunDir,
@@ -568,10 +568,6 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
 
     printSummary(run, paths.reportHtml, { promotedCount, deprecatedCount, platform });
 
-    if (opts.open) {
-      await open(paths.reportHtml).catch(() => undefined);
-    }
-
     if (opts.ci) {
       const blocking = allIssues.filter((i) => failOn.includes(i.severity));
       if (blocking.length > 0) {
@@ -581,6 +577,17 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         return 1;
       }
     }
+
+    // --open: spin up a local proxy server (so the Side-by-side iframe works)
+    // and block until the user Ctrl+C's. Must run AFTER Playwright cleanup.
+    if (opts.open) {
+      if (browser) {
+        await browser.close().catch(() => undefined);
+        browser = null;
+      }
+      return await serveRunAndBlock(paths.runDir, { label: `parity run · ${runId}` });
+    }
+
     return 0;
   } catch (err) {
     spinner.fail(`Erro: ${(err as Error).message}`);
