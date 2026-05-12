@@ -140,6 +140,132 @@ export const CheckResult = z.object({
 });
 export type CheckResult = z.infer<typeof CheckResult>;
 
+export const VisualDifferenceType = z.enum([
+  "missing-component",
+  "different-component",
+  "extra-component",
+  "layout-shift",
+  "text-changed",
+  "color-style-diff",
+  "image-diff",
+  "cosmetic",
+]);
+export type VisualDifferenceType = z.infer<typeof VisualDifferenceType>;
+
+export const VisualRegion = z.enum([
+  "header",
+  "hero",
+  "navigation",
+  "main",
+  "shelf",
+  "footer",
+  "sidebar",
+  "modal",
+  "minicart",
+  "other",
+]);
+export type VisualRegion = z.infer<typeof VisualRegion>;
+
+export const VisualDifference = z.object({
+  type: VisualDifferenceType,
+  region: VisualRegion,
+  severity: Severity,
+  description: z.string(),
+});
+export type VisualDifference = z.infer<typeof VisualDifference>;
+
+export const VisualDiffPage = z.object({
+  pageKey: z.string(),
+  pagePath: z.string(),
+  pageLabel: z.string(),
+  viewport: Viewport,
+  prodUrl: z.string(),
+  candUrl: z.string(),
+  prodScreenshotPath: z.string(),
+  candScreenshotPath: z.string(),
+  heatmapPath: z.string().optional(),
+  pctDiff: z.number(),
+  verdict: z.enum(["pass", "diffs", "failed"]),
+  prodSections: z.array(z.string()),
+  candSections: z.array(z.string()),
+  sectionsOnlyInProd: z.array(z.string()),
+  sectionsOnlyInCand: z.array(z.string()),
+  differences: z.array(VisualDifference),
+  llmCalled: z.boolean(),
+  llmError: z.string().optional(),
+});
+export type VisualDiffPage = z.infer<typeof VisualDiffPage>;
+
+export const VisualDiffSummary = z.object({
+  results: z.array(VisualDiffPage),
+  pagesChecked: z.number(),
+  pagesWithDiffs: z.number(),
+  pagesPassed: z.number(),
+  pagesFailed: z.number(),
+  llmCallsUsed: z.number(),
+});
+export type VisualDiffSummary = z.infer<typeof VisualDiffSummary>;
+
+/** SEO check — structured result so the report can render a dedicated tab. */
+export const SeoPageMeta = z.object({
+  pageKey: z.string(),
+  pageLabel: z.string(),
+  prodTitle: z.string().nullable(),
+  candTitle: z.string().nullable(),
+  prodDescription: z.string().nullable(),
+  candDescription: z.string().nullable(),
+  prodCanonical: z.string().nullable(),
+  candCanonical: z.string().nullable(),
+  prodRobots: z.string().nullable(),
+  candRobots: z.string().nullable(),
+  prodXRobotsTag: z.string().nullable(),
+  candXRobotsTag: z.string().nullable(),
+  prodJsonLdTypes: z.array(z.string()),
+  candJsonLdTypes: z.array(z.string()),
+  /** Aggregated severity for this page (max of all its issues). null = no issues. */
+  maxSeverity: Severity.nullable(),
+  issueCount: z.number(),
+});
+export type SeoPageMeta = z.infer<typeof SeoPageMeta>;
+
+export const SeoRobotsTxt = z.object({
+  prodPresent: z.boolean(),
+  candPresent: z.boolean(),
+  prodSitemaps: z.array(z.string()),
+  candSitemaps: z.array(z.string()),
+  uaDiffCount: z.number(),
+  raw: z
+    .object({
+      prod: z.string().nullable(),
+      cand: z.string().nullable(),
+    })
+    .optional(),
+});
+export type SeoRobotsTxt = z.infer<typeof SeoRobotsTxt>;
+
+export const SeoSitemap = z.object({
+  prodPresent: z.boolean(),
+  candPresent: z.boolean(),
+  prodCount: z.number(),
+  candCount: z.number(),
+  countDelta: z.number(),
+  countPct: z.number(),
+  onlyProdSample: z.array(z.string()),
+  onlyCandSample: z.array(z.string()),
+});
+export type SeoSitemap = z.infer<typeof SeoSitemap>;
+
+export const SeoSummary = z.object({
+  pages: z.array(SeoPageMeta),
+  robotsTxt: SeoRobotsTxt,
+  sitemap: SeoSitemap,
+  /** Issues raised by the SEO check (mirror of CheckResult.issues, kept here for self-contained tab rendering). */
+  issues: z.array(Issue),
+  /** Count of pages with at least one SEO regression. */
+  pagesWithIssues: z.number(),
+});
+export type SeoSummary = z.infer<typeof SeoSummary>;
+
 export const Verdict = z.object({
   status: z.enum(["pass", "warn", "fail"]),
   score: z.number().min(0).max(100),
@@ -169,6 +295,8 @@ export const Run = z.object({
   issues: z.array(Issue),
   checks: z.array(CheckResult),
   flowCaptures: z.array(FlowCapture),
+  visualDiff: VisualDiffSummary.optional(),
+  seo: SeoSummary.optional(),
   baseline: z
     .object({
       name: z.string(),

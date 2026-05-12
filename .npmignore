@@ -1,0 +1,53 @@
+# package.json `files` is already restrictive (only dist/, README, AGENTS, CHANGELOG, LICENSE).
+# This .npmignore is belt-and-suspenders: it ensures these never sneak into the tarball
+# even if someone forgets to update `files`.
+
+# Source / build inputs
+src/
+scripts/
+tests/
+test/
+
+# Local runs / caches (also .gitignored)
+parity-output/
+parity-baselines/
+.parity-cache/
+learned-selectors.json
+.parityrc.json
+.parityignore
+
+# Tooling
+.github/
+.context/
+.claude/
+node_modules/
+*.tsbuildinfo
+tsconfig.json
+biome.json
+bun.lock
+bun.lockb
+package-lock.json
+yarn.lock
+
+# Env / secrets
+.env
+.env.*
+*.env
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+bun-debug.log*
+
+# Test artifacts
+test-results/
+playwright-report/
+playwright/.cache/
+coverage/

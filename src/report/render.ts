@@ -1,8 +1,9 @@
 import { relative } from "node:path";
 import { buildCacheReport, type CacheReport, type ClassifiedRequest } from "../diff/cache.ts";
-import type { Issue, NetworkEntry, Run } from "../types/schema.ts";
+import type { Issue, NetworkEntry, Run, SeoPageMeta, VisualDiffPage } from "../types/schema.ts";
 import { REPORT_CSS, REPORT_JS } from "./html-template.ts";
 import { buildLlmPrompt } from "./prompt-builder.ts";
+import { buildVisualPrompt } from "./visual-prompt-builder.ts";
 
 function esc(s: string | number | null | undefined): string {
   if (s == null) return "";
@@ -185,7 +186,7 @@ function buildTiles(run: Run): Tile[] {
       value: critical > 0 ? `${critical} crit` : seo.status === "pass" ? "✓" : seo.issues.length.toString(),
       meta: critical > 0 ? "noindex / robots regression" : `${seo.issues.length} issue(s)`,
       state: critical > 0 ? "fail" : seo.status === "pass" ? "pass" : "warn",
-      href: "#issues",
+      href: "#seo",
     });
   }
 
@@ -205,13 +206,22 @@ function buildTiles(run: Run): Tile[] {
   // Visual
   const visual = run.checks.find((c) => c.name === "visual-regression-keyframes");
   if (visual) {
+    const vd = run.visualDiff;
+    const value = vd ? `${vd.pagesWithDiffs}/${vd.pagesChecked}` : visual.issues.length.toString();
+    const meta = vd
+      ? vd.pagesWithDiffs === 0
+        ? "todas as páginas OK"
+        : `${vd.pagesWithDiffs} página(s) com diff`
+      : visual.status === "pass"
+        ? "sem regressão visual"
+        : "diferenças detectadas";
     tiles.push({
       icon: "🖼",
       label: "Visual",
-      value: visual.issues.length.toString(),
-      meta: visual.status === "pass" ? "sem regressão visual" : "diferenças detectadas",
+      value,
+      meta,
       state: visual.status === "pass" ? "pass" : "warn",
-      href: "#issues",
+      href: "#visualdiff",
     });
   }
 
@@ -653,6 +663,322 @@ function renderDiffPanel(run: Run, runDir: string): string {
   </div>`;
 }
 
+function renderVisualDiffPanel(run: Run, runDir: string): string {
+  const vd = run.visualDiff;
+  if (!vd || vd.results.length === 0) {
+    return `
+    <div class="card">
+      <h2>Visual Diff</h2>
+      <div class="empty">Nenhuma comparação visual rodou. Use <code>--visual-pages &lt;n&gt;</code> (default 5) e configure <code>ANTHROPIC_API_KEY</code> para a análise semântica via LLM Vision.</div>
+    </div>`;
+  }
+
+  const sortedResults = [...vd.results].sort((a, b) => {
+    const order = { failed: 0, diffs: 1, pass: 2 } as const;
+    return order[a.verdict] - order[b.verdict];
+  });
+
+  const cards = sortedResults
+    .map((page, idx) => renderVisualDiffPage(page, runDir, idx === 0))
+    .join("");
+
+  const md = buildVisualPrompt(run, runDir);
+  const charCount = md.length;
+
+  return `
+  <div class="card">
+    <h2>Visual Diff <span class="hint-inline">prod (Fresh) vs cand (TanStack)</span></h2>
+    <div class="vd-summary">
+      <span class="vd-badge total">${vd.pagesChecked} páginas</span>
+      <span class="vd-badge warn">${vd.pagesWithDiffs} com diff</span>
+      <span class="vd-badge good">${vd.pagesPassed} OK</span>
+      ${vd.pagesFailed > 0 ? `<span class="vd-badge bad">${vd.pagesFailed} falha de análise</span>` : ""}
+      <span class="vd-badge info">${vd.llmCallsUsed} chamadas LLM Vision</span>
+    </div>
+    <div class="vd-filters">
+      <label class="label"><input type="checkbox" class="vd-filter" data-vd-show="diffs" checked/> com diffs</label>
+      <label class="label"><input type="checkbox" class="vd-filter" data-vd-show="pass"/> OK</label>
+      <label class="label"><input type="checkbox" class="vd-filter" data-vd-show="failed" checked/> falha</label>
+      <select id="vd-viewport-filter">
+        <option value="">todos os viewports</option>
+        <option value="mobile">mobile</option>
+        <option value="desktop">desktop</option>
+        <option value="tablet">tablet</option>
+      </select>
+    </div>
+    <div class="vd-list">
+      ${cards}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Prompt para LLM (visual)</h2>
+    <div class="hint">Pronto pra colar em Claude / ChatGPT — lista as páginas com diffs, sections faltantes, screenshots referenciados, e instruções específicas pra corrigir migração Fresh → TanStack.</div>
+    <div class="prompt-toolbar">
+      <button id="vprompt-copy">📋 Copiar markdown</button>
+      <button class="secondary" id="vprompt-download">⬇ Download .md</button>
+      <span class="feedback" id="vprompt-feedback"></span>
+      <div class="right">${charCount.toLocaleString("en-US")} chars · ${(charCount / 1024).toFixed(1)} KB</div>
+    </div>
+    <div class="prompt-md" id="vprompt-md">${esc(md)}</div>
+  </div>`;
+}
+
+function renderFig(srcPath: string, alt: string, variantClass: string, label: string): string {
+  const safeSrc = esc(srcPath);
+  return `
+        <figure class="vd-fig ${variantClass}">
+          <figcaption>${esc(label)}</figcaption>
+          <div class="vd-img-wrap">
+            <img src="${safeSrc}" alt="${esc(alt)}" loading="lazy" class="vd-img" onerror="this.classList.add('broken'); var fb = this.nextElementSibling; if (fb) fb.classList.add('show');"/>
+            <div class="vd-img-fallback">
+              <span class="icon">🖼️</span>
+              <span class="msg">imagem não encontrada</span>
+              <span class="path">${safeSrc}</span>
+            </div>
+          </div>
+        </figure>`;
+}
+
+function renderVisualDiffPage(page: VisualDiffPage, runDir: string, openFirst: boolean): string {
+  const verdictClass = page.verdict === "pass" ? "ok" : page.verdict === "failed" ? "bad" : "warn";
+  const verdictLabel = page.verdict === "pass" ? "OK" : page.verdict === "failed" ? "FAIL" : "DIFFS";
+  const diffsCount = page.differences.length;
+  const sectionsMissing = page.sectionsOnlyInProd.length;
+  const maxSev = page.differences.reduce<string>((best, d) => {
+    const order = { critical: 0, high: 1, medium: 2, low: 3 } as const;
+    if (order[d.severity] < (order[best as keyof typeof order] ?? 99)) return d.severity;
+    return best;
+  }, "");
+
+  const headerBadges: string[] = [];
+  headerBadges.push(`<span class="vd-badge ${verdictClass}">${verdictLabel}</span>`);
+  if (diffsCount > 0) headerBadges.push(`<span class="vd-badge info">${diffsCount} diff(s)</span>`);
+  if (sectionsMissing > 0) headerBadges.push(`<span class="vd-badge bad">${sectionsMissing} section(s) ausente(s)</span>`);
+  if (maxSev) headerBadges.push(`<span class="vd-badge sev-${maxSev}">${maxSev}</span>`);
+  headerBadges.push(`<span class="vd-badge dim">${(page.pctDiff * 100).toFixed(2)}% pixels</span>`);
+
+  const heatmapHtml = page.heatmapPath
+    ? renderFig(relPath(runDir, page.heatmapPath), "heatmap", "vd-fig-heatmap", "HEATMAP (pixelmatch)")
+    : `<figure class="vd-fig vd-fig-heatmap vd-fig-empty"><figcaption>HEATMAP</figcaption><div class="vd-empty-cell"><span class="icon">🗺️</span><span>heatmap não gerado</span></div></figure>`;
+
+  const diffsList = page.differences
+    .map(
+      (d) => `
+    <li class="vd-diff sev-${d.severity}">
+      <span class="vd-diff-tags">
+        <span class="tag sev-${d.severity}">${esc(d.severity)}</span>
+        <span class="tag">${esc(d.region)}</span>
+        <span class="tag tag-mono">${esc(d.type)}</span>
+      </span>
+      <span class="vd-diff-desc">${esc(d.description)}</span>
+    </li>`,
+    )
+    .join("");
+
+  const sectionsHtml = page.sectionsOnlyInProd.length > 0
+    ? `<div class="vd-sections">
+        <div class="vd-sections-title">Sections detectadas no DOM de prod e AUSENTES em cand:</div>
+        <ul class="vd-sections-list">
+          ${page.sectionsOnlyInProd.map((s) => `<li><code>${esc(s)}</code></li>`).join("")}
+        </ul>
+      </div>`
+    : "";
+
+  const errorHtml = page.llmError
+    ? `<div class="vd-error">⚠️ LLM Vision retornou erro: ${esc(page.llmError)}</div>`
+    : "";
+
+  return `
+  <details class="vd-page" data-vd-verdict="${esc(page.verdict)}" data-vd-viewport="${esc(page.viewport)}" ${openFirst ? "open" : ""}>
+    <summary class="vd-page-header">
+      <span class="vd-page-title">${esc(page.pageLabel)}</span>
+      <span class="vd-page-badges">${headerBadges.join(" ")}</span>
+    </summary>
+    <div class="vd-page-body">
+      <div class="vd-gallery">
+        ${renderFig(relPath(runDir, page.prodScreenshotPath), "prod", "vd-fig-prod", "PROD (Fresh — fonte da verdade)")}
+        ${renderFig(relPath(runDir, page.candScreenshotPath), "cand", "vd-fig-cand", "CAND (TanStack)")}
+        ${heatmapHtml}
+      </div>
+      ${sectionsHtml}
+      ${diffsList ? `<div class="vd-diffs-block"><div class="vd-diffs-title">Diferenças visuais (LLM Vision):</div><ul class="vd-diffs-list">${diffsList}</ul></div>` : ""}
+      ${errorHtml}
+      ${page.differences.length === 0 && page.sectionsOnlyInProd.length === 0 && !page.llmError
+        ? `<div class="vd-empty-msg">Nenhuma diferença relevante detectada nesta página. ✅</div>`
+        : ""
+      }
+      <div class="vd-meta">
+        <a href="${esc(page.prodUrl)}" target="_blank" rel="noreferrer">prod ↗</a>
+        <a href="${esc(page.candUrl)}" target="_blank" rel="noreferrer">cand ↗</a>
+        <span class="dim">viewport: ${esc(page.viewport)} · llm: ${page.llmCalled ? "called" : "skipped"}</span>
+      </div>
+    </div>
+  </details>`;
+}
+
+function renderSeoPanel(run: Run, runDir: string): string {
+  const seo = run.seo;
+  if (!seo) {
+    return `
+    <div class="card">
+      <h2>SEO</h2>
+      <div class="empty">SEO audit não rodou neste run.</div>
+    </div>`;
+  }
+
+  const robotsCard = renderSeoRobotsCard(seo.robotsTxt);
+  const sitemapCard = renderSeoSitemapCard(seo.sitemap);
+  const pagesCard = renderSeoPagesCard(seo.pages);
+  const issuesCard = renderSeoIssuesCard(seo.issues, runDir);
+
+  return `
+  <div class="card">
+    <h2>SEO <span class="hint-inline">robots, sitemap, meta tags, JSON-LD</span></h2>
+    <div class="vd-summary">
+      <span class="vd-badge total">${seo.pages.length} páginas auditadas</span>
+      <span class="vd-badge ${seo.issues.length === 0 ? "good" : "warn"}">${seo.issues.length} issue(s)</span>
+      <span class="vd-badge ${seo.pagesWithIssues === 0 ? "good" : "warn"}">${seo.pagesWithIssues} página(s) afetada(s)</span>
+    </div>
+  </div>
+  ${robotsCard}
+  ${sitemapCard}
+  ${pagesCard}
+  ${issuesCard}`;
+}
+
+function renderSeoRobotsCard(robots: NonNullable<Run["seo"]>["robotsTxt"]): string {
+  const prodBadge = robots.prodPresent
+    ? `<span class="vd-badge good">presente</span>`
+    : `<span class="vd-badge bad">ausente</span>`;
+  const candBadge = robots.candPresent
+    ? `<span class="vd-badge good">presente</span>`
+    : `<span class="vd-badge bad">ausente</span>`;
+
+  const onlyProdSm = robots.prodSitemaps.filter((s) => !robots.candSitemaps.includes(s));
+  const onlyCandSm = robots.candSitemaps.filter((s) => !robots.prodSitemaps.includes(s));
+
+  return `
+  <div class="card">
+    <h2>robots.txt</h2>
+    <table class="seo-kv">
+      <tbody>
+        <tr><th>prod</th><td>${prodBadge}</td></tr>
+        <tr><th>cand</th><td>${candBadge}</td></tr>
+        <tr><th>Sitemap(s) declarado(s)</th><td>prod: ${robots.prodSitemaps.length} · cand: ${robots.candSitemaps.length}</td></tr>
+        <tr><th>Divergências por User-agent</th><td>${robots.uaDiffCount}</td></tr>
+      </tbody>
+    </table>
+    ${onlyProdSm.length > 0 ? `<div class="seo-sub">Sitemap(s) em prod e ausente(s) em cand: <code>${onlyProdSm.map(esc).join(", ")}</code></div>` : ""}
+    ${onlyCandSm.length > 0 ? `<div class="seo-sub">Sitemap(s) só em cand: <code>${onlyCandSm.map(esc).join(", ")}</code></div>` : ""}
+    ${
+      robots.raw?.prod || robots.raw?.cand
+        ? `<details class="seo-raw"><summary>Ver conteúdo bruto (prod vs cand)</summary>
+            <div class="seo-raw-pair">
+              <div><div class="label">prod</div><pre>${esc(robots.raw?.prod ?? "—")}</pre></div>
+              <div><div class="label">cand</div><pre>${esc(robots.raw?.cand ?? "—")}</pre></div>
+            </div>
+          </details>`
+        : ""
+    }
+  </div>`;
+}
+
+function renderSeoSitemapCard(sitemap: NonNullable<Run["seo"]>["sitemap"]): string {
+  const deltaClass = sitemap.countPct < -0.05 ? "delta-bad" : sitemap.countPct > 0.05 ? "delta-good" : "delta-neutral";
+  const deltaText = `${sitemap.countDelta > 0 ? "+" : ""}${sitemap.countDelta} (${(sitemap.countPct * 100).toFixed(1)}%)`;
+  return `
+  <div class="card">
+    <h2>sitemap.xml</h2>
+    <table class="seo-kv">
+      <tbody>
+        <tr><th>prod</th><td>${sitemap.prodPresent ? `<span class="vd-badge good">presente · ${sitemap.prodCount} URLs</span>` : `<span class="vd-badge bad">ausente</span>`}</td></tr>
+        <tr><th>cand</th><td>${sitemap.candPresent ? `<span class="vd-badge good">presente · ${sitemap.candCount} URLs</span>` : `<span class="vd-badge bad">ausente</span>`}</td></tr>
+        <tr><th>Δ cand vs prod</th><td class="${deltaClass}">${deltaText}</td></tr>
+      </tbody>
+    </table>
+    ${
+      sitemap.onlyProdSample.length > 0
+        ? `<div class="seo-sub">URLs em prod e ausentes em cand (amostra ${sitemap.onlyProdSample.length}):
+            <ul class="seo-list">${sitemap.onlyProdSample.map((u) => `<li><code>${esc(u)}</code></li>`).join("")}</ul>
+          </div>`
+        : ""
+    }
+    ${
+      sitemap.onlyCandSample.length > 0
+        ? `<div class="seo-sub">URLs só em cand (amostra ${sitemap.onlyCandSample.length}):
+            <ul class="seo-list">${sitemap.onlyCandSample.map((u) => `<li><code>${esc(u)}</code></li>`).join("")}</ul>
+          </div>`
+        : ""
+    }
+  </div>`;
+}
+
+function renderSeoPagesCard(pages: SeoPageMeta[]): string {
+  if (pages.length === 0) {
+    return `<div class="card"><h2>Meta tags por página</h2><div class="empty">Nenhuma página pareada para auditoria.</div></div>`;
+  }
+  const rows = pages
+    .map((p) => {
+      const sevBadge = p.maxSeverity
+        ? `<span class="vd-badge sev-${p.maxSeverity}">${p.maxSeverity}</span>`
+        : `<span class="vd-badge good">ok</span>`;
+      return `
+      <details class="seo-page-row ${p.issueCount > 0 ? "has-issues" : ""}" ${p.issueCount > 0 ? "open" : ""}>
+        <summary class="seo-page-summary">
+          <span class="seo-page-title">${esc(p.pageLabel)}</span>
+          <span class="seo-page-badges">
+            ${sevBadge}
+            ${p.issueCount > 0 ? `<span class="vd-badge warn">${p.issueCount} issue(s)</span>` : ""}
+          </span>
+        </summary>
+        <div class="seo-page-body">
+          <table class="seo-meta">
+            <thead><tr><th></th><th>prod</th><th>cand</th><th>match</th></tr></thead>
+            <tbody>
+              ${seoMetaRow("title", p.prodTitle, p.candTitle)}
+              ${seoMetaRow("description", p.prodDescription, p.candDescription)}
+              ${seoMetaRow("canonical", p.prodCanonical, p.candCanonical)}
+              ${seoMetaRow("robots", p.prodRobots, p.candRobots)}
+              ${seoMetaRow("X-Robots-Tag", p.prodXRobotsTag, p.candXRobotsTag)}
+              ${seoMetaRow("json-ld types", p.prodJsonLdTypes.join(", ") || null, p.candJsonLdTypes.join(", ") || null)}
+            </tbody>
+          </table>
+        </div>
+      </details>`;
+    })
+    .join("");
+  return `
+  <div class="card">
+    <h2>Meta tags por página</h2>
+    <div class="hint">Comparação direta de title/description/canonical/robots/json-ld. Linhas em vermelho divergem entre prod e cand.</div>
+    ${rows}
+  </div>`;
+}
+
+function seoMetaRow(label: string, prod: string | null, cand: string | null): string {
+  const equal = (prod ?? "") === (cand ?? "");
+  const cls = equal ? "match-yes" : "match-no";
+  return `
+    <tr class="${cls}">
+      <th>${esc(label)}</th>
+      <td>${prod ? `<code>${esc(prod)}</code>` : `<span class="dim">—</span>`}</td>
+      <td>${cand ? `<code>${esc(cand)}</code>` : `<span class="dim">—</span>`}</td>
+      <td>${equal ? "✓" : "✗"}</td>
+    </tr>`;
+}
+
+function renderSeoIssuesCard(issues: Issue[], runDir: string): string {
+  if (issues.length === 0) {
+    return `<div class="card"><h2>Issues de SEO</h2><div class="empty">Nenhuma issue de SEO detectada 🎉</div></div>`;
+  }
+  return `
+  <div class="card">
+    <h2>Issues de SEO (${issues.length})</h2>
+    ${issues.map((i) => renderIssue(i, runDir)).join("")}
+  </div>`;
+}
+
 function renderPromptPanel(run: Run): string {
   const md = buildLlmPrompt(run, { limit: 20 });
   const charCount = md.length;
@@ -761,6 +1087,8 @@ interface NavEntry {
 function buildNav(run: Run): NavEntry[] {
   return [
     { tab: "summary", label: "Dashboard", icon: "🏠" },
+    { tab: "visualdiff", label: "Visual Diff", icon: "🖼", count: run.visualDiff?.pagesWithDiffs },
+    { tab: "seo", label: "SEO", icon: "🔍", count: run.seo?.issues.length },
     { tab: "sidebyside", label: "Side-by-side", icon: "⇆" },
     { tab: "issues", label: "Issues", icon: "⚠", count: run.issues.length },
     { tab: "vitals", label: "Vitals", icon: "📊" },
@@ -824,6 +1152,12 @@ export function renderHtmlReport(run: Run, runDir: string): string {
     <main class="app-main">
       <section class="panel" data-panel="summary">
         ${renderDashboard(run)}
+      </section>
+      <section class="panel" data-panel="visualdiff">
+        ${renderVisualDiffPanel(run, runDir)}
+      </section>
+      <section class="panel" data-panel="seo">
+        ${renderSeoPanel(run, runDir)}
       </section>
       <section class="panel" data-panel="sidebyside">
         ${renderSideBySidePanel(run)}

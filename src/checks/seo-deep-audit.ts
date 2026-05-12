@@ -7,9 +7,40 @@ import {
 } from "../diff/jsonld.ts";
 import { diffRobots, fetchRobots, parseRobots } from "../diff/robots.ts";
 import { diffSitemap, resolveSitemapUrls } from "../diff/sitemap.ts";
-import type { CheckResult, Issue, PageCapture } from "../types/schema.ts";
+import type {
+  CheckResult,
+  Issue,
+  PageCapture,
+  SeoPageMeta,
+  SeoRobotsTxt,
+  SeoSitemap,
+  SeoSummary,
+  Severity,
+} from "../types/schema.ts";
 import type { CheckContext } from "./index.ts";
 import { pairCaptures } from "./lib/pairing.ts";
+
+const SEVERITY_ORDER: Record<Severity, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
+
+function maxSeverity(issues: Issue[]): Severity | null {
+  if (issues.length === 0) return null;
+  let best: Severity = "low";
+  for (const i of issues) {
+    if (SEVERITY_ORDER[i.severity] < SEVERITY_ORDER[best]) best = i.severity;
+  }
+  return best;
+}
+
+function labelForPageKey(key: string): string {
+  const [path = "/", viewport = ""] = key.split("::");
+  const niceName = path === "/" || path === "" ? "Home" : path;
+  return viewport ? `${niceName} · ${viewport}` : niceName;
+}
 
 interface SeoState {
   prodBaseUrl: string;
@@ -30,18 +61,52 @@ export async function seoDeepAudit(ctx: CheckContext): Promise<CheckResult> {
     candBaseUrl: originOf(sample.cand.url),
   };
 
-  // Per-page sub-checks
+  // Per-page sub-checks + collect structured page snapshot
+  const pageSnapshots: SeoPageMeta[] = [];
   for (const pair of pairs) {
-    issues.push(...checkMetaRobots(pair));
-    issues.push(...checkXRobotsHeader(pair));
-    issues.push(...checkCanonical(pair));
-    issues.push(...checkHreflang(pair));
-    issues.push(...checkJsonLd(pair));
+    const pageIssues: Issue[] = [];
+    pageIssues.push(...checkMetaRobots(pair));
+    pageIssues.push(...checkXRobotsHeader(pair));
+    pageIssues.push(...checkCanonical(pair));
+    pageIssues.push(...checkHreflang(pair));
+    pageIssues.push(...checkJsonLd(pair));
+    issues.push(...pageIssues);
+
+    const prodSnap = snapshotDom(pair.prod.html);
+    const candSnap = snapshotDom(pair.cand.html);
+    pageSnapshots.push({
+      pageKey: pair.key,
+      pageLabel: labelForPageKey(pair.key),
+      prodTitle: prodSnap.meta.title,
+      candTitle: candSnap.meta.title,
+      prodDescription: prodSnap.meta.description,
+      candDescription: candSnap.meta.description,
+      prodCanonical: prodSnap.meta.canonical,
+      candCanonical: candSnap.meta.canonical,
+      prodRobots: prodSnap.meta.robots,
+      candRobots: candSnap.meta.robots,
+      prodXRobotsTag: pair.prod.xRobotsTag ?? null,
+      candXRobotsTag: pair.cand.xRobotsTag ?? null,
+      prodJsonLdTypes: prodSnap.meta.jsonLdTypes,
+      candJsonLdTypes: candSnap.meta.jsonLdTypes,
+      maxSeverity: maxSeverity(pageIssues),
+      issueCount: pageIssues.length,
+    });
   }
 
   // Run-wide sub-checks (only once per run)
-  issues.push(...(await checkRobotsTxt(state)));
-  issues.push(...(await checkSitemap(state, pairs.map((p) => p.cand))));
+  const { issues: robotsIssues, robotsTxt } = await checkRobotsTxtStructured(state);
+  issues.push(...robotsIssues);
+  const { issues: sitemapIssues, sitemap } = await checkSitemapStructured(state, pairs.map((p) => p.cand));
+  issues.push(...sitemapIssues);
+
+  const seo: SeoSummary = {
+    pages: pageSnapshots,
+    robotsTxt,
+    sitemap,
+    issues,
+    pagesWithIssues: pageSnapshots.filter((p) => p.issueCount > 0).length,
+  };
 
   return {
     name: "seo-deep-audit",
@@ -54,7 +119,7 @@ export async function seoDeepAudit(ctx: CheckContext): Promise<CheckResult> {
     durationMs: Date.now() - start,
     summary: `${issues.length} divergência(s) de SEO em ${pairs.length} página(s)`,
     issues,
-    data: { pages: pairs.length },
+    data: { pages: pairs.length, seo },
   };
 }
 
@@ -408,6 +473,55 @@ async function checkSitemap(state: SeoState, candPages: PageCapture[]): Promise<
     });
   }
   return out;
+}
+
+async function checkRobotsTxtStructured(
+  state: SeoState,
+): Promise<{ issues: Issue[]; robotsTxt: SeoRobotsTxt }> {
+  const issues = await checkRobotsTxt(state);
+  const [prodTxt, candTxt] = await Promise.all([
+    fetchRobots(state.prodBaseUrl),
+    fetchRobots(state.candBaseUrl),
+  ]);
+  const prodParsed = prodTxt ? parseRobots(prodTxt) : null;
+  const candParsed = candTxt ? parseRobots(candTxt) : null;
+  const diff = diffRobots(prodParsed, candParsed);
+  return {
+    issues,
+    robotsTxt: {
+      prodPresent: !!prodTxt,
+      candPresent: !!candTxt,
+      prodSitemaps: prodParsed?.sitemaps ?? [],
+      candSitemaps: candParsed?.sitemaps ?? [],
+      uaDiffCount: diff.uaDiffs.length,
+      raw: { prod: prodTxt, cand: candTxt },
+    },
+  };
+}
+
+async function checkSitemapStructured(
+  state: SeoState,
+  candPages: PageCapture[],
+): Promise<{ issues: Issue[]; sitemap: SeoSitemap }> {
+  const issues = await checkSitemap(state, candPages);
+  const [prodUrls, candUrls] = await Promise.all([
+    resolveSitemapUrls(state.prodBaseUrl),
+    resolveSitemapUrls(state.candBaseUrl),
+  ]);
+  const diff = diffSitemap(prodUrls, candUrls);
+  return {
+    issues,
+    sitemap: {
+      prodPresent: prodUrls.length > 0,
+      candPresent: candUrls.length > 0,
+      prodCount: diff.prodCount,
+      candCount: diff.candCount,
+      countDelta: diff.countDelta,
+      countPct: diff.countPct,
+      onlyProdSample: diff.onlyProdSample,
+      onlyCandSample: diff.onlyCandSample,
+    },
+  };
 }
 
 function emptyResult(start: number): CheckResult {

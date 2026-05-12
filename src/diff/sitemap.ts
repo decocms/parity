@@ -12,14 +12,18 @@ const MAX_URLS = 1000;
 export async function fetchSitemap(
   baseUrl: string,
   hintUrl?: string,
+  timeoutMs = 15_000,
 ): Promise<{ url: string; xml: string } | null> {
   const candidates = hintUrl
     ? [hintUrl]
     : [new URL("/sitemap.xml", baseUrl).toString(), new URL("/sitemap_index.xml", baseUrl).toString()];
 
   for (const url of candidates) {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(url, {
+        signal: controller.signal,
         headers: {
           "User-Agent":
             "Mozilla/5.0 (compatible; parity-cli/0.1; +https://github.com/decocms/parity)",
@@ -33,6 +37,8 @@ export async function fetchSitemap(
       }
     } catch {
       /* try next */
+    } finally {
+      clearTimeout(t);
     }
   }
   return null;

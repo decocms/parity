@@ -15,7 +15,11 @@ export function extractJsonLd(html: string): Map<string, JsonLdObject[]> {
       try {
         const parsed = JSON.parse(text) as JsonLdObject | JsonLdObject[];
         const items = Array.isArray(parsed) ? parsed : [parsed];
-        for (const item of items) collectByType(item, out);
+        for (const item of items) {
+          // Skip null/non-object entries so one bad item doesn't drop the whole array
+          if (!item || typeof item !== "object") continue;
+          collectByType(item, out);
+        }
       } catch {
         /* invalid JSON-LD */
       }

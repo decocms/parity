@@ -26,3 +26,7 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      - name: Dead code (informational)
+        run: bun run deadcode
+        continue-on-error: true

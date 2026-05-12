@@ -8,6 +8,7 @@ import type { CheckContext } from "../checks/index.ts";
 import { launchBrowser, newContext, stopTracing } from "../engine/browser.ts";
 import { capturePage, installVitalsCollector } from "../engine/collect.ts";
 import { runFlow } from "../engine/flows.ts";
+import { discoverPagesFromSitemap } from "../engine/sitemap-discover.ts";
 import { resolveSitemapUrls } from "../diff/sitemap.ts";
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
 import { detectPlatform, type Platform } from "../learned/platform.ts";
@@ -39,8 +40,10 @@ import type {
   Issue,
   PageCapture,
   Run,
+  SeoSummary,
   Side,
   Verdict,
+  VisualDiffSummary,
   Viewport,
 } from "../types/schema.ts";
 
@@ -64,6 +67,77 @@ export interface RunOptions {
   learn?: boolean;
   /** Extra pages (beyond flows) to crawl just for Web Vitals coverage. Default 10. */
   vitalsPages?: number;
+  /** Pages to compare visually (prod vs cand screenshots + LLM). Default 5. */
+  visualPages?: number;
+  /** Disable the visual-diff capture pass entirely. */
+  noVisualDiff?: boolean;
+  /** Named bundle of defaults. Individual flags still override the preset. */
+  preset?: "smoke" | "full" | "ci";
+}
+
+type PresetDefaults = Partial<Pick<RunOptions,
+  | "flows"
+  | "viewports"
+  | "vitalsPages"
+  | "visualPages"
+  | "noVisualDiff"
+  | "autoSelectors"
+>>;
+
+/**
+ * Named bundles of defaults so users don't have to remember every flag.
+ * Individual flags passed by the user always win over preset values.
+ */
+const PRESETS: Record<NonNullable<RunOptions["preset"]>, PresetDefaults> = {
+  // ~30s smoke run — homepage only, one viewport, skip extra crawls + LLM
+  smoke: {
+    flows: "homepage",
+    viewports: "mobile",
+    vitalsPages: 0,
+    visualPages: 0,
+    noVisualDiff: true,
+    autoSelectors: false,
+  },
+  // Full audit — purchase journey, both viewports, visual diff, extra vitals
+  full: {
+    flows: "purchase-journey",
+    viewports: "mobile,desktop",
+    vitalsPages: 10,
+    visualPages: 5,
+  },
+  // CI-friendly — purchase journey on mobile, smaller crawls, no extra browser opens
+  ci: {
+    flows: "purchase-journey",
+    viewports: "mobile",
+    vitalsPages: 5,
+    visualPages: 3,
+  },
+};
+
+function applyPreset(opts: RunOptions): RunOptions {
+  if (!opts.preset) return opts;
+  const preset = PRESETS[opts.preset];
+  if (!preset) return opts;
+  // Merge preset BENEATH user-provided opts (user wins on every key explicitly set)
+  // We detect "user-provided" as "not equal to commander's static default".
+  const merged: RunOptions = { ...opts };
+  // Defaults from commander that we treat as "not user-set" for the preset merge
+  const COMMANDER_DEFAULTS: Record<string, unknown> = {
+    flows: "purchase-journey",
+    viewports: "mobile,desktop",
+    vitalsPages: 10,
+    visualPages: 5,
+  };
+  const mergedRec = merged as unknown as Record<string, unknown>;
+  for (const [k, v] of Object.entries(preset)) {
+    const currentVal = mergedRec[k];
+    const defaultVal = COMMANDER_DEFAULTS[k];
+    const isUserSet = currentVal !== undefined && currentVal !== defaultVal;
+    if (!isUserSet) {
+      mergedRec[k] = v;
+    }
+  }
+  return merged;
 }
 
 const SEVERITY_RANK: Record<Issue["severity"], number> = {
@@ -73,7 +147,11 @@ const SEVERITY_RANK: Record<Issue["severity"], number> = {
   low: 3,
 };
 
-export async function runCommand(opts: RunOptions): Promise<number> {
+export async function runCommand(rawOpts: RunOptions): Promise<number> {
+  const opts = applyPreset(rawOpts);
+  if (rawOpts.preset) {
+    console.log(chalk.dim(`  preset: ${rawOpts.preset}`));
+  }
   const flows = opts.flows.split(",").map((s) => s.trim()) as FlowName[];
   const viewports = opts.viewports.split(",").map((s) => s.trim()) as Viewport[];
   const failOn = opts.failOn
@@ -84,6 +162,15 @@ export async function runCommand(opts: RunOptions): Promise<number> {
   const rc = loadParityRc();
   rc.cep = opts.cep || rc.cep;
   const ignore = loadParityIgnore();
+
+  // Pre-flight: confirm both URLs respond before spending 10 minutes on a doomed run
+  const preflight = await preflightCheck(opts.prod, opts.cand);
+  if (!preflight.ok) {
+    console.error(chalk.red("\n  ✖ pre-flight falhou:"));
+    for (const err of preflight.errors) console.error(chalk.red(`    - ${err}`));
+    console.error(chalk.dim("\n  dica: verifique se as URLs estão corretas e acessíveis"));
+    return 2;
+  }
 
   // Load learned-selectors library + detect platform from prod home
   const learned = loadLearned();
@@ -324,6 +411,76 @@ export async function runCommand(opts: RunOptions): Promise<number> {
       }
     }
 
+    // Visual diff capture pass: home + sampled PLPs/PDPs from sitemap, with full-page screenshots
+    const visualPagesLimit = opts.noVisualDiff ? 0 : (opts.visualPages ?? 5);
+    if (browser && visualPagesLimit > 0) {
+      const visualSpinner = ora("Descobrindo páginas pra visual diff…").start();
+      try {
+        const sample = await discoverPagesFromSitemap(opts.prod, { sampleSize: visualPagesLimit });
+        const visualPaths = sample.all.map((p) => p.path);
+        // Don't re-capture paths we already have screenshots for (in flows or vitals extras)
+        const alreadyCapturedKeys = new Set<string>();
+        for (const p of allPageCaptures) {
+          try {
+            alreadyCapturedKeys.add(`${new URL(p.url).pathname}::${p.viewport}::${p.side}`);
+          } catch {
+            /* skip */
+          }
+        }
+
+        const tasks: Array<{ path: string; viewport: Viewport; side: Side }> = [];
+        for (const viewport of viewports) {
+          for (const path of visualPaths) {
+            for (const side of ["prod", "cand"] as Side[]) {
+              if (alreadyCapturedKeys.has(`${path}::${viewport}::${side}`)) continue;
+              tasks.push({ path, viewport, side });
+            }
+          }
+        }
+
+        if (tasks.length === 0) {
+          visualSpinner.succeed(`Visual diff: páginas já capturadas em flows (${visualPaths.length} alvos)`);
+        } else {
+          visualSpinner.text = `Visual diff: capturando ${tasks.length} screenshot(s) (${visualPaths.length} páginas × ${viewports.length} viewport(s) × 2 sides)…`;
+          let done = 0;
+          await runWithConcurrency(tasks, 4, async (task) => {
+            const baseUrl = task.side === "prod" ? opts.prod : opts.cand;
+            const fullUrl = new URL(task.path, baseUrl).toString();
+            const safePath = task.path.replace(/[/?&=]+/g, "_") || "_root";
+            const screenshotPath = `${paths.screenshotsDir}/visual-${safePath}-${task.viewport}-${task.side}.png`;
+            try {
+              const ctx = await newContext(browser!, { viewport: task.viewport, cohortCookieValue: "control" });
+              await installVitalsCollector(ctx);
+              const page = await ctx.newPage();
+              try {
+                const cap = await capturePage(page, {
+                  url: fullUrl,
+                  side: task.side,
+                  viewport: task.viewport,
+                  screenshotPath,
+                  settleMs: 1800,
+                  timeoutMs: 30_000,
+                  scrollToLoad: true,
+                });
+                allPageCaptures.push(cap);
+              } finally {
+                await page.close().catch(() => undefined);
+                await ctx.close().catch(() => undefined);
+              }
+            } catch {
+              /* tolerated */
+            } finally {
+              done++;
+              visualSpinner.text = `[visual] ${done}/${tasks.length} (último: ${task.path})`;
+            }
+          });
+          visualSpinner.succeed(`Visual diff: ${tasks.length} screenshot(s) capturado(s)`);
+        }
+      } catch (err) {
+        visualSpinner.warn(`Visual diff descoberta pulada: ${(err as Error).message}`);
+      }
+    }
+
     spinner.start("Rodando checks…");
     const checkCtx: CheckContext = {
       prodPages: allPageCaptures.filter((p) => p.side === "prod"),
@@ -378,6 +535,13 @@ export async function runCommand(opts: RunOptions): Promise<number> {
       }
     }
 
+    // Pull the structured visual-diff summary out of the visual-regression check
+    const visualCheck = checks.find((c) => c.name === "visual-regression-keyframes");
+    const visualDiff = (visualCheck?.data?.visualDiff as VisualDiffSummary | undefined);
+    // Pull the structured SEO summary out of the seo-deep-audit check
+    const seoCheck = checks.find((c) => c.name === "seo-deep-audit");
+    const seo = (seoCheck?.data?.seo as SeoSummary | undefined);
+
     const run: Run = {
       schemaVersion: "0.1",
       id: runId,
@@ -393,6 +557,8 @@ export async function runCommand(opts: RunOptions): Promise<number> {
       issues: allIssues,
       checks,
       flowCaptures: allFlowCaptures,
+      visualDiff,
+      seo,
       baseline: baselineSection,
     };
 
@@ -475,6 +641,59 @@ async function runWithConcurrency<T>(
       }
     }),
   );
+}
+
+interface PreflightResult {
+  ok: boolean;
+  errors: string[];
+}
+
+/**
+ * Ping prod and cand before the heavy capture phase. Catches typos, dead URLs,
+ * and obvious 5xx so we fail fast (3 seconds) instead of 10 minutes in.
+ */
+async function preflightCheck(prodUrl: string, candUrl: string): Promise<PreflightResult> {
+  const spinner = ora("Pre-flight: verificando URLs…").start();
+  const errors: string[] = [];
+
+  async function probe(label: string, url: string): Promise<void> {
+    try {
+      new URL(url);
+    } catch {
+      errors.push(`${label}: URL inválida (${url})`);
+      return;
+    }
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        },
+      });
+      if (res.status >= 500) errors.push(`${label}: HTTP ${res.status} ${res.statusText} (${url})`);
+      else if (res.status >= 400) errors.push(`${label}: HTTP ${res.status} ${res.statusText} (${url})`);
+    } catch (err) {
+      const e = err as Error;
+      const msg = e.name === "AbortError" ? "timeout (10s)" : e.message;
+      errors.push(`${label}: ${msg} (${url})`);
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  await Promise.all([probe("prod", prodUrl), probe("cand", candUrl)]);
+
+  if (errors.length > 0) {
+    spinner.fail("Pre-flight falhou");
+    return { ok: false, errors };
+  }
+  spinner.succeed("Pre-flight OK");
+  return { ok: true, errors: [] };
 }
 
 async function fetchHomeHtml(url: string): Promise<string | null> {
