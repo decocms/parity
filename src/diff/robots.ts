@@ -13,10 +13,13 @@ export interface ParsedRobots {
   raw: string;
 }
 
-export async function fetchRobots(baseUrl: string): Promise<string | null> {
+export async function fetchRobots(baseUrl: string, timeoutMs = 10_000): Promise<string | null> {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const url = new URL("/robots.txt", baseUrl).toString();
     const res = await fetch(url, {
+      signal: controller.signal,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (compatible; parity-cli/0.1; +https://github.com/decocms/parity)",
@@ -30,6 +33,8 @@ export async function fetchRobots(baseUrl: string): Promise<string | null> {
     return txt;
   } catch {
     return null;
+  } finally {
+    clearTimeout(t);
   }
 }
 

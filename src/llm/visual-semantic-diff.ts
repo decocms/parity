@@ -1,38 +1,14 @@
 import { readFileSync } from "node:fs";
 import { PNG } from "pngjs";
+import type { VisualDifference, VisualDifferenceType, VisualRegion } from "../types/schema.ts";
 import { callTool } from "./client.ts";
 
-/** Max height to send to Vision (above-the-fold + scroll). Keeps cost predictable. */
-const MAX_HEIGHT = 2500;
+/** Max height to send to Vision. Trades cost for catching below-the-fold diffs (footer, lower shelves). */
+const MAX_HEIGHT = 8000;
 
-export type DifferenceType =
-  | "missing-component"
-  | "different-component"
-  | "extra-component"
-  | "layout-shift"
-  | "text-changed"
-  | "color-style-diff"
-  | "image-diff"
-  | "cosmetic";
-
-export type Region =
-  | "header"
-  | "hero"
-  | "navigation"
-  | "main"
-  | "shelf"
-  | "footer"
-  | "sidebar"
-  | "modal"
-  | "minicart"
-  | "other";
-
-export interface VisualDifference {
-  type: DifferenceType;
-  region: Region;
-  severity: "critical" | "high" | "medium" | "low";
-  description: string;
-}
+export type DifferenceType = VisualDifferenceType;
+export type Region = VisualRegion;
+export type { VisualDifference };
 
 const REPORT_VISUAL_DIFFS_TOOL = {
   name: "report_visual_differences",
@@ -145,6 +121,29 @@ export interface VisualDiffInput {
   candPath: string;
   pageContext?: string;
   viewport?: string;
+  /** Deco sections detected in prod HTML (data-section attribute). */
+  prodSections?: string[];
+  /** Deco sections detected in cand HTML. */
+  candSections?: string[];
+  /** Sections present only in prod (missing in cand) — flagged as priority context. */
+  sectionsOnlyInProd?: string[];
+}
+
+function buildContextBlock(input: VisualDiffInput): string {
+  const lines: string[] = [];
+  if (input.sectionsOnlyInProd && input.sectionsOnlyInProd.length > 0) {
+    lines.push(
+      "",
+      "**Sections detectadas no DOM de prod mas AUSENTES em cand** (provavelmente faltando migrar):",
+      ...input.sectionsOnlyInProd.map((s) => `- ${s}`),
+      "",
+      "Verifique visualmente se essas sections aparecem na 2ª imagem. Se ausentes, reporte como missing-component com severity high ou critical.",
+    );
+  }
+  if (input.prodSections && input.prodSections.length > 0) {
+    lines.push("", `Total sections em prod: ${input.prodSections.length}; em cand: ${input.candSections?.length ?? 0}.`);
+  }
+  return lines.join("\n");
 }
 
 export async function visualSemanticDiff(
@@ -161,9 +160,11 @@ export async function visualSemanticDiff(
   }
 
   const context = `${input.pageContext ?? "a página"}${input.viewport ? ` (${input.viewport})` : ""}`;
+  const contextBlock = buildContextBlock(input);
+  const userText = `Compare as duas screenshots de ${context}. 1ª = prod (Fresh, fonte da verdade), 2ª = cand (TanStack, migrada).${contextBlock}`;
   const result = await callTool<{ differences?: Partial<VisualDifference>[] }>({
     systemPrompt: SYSTEM_PROMPT,
-    userText: `Compare as duas screenshots de ${context}. 1ª = prod, 2ª = cand.`,
+    userText,
     userImages: [
       { base64: prodB64, mediaType: "image/png" },
       { base64: candB64, mediaType: "image/png" },

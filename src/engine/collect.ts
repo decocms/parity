@@ -140,9 +140,18 @@ export function attachCollectors(page: Page): CollectorState {
   return state;
 }
 
-export async function flushCollectors(state: CollectorState): Promise<void> {
+/**
+ * Wait for response promises to settle, but bail out after `timeoutMs` to
+ * avoid hanging on streaming responses (SSE, long-poll, websockets) whose
+ * `body()` never resolves until the page closes.
+ */
+export async function flushCollectors(state: CollectorState, timeoutMs = 5_000): Promise<void> {
   const flush = (state as CollectorState & { __flush?: () => Promise<void> }).__flush;
-  if (flush) await flush();
+  if (!flush) return;
+  await Promise.race([
+    flush(),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
 }
 
 async function responseToEntry(resp: Response): Promise<NetworkEntry> {
@@ -166,7 +175,11 @@ async function responseToEntry(resp: Response): Promise<NetworkEntry> {
 
 async function safeBodySize(resp: Response): Promise<number | null> {
   try {
-    const buf = await resp.body();
+    const buf = await Promise.race([
+      resp.body(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 4_000)),
+    ]);
+    if (!buf) return null;
     return buf.byteLength;
   } catch {
     return null;
@@ -241,6 +254,10 @@ export interface CaptureOptions {
 export async function capturePage(page: Page, opts: CaptureOptions): Promise<PageCapture> {
   const start = Date.now();
   const state = attachCollectors(page);
+  /** Hard total cap so a single bad page can never hang the whole crawl. */
+  const overallBudgetMs = opts.fast ? 25_000 : 60_000;
+  const deadline = start + overallBudgetMs;
+  const remaining = () => Math.max(500, deadline - Date.now());
 
   let response: Response | null = null;
   let finalUrl = opts.url;
@@ -248,7 +265,7 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
   try {
     response = await page.goto(opts.url, {
       waitUntil: "domcontentloaded",
-      timeout: opts.timeoutMs ?? 30_000,
+      timeout: Math.min(opts.timeoutMs ?? 30_000, remaining()),
     });
     finalUrl = page.url();
     if (response) {
@@ -258,21 +275,24 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
     if (opts.fast) {
       // Fast path: just settle a bit after DOM is ready, no full load wait, no scroll
       await page
-        .waitForLoadState("networkidle", { timeout: 4_000 })
+        .waitForLoadState("networkidle", { timeout: Math.min(4_000, remaining()) })
         .catch(() => undefined);
-      await page.waitForTimeout(opts.settleMs ?? 1_200);
+      await page.waitForTimeout(Math.min(opts.settleMs ?? 1_200, remaining()));
     } else {
       // Wait for full load (images, fonts, etc.) — capped
-      await page.waitForLoadState("load", { timeout: 12_000 }).catch(() => undefined);
+      await page.waitForLoadState("load", { timeout: Math.min(12_000, remaining()) }).catch(() => undefined);
       // Then networkidle (background fetches settle)
-      await page.waitForLoadState("networkidle", { timeout: 6_000 }).catch(() => undefined);
-      await page.waitForTimeout(opts.settleMs ?? 2_000);
+      await page.waitForLoadState("networkidle", { timeout: Math.min(6_000, remaining()) }).catch(() => undefined);
+      await page.waitForTimeout(Math.min(opts.settleMs ?? 2_000, remaining()));
 
       // Auto-scroll to trigger lazy-loaded content (images, sections, analytics)
-      if (opts.scrollToLoad !== false) {
-        await scrollFullPage(page).catch(() => undefined);
+      if (opts.scrollToLoad !== false && remaining() > 3_000) {
+        await Promise.race([
+          scrollFullPage(page).catch(() => undefined),
+          new Promise<void>((resolve) => setTimeout(resolve, Math.min(10_000, remaining()))),
+        ]);
         // Brief settle after scrolling back to top
-        await page.waitForTimeout(600);
+        await page.waitForTimeout(Math.min(600, remaining()));
       }
     }
   } catch (err) {
@@ -287,16 +307,18 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
     .catch(() => null);
 
   if (!opts.skipScreenshot) {
-    await page
-      .screenshot({ path: opts.screenshotPath, fullPage: true, animations: "disabled" })
-      .catch(() => {
-        /* tolerated; screenshot path may be undefined if URL failed completely */
-      });
+    await Promise.race([
+      page.screenshot({ path: opts.screenshotPath, fullPage: true, animations: "disabled" }).catch(() => undefined),
+      new Promise<void>((resolve) => setTimeout(resolve, Math.min(15_000, remaining()))),
+    ]);
   }
 
-  const html = await page.content().catch(() => "");
+  const html = await Promise.race([
+    page.content().catch(() => ""),
+    new Promise<string>((resolve) => setTimeout(() => resolve(""), Math.min(5_000, remaining()))),
+  ]);
 
-  await flushCollectors(state);
+  await flushCollectors(state, Math.min(3_000, remaining()));
 
   return {
     url: opts.url,

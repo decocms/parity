@@ -39,6 +39,19 @@ export interface ToolCallParams {
     inputSchema: Record<string, unknown>;
   };
   maxTokens?: number;
+  /** Hard timeout in ms. Default: 120s for image calls, 60s for text-only. */
+  timeoutMs?: number;
+}
+
+/** Default timeout for LLM calls. Vision (with images) gets more time. */
+function defaultTimeout(params: { userImages?: unknown[] }): number {
+  return params.userImages && params.userImages.length > 0 ? 120_000 : 60_000;
+}
+
+function makeTimeoutSignal(ms: number): { signal: AbortSignal; clear: () => void } {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(new Error(`LLM call timed out after ${ms}ms`)), ms);
+  return { signal: controller.signal, clear: () => clearTimeout(t) };
 }
 
 /**
@@ -68,23 +81,28 @@ async function callAnthropicTool<T>(params: ToolCallParams): Promise<T | null> {
       },
     });
   }
+  const timeoutMs = params.timeoutMs ?? defaultTimeout(params);
+  const { signal, clear } = makeTimeoutSignal(timeoutMs);
   try {
-    const response = await client.messages.create({
-      model: LLM_MODEL_ANTHROPIC,
-      max_tokens: params.maxTokens ?? 2000,
-      system: [
-        { type: "text", text: params.systemPrompt, cache_control: { type: "ephemeral" } },
-      ],
-      tools: [
-        {
-          name: params.tool.name,
-          description: params.tool.description,
-          input_schema: params.tool.inputSchema as Anthropic.Tool["input_schema"],
-        },
-      ],
-      tool_choice: { type: "tool", name: params.tool.name },
-      messages: [{ role: "user", content: userContent }],
-    });
+    const response = await client.messages.create(
+      {
+        model: LLM_MODEL_ANTHROPIC,
+        max_tokens: params.maxTokens ?? 2000,
+        system: [
+          { type: "text", text: params.systemPrompt, cache_control: { type: "ephemeral" } },
+        ],
+        tools: [
+          {
+            name: params.tool.name,
+            description: params.tool.description,
+            input_schema: params.tool.inputSchema as Anthropic.Tool["input_schema"],
+          },
+        ],
+        tool_choice: { type: "tool", name: params.tool.name },
+        messages: [{ role: "user", content: userContent }],
+      },
+      { signal },
+    );
     for (const block of response.content) {
       if (block.type === "tool_use" && block.name === params.tool.name) {
         return block.input as T;
@@ -92,6 +110,8 @@ async function callAnthropicTool<T>(params: ToolCallParams): Promise<T | null> {
     }
   } catch (err) {
     console.error(`[llm-anthropic] failed: ${(err as Error).message}`);
+  } finally {
+    clear();
   }
   return null;
 }
@@ -116,9 +136,12 @@ async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> 
     });
   }
 
+  const timeoutMs = params.timeoutMs ?? defaultTimeout(params);
+  const { signal, clear } = makeTimeoutSignal(timeoutMs);
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
+      signal,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
@@ -180,6 +203,8 @@ async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> 
     }
   } catch (err) {
     console.error(`[llm-openrouter] failed: ${(err as Error).message}`);
+  } finally {
+    clear();
   }
   return null;
 }
@@ -188,6 +213,8 @@ export interface MessageCallParams {
   systemPrompt: string;
   userText: string;
   maxTokens?: number;
+  /** Hard timeout in ms. Default: 60s. */
+  timeoutMs?: number;
 }
 
 /**
@@ -202,15 +229,19 @@ export async function callMessage(params: MessageCallParams): Promise<string | n
 
 async function callAnthropicMessage(params: MessageCallParams): Promise<string | null> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? "" });
+  const { signal, clear } = makeTimeoutSignal(params.timeoutMs ?? 60_000);
   try {
-    const response = await client.messages.create({
-      model: LLM_MODEL_ANTHROPIC,
-      max_tokens: params.maxTokens ?? 1500,
-      system: [
-        { type: "text", text: params.systemPrompt, cache_control: { type: "ephemeral" } },
-      ],
-      messages: [{ role: "user", content: params.userText }],
-    });
+    const response = await client.messages.create(
+      {
+        model: LLM_MODEL_ANTHROPIC,
+        max_tokens: params.maxTokens ?? 1500,
+        system: [
+          { type: "text", text: params.systemPrompt, cache_control: { type: "ephemeral" } },
+        ],
+        messages: [{ role: "user", content: params.userText }],
+      },
+      { signal },
+    );
     const parts: string[] = [];
     for (const block of response.content) {
       if (block.type === "text") parts.push(block.text);
@@ -219,15 +250,19 @@ async function callAnthropicMessage(params: MessageCallParams): Promise<string |
   } catch (err) {
     console.error(`[llm-anthropic] failed: ${(err as Error).message}`);
     return null;
+  } finally {
+    clear();
   }
 }
 
 async function callOpenRouterMessage(params: MessageCallParams): Promise<string | null> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return null;
+  const { signal, clear } = makeTimeoutSignal(params.timeoutMs ?? 60_000);
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
+      signal,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
@@ -250,16 +285,8 @@ async function callOpenRouterMessage(params: MessageCallParams): Promise<string 
     return json.choices?.[0]?.message?.content ?? null;
   } catch {
     return null;
+  } finally {
+    clear();
   }
 }
 
-/* ---------- Backwards-compatible exports (used by legacy callers) ---------- */
-
-/** @deprecated prefer callTool / callMessage. Kept for callers still using the SDK directly. */
-export const LLM_MODEL = LLM_MODEL_ANTHROPIC;
-
-/** @deprecated prefer callTool / callMessage. */
-export function getLlmClient(): Anthropic | null {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-}

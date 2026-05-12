@@ -1,8 +1,16 @@
 node_modules/
 dist/
+coverage/
 parity-output/
 parity-baselines/
 .parity-cache/
+
+# Learned selectors are user-specific (may contain host names of tested sites)
+learned-selectors.json
+
+# User-local config (may contain private URLs or selectors)
+.parityrc.json
+.parityignore
 
 # Playwright
 test-results/

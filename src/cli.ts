@@ -25,6 +25,10 @@ program
   .requiredOption("--prod <url>", "Production URL (source of truth, e.g. Fresh site)")
   .requiredOption("--cand <url>", "Candidate URL (migrated site, e.g. TanStack)")
   .option(
+    "--preset <name>",
+    "Bundle of defaults: smoke (fast, ~30s, no LLM) | full (deep audit) | ci (CI-tuned)",
+  )
+  .option(
     "--flows <list>",
     "Comma-separated flows: homepage,plp,pdp,purchase-journey",
     "purchase-journey",
@@ -41,6 +45,8 @@ program
   .option("--refresh-selectors", "Bypass selector cache and re-run discovery", false)
   .option("--no-learn", "Don't write to learned-selectors.json (read-only mode)")
   .option("--vitals-pages <n>", "Extra pages from sitemap to crawl for Vitals coverage (default 10)", (v) => Number(v), 10)
+  .option("--visual-pages <n>", "Pages to compare visually via LLM (home + sampled PLPs/PDPs from sitemap, default 5)", (v) => Number(v), 5)
+  .option("--no-visual-diff", "Skip the visual diff capture pass entirely")
   .action(async (opts) => {
     const code = await runCommand(opts);
     process.exit(code);
