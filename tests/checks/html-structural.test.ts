@@ -63,7 +63,7 @@ describe("htmlStructuralDiff", () => {
     const prodHtml = baseHtml(
       `<div data-section="Hero"></div>${"<a href='/a'>a</a>".repeat(20)}`,
     );
-    const candHtml = baseHtml(``);
+    const candHtml = baseHtml("");
     const r = htmlStructuralDiff(
       makeContext({
         prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", html: prodHtml })],

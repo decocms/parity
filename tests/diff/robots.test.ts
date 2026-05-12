@@ -75,37 +75,37 @@ Disallow: /b
   });
 
   it("parses crawl-delay as a number", () => {
-    const r = parseRobots(`User-agent: *\nCrawl-delay: 10\n`);
+    const r = parseRobots("User-agent: *\nCrawl-delay: 10\n");
     expect(r.userAgents["*"]?.crawlDelay).toBe(10);
   });
 
   it("ignores comments and blank lines", () => {
-    const r = parseRobots(`# top comment\n\nUser-agent: *\n# nested\nDisallow: /x\n`);
+    const r = parseRobots("# top comment\n\nUser-agent: *\n# nested\nDisallow: /x\n");
     expect(r.userAgents["*"]?.disallow).toEqual(["/x"]);
   });
 
   it("bug #10: silently ignores typo directives (User-Agentt) but does not crash", () => {
-    const r = parseRobots(`User-Agentt: typo\nDisallow: /x\n`);
+    const r = parseRobots("User-Agentt: typo\nDisallow: /x\n");
     expect(Object.keys(r.userAgents)).toEqual([]); // typo'd UA never registers
   });
 
   it("normalizes lists (sorted) so set comparisons are stable", () => {
-    const r = parseRobots(`User-agent: *\nDisallow: /z\nDisallow: /a\n`);
+    const r = parseRobots("User-agent: *\nDisallow: /z\nDisallow: /a\n");
     expect(r.userAgents["*"]?.disallow).toEqual(["/a", "/z"]);
   });
 });
 
 describe("diffRobots", () => {
   it("flags cand-only Disallow as divergence", () => {
-    const prod = parseRobots(`User-agent: *\nAllow: /\n`);
-    const cand = parseRobots(`User-agent: *\nDisallow: /\n`);
+    const prod = parseRobots("User-agent: *\nAllow: /\n");
+    const cand = parseRobots("User-agent: *\nDisallow: /\n");
     const d = diffRobots(prod, cand);
     expect(d.anyDivergence).toBe(true);
     expect(d.uaDiffs[0]?.disallowOnlyCand).toContain("/");
   });
 
   it("returns prodOnly/candOnly flags correctly when one side missing", () => {
-    const prod = parseRobots(`User-agent: *\nDisallow: /a\n`);
+    const prod = parseRobots("User-agent: *\nDisallow: /a\n");
     const d1 = diffRobots(prod, null);
     expect(d1.prodOnly).toBe(true);
     expect(d1.anyDivergence).toBe(true);
@@ -115,21 +115,21 @@ describe("diffRobots", () => {
   });
 
   it("flags sitemap-only-in-prod regressions", () => {
-    const prod = parseRobots(`User-agent: *\nSitemap: https://x.com/s.xml\n`);
-    const cand = parseRobots(`User-agent: *\n`);
+    const prod = parseRobots("User-agent: *\nSitemap: https://x.com/s.xml\n");
+    const cand = parseRobots("User-agent: *\n");
     const d = diffRobots(prod, cand);
     expect(d.sitemapDiff.onlyProd).toContain("https://x.com/s.xml");
     expect(d.anyDivergence).toBe(true);
   });
 
   it("no divergence when both sides identical", () => {
-    const txt = `User-agent: *\nDisallow: /admin\nSitemap: https://x.com/s.xml\n`;
+    const txt = "User-agent: *\nDisallow: /admin\nSitemap: https://x.com/s.xml\n";
     expect(diffRobots(parseRobots(txt), parseRobots(txt)).anyDivergence).toBe(false);
   });
 
   it("flags crawl-delay change for a UA", () => {
-    const prod = parseRobots(`User-agent: *\nCrawl-delay: 1\n`);
-    const cand = parseRobots(`User-agent: *\nCrawl-delay: 10\n`);
+    const prod = parseRobots("User-agent: *\nCrawl-delay: 1\n");
+    const cand = parseRobots("User-agent: *\nCrawl-delay: 10\n");
     const d = diffRobots(prod, cand);
     expect(d.uaDiffs[0]?.crawlDelayProd).toBe(1);
     expect(d.uaDiffs[0]?.crawlDelayCand).toBe(10);

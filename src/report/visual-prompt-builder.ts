@@ -120,7 +120,7 @@ function buildHeader(
   );
   if (summary) {
     lines.push(
-      `## Sumário`,
+      "## Sumário",
       "",
       `- **Páginas comparadas:** ${summary.pagesChecked}`,
       `- **Com diferenças:** ${summary.pagesWithDiffs}`,
