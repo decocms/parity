@@ -30,7 +30,7 @@
     "regression-testing"
   ],
   "bin": {
-    "parity": "./dist/cli.js"
+    "parity": "dist/cli.js"
   },
   "files": [
     "dist",
