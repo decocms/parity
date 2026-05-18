@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { baselineList, baselineSet, baselineUnset } from "./commands/baseline.ts";
 import { cacheCommand } from "./commands/cache.ts";
 import { compareCommand } from "./commands/compare.ts";
+import { cssTraceCommand } from "./commands/css-trace.ts";
 import { explainCommand } from "./commands/explain.ts";
 import { journeyCommand } from "./commands/journey.ts";
 import { learnedStats } from "./commands/learned.ts";
@@ -194,6 +195,37 @@ program
   .description("LLM deep-dive on a specific issue (requires ANTHROPIC_API_KEY)")
   .action(async (runId, issueId, opts) => {
     process.exit(await explainCommand(runId, issueId, opts.output));
+  });
+
+program
+  .command("css-trace")
+  .description(
+    "Inspect which CSS rules (from which stylesheets) are affecting a DOM element. Single URL mode lists every matched rule; --prod + --cand mode diffs computed styles between Fresh and TanStack sides.",
+  )
+  .option("--url <url>", "Single URL to inspect (mutually exclusive with --prod/--cand)")
+  .option("--prod <url>", "Production URL (for comparison mode)")
+  .option("--cand <url>", "Candidate URL (for comparison mode)")
+  .requiredOption("--selector <sel>", "CSS selector for the target element (e.g. 'html', '[data-aside]', '.drawer-side')")
+  .option(
+    "--filter <props>",
+    "Comma-separated property names to focus on (e.g. 'scrollbar-gutter,position,width')",
+  )
+  .option("--viewport <viewport>", "mobile, tablet, or desktop", "desktop")
+  .option("--settle <ms>", "Wait this many ms after `load` for hydration", (v) => Number(v), 1500)
+  .option("--json", "Output JSON instead of pretty text", false)
+  .action(async (opts) => {
+    process.exit(
+      await cssTraceCommand({
+        url: opts.url,
+        prod: opts.prod,
+        cand: opts.cand,
+        selector: opts.selector,
+        filter: opts.filter,
+        viewport: opts.viewport,
+        settleMs: opts.settle,
+        json: opts.json,
+      }),
+    );
   });
 
 program
