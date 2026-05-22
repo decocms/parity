@@ -83,6 +83,15 @@ describe("isThirdParty", () => {
     expect(isThirdParty("https://decoassets.com/x.js", "example.com")).toBe(false);
   });
 
+  it("treats deco image proxy / edge cache as first-party", () => {
+    // decoims.com is the deco image optimizer (`/image?fit=cover&src=...`)
+    // decocache.com is the deco edge cache (assets.decocache.com/<site>/...)
+    // Both are storefront-owned infra; they need to be eligible for
+    // cache-coverage opportunities, not filtered out as third-party.
+    expect(isThirdParty("https://decoims.com/image?src=miess-01/foo.png", "miess.com.br")).toBe(false);
+    expect(isThirdParty("https://assets.decocache.com/miess-01/abc/banner.jpg", "miess.com.br")).toBe(false);
+  });
+
   it("returns false for malformed URLs (bug #21: conservative classification)", () => {
     // Conservative: malformed URL should not crash and should not be flagged 3rd party.
     expect(isThirdParty("http://[invalid", "example.com")).toBe(false);
