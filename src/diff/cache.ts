@@ -76,8 +76,21 @@ export function isThirdParty(url: string, baseHost: string | null): boolean {
     const cleanedBase = baseHost.replace(/^www\./, "");
     if (u.hostname === cleanedBase) return false;
     if (u.hostname.endsWith(`.${cleanedBase}`)) return false;
-    // Known same-org patterns: vtex CDN, deco assets
-    if (u.hostname.includes("vtexassets") || u.hostname.includes("decoassets") || u.hostname.includes("vteximg"))
+    // Known same-org patterns for commerce CDNs / image proxies.
+    // - vtexassets.com, vteximg.com.br  → VTEX-hosted CDN
+    // - decoassets.com                  → deco asset storage
+    // - decocache.com                   → deco edge cache
+    // - decoims.com                     → deco image optimizer / proxy
+    // These are all under the storefront's own infra, not third-party trackers,
+    // so they must remain eligible for `cache-coverage` opportunities instead
+    // of being silently skipped as cross-org.
+    if (
+      u.hostname.includes("vtexassets") ||
+      u.hostname.includes("decoassets") ||
+      u.hostname.includes("vteximg") ||
+      u.hostname.includes("decocache") ||
+      u.hostname.includes("decoims")
+    )
       return false;
     return true;
   } catch {
