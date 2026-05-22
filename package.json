@@ -1,87 +1,87 @@
 {
-  "name": "@decocms/parity",
-  "version": "0.1.0",
-  "description": "E2E parity validator for site migrations. Compares prod vs cand and reports UI, functional, SEO, visual, and Web Vitals deltas with an LLM-ranked HTML report.",
-  "type": "module",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/decocms/parity.git"
-  },
-  "homepage": "https://github.com/decocms/parity#readme",
-  "bugs": {
-    "url": "https://github.com/decocms/parity/issues"
-  },
-  "keywords": [
-    "deco",
-    "tanstack",
-    "fresh",
-    "migration",
-    "e2e",
-    "playwright",
-    "web-vitals",
-    "visual-regression",
-    "visual-diff",
-    "llm",
-    "claude",
-    "anthropic",
-    "cli",
-    "parity",
-    "regression-testing"
-  ],
-  "bin": {
-    "parity": "dist/cli.js"
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "AGENTS.md",
-    "CHANGELOG.md",
-    "LICENSE"
-  ],
-  "scripts": {
-    "dev": "bun run --hot src/cli.ts",
-    "build": "bun build src/cli.ts --target=node --outfile=dist/cli.js --packages=external && bun run scripts/postbuild.ts",
-    "check": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "test:e2e": "vitest run tests/e2e",
-    "deadcode": "knip",
-    "lint": "biome lint .",
-    "fmt": "biome format --write .",
-    "prepublishOnly": "bun run check && bun run build"
-  },
-  "engines": {
-    "node": ">=20",
-    "bun": ">=1.1"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.40.0",
-    "chalk": "^5.3.0",
-    "cheerio": "^1.0.0",
-    "commander": "^12.1.0",
-    "open": "^10.1.0",
-    "ora": "^8.1.1",
-    "pixelmatch": "^6.0.0",
-    "playwright": "^1.49.0",
-    "pngjs": "^7.0.0",
-    "zod": "^3.24.1"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
-    "@types/node": "^22.10.0",
-    "@types/pixelmatch": "^5.2.6",
-    "@types/pngjs": "^6.0.5",
-    "@vitest/coverage-v8": "^2.1.8",
-    "knip": "^6.13.1",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
-  "trustedDependencies": [
-    "@biomejs/biome"
-  ]
+	"name": "@decocms/parity",
+	"version": "0.1.1",
+	"description": "E2E parity validator for site migrations. Compares prod vs cand and reports UI, functional, SEO, visual, and Web Vitals deltas with an LLM-ranked HTML report.",
+	"type": "module",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/decocms/parity.git"
+	},
+	"homepage": "https://github.com/decocms/parity#readme",
+	"bugs": {
+		"url": "https://github.com/decocms/parity/issues"
+	},
+	"keywords": [
+		"deco",
+		"tanstack",
+		"fresh",
+		"migration",
+		"e2e",
+		"playwright",
+		"web-vitals",
+		"visual-regression",
+		"visual-diff",
+		"llm",
+		"claude",
+		"anthropic",
+		"cli",
+		"parity",
+		"regression-testing"
+	],
+	"bin": {
+		"parity": "dist/cli.js"
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"AGENTS.md",
+		"CHANGELOG.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"dev": "bun run --hot src/cli.ts",
+		"build": "bun build src/cli.ts --target=node --outfile=dist/cli.js --packages=external && bun run scripts/postbuild.ts",
+		"check": "tsc --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:coverage": "vitest run --coverage",
+		"test:e2e": "vitest run tests/e2e",
+		"deadcode": "knip",
+		"lint": "biome lint .",
+		"fmt": "biome format --write .",
+		"prepublishOnly": "bun run check && bun run build"
+	},
+	"engines": {
+		"node": ">=20",
+		"bun": ">=1.1"
+	},
+	"dependencies": {
+		"@anthropic-ai/sdk": "^0.40.0",
+		"chalk": "^5.3.0",
+		"cheerio": "^1.0.0",
+		"commander": "^12.1.0",
+		"open": "^10.1.0",
+		"ora": "^8.1.1",
+		"pixelmatch": "^6.0.0",
+		"playwright": "^1.49.0",
+		"pngjs": "^7.0.0",
+		"zod": "^3.24.1"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.4",
+		"@types/node": "^22.10.0",
+		"@types/pixelmatch": "^5.2.6",
+		"@types/pngjs": "^6.0.5",
+		"@vitest/coverage-v8": "^2.1.8",
+		"knip": "^6.13.1",
+		"typescript": "^5.7.2",
+		"vitest": "^2.1.8"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"trustedDependencies": [
+		"@biomejs/biome"
+	]
 }
