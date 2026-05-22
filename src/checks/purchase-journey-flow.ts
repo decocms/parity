@@ -28,11 +28,62 @@ export function purchaseJourneyFlow(ctx: CheckContext): CheckResult {
   let failedSteps = 0;
   let asymmetricSkips = 0;
 
+  // Was the purchase-journey flow even in scope for this run? If neither
+  // side has any flow capture for it, the user didn't request it — skip
+  // the check entirely instead of silently reporting "0 steps / pass",
+  // which would let real checkout regressions slip through.
+  const hasAnyPurchaseFlow =
+    ctx.prodFlows.some((f) => f.flow === "purchase-journey") ||
+    ctx.candFlows.some((f) => f.flow === "purchase-journey");
+  if (!hasAnyPurchaseFlow) {
+    return {
+      name: "purchase-journey-flow",
+      status: "skipped",
+      severity: "critical",
+      durationMs: Date.now() - start,
+      summary: "purchase-journey não estava no escopo do run (sem captura de flow)",
+      issues: [],
+      data: { totalSteps: 0, failedSteps: 0, asymmetricSkips: 0 },
+    };
+  }
+
   // Pair flows by viewport
   for (const viewport of ctx.viewports) {
     const prodFlow = findFlow(ctx.prodFlows, viewport);
     const candFlow = findFlow(ctx.candFlows, viewport);
-    if (!prodFlow || !candFlow) continue;
+    if (!prodFlow || !candFlow) {
+      // The flow was requested for the run (we just confirmed above), so a
+      // missing side here is itself a critical signal — either prod never
+      // produced steps (selectors broke against the source-of-truth) or
+      // cand crashed before any step could run. Either way, "pass" is
+      // dangerous.
+      if (prodFlow && !candFlow) {
+        issues.push({
+          id: `pj:${viewport}:missing-cand-flow`,
+          severity: "critical",
+          category: "functional",
+          check: "purchase-journey-flow",
+          summary: `[${viewport}] cand não produziu captura da purchase-journey (prod produziu) — checkout indisponível ou cliente nunca hidratou`,
+        });
+      } else if (!prodFlow && candFlow) {
+        issues.push({
+          id: `pj:${viewport}:missing-prod-flow`,
+          severity: "high",
+          category: "functional",
+          check: "purchase-journey-flow",
+          summary: `[${viewport}] prod não produziu captura da purchase-journey — selectors podem estar desalinhados com a source-of-truth`,
+        });
+      } else {
+        issues.push({
+          id: `pj:${viewport}:no-flow-either-side`,
+          severity: "critical",
+          category: "functional",
+          check: "purchase-journey-flow",
+          summary: `[${viewport}] purchase-journey foi requisitada mas não há captura em prod nem cand — flow falhou completamente`,
+        });
+      }
+      continue;
+    }
 
     const prodSteps = indexBy(prodFlow.steps ?? [], (s) => s.name);
     const candSteps = indexBy(candFlow.steps ?? [], (s) => s.name);
@@ -84,6 +135,21 @@ export function purchaseJourneyFlow(ctx: CheckContext): CheckResult {
         // Cand has something prod doesn't — neutral
       }
     }
+  }
+
+  // Captures existed but 0 steps were actually evaluated (selectors produced
+  // empty step arrays on both sides, or the only steps were cand-only and
+  // skipped at line 47). With no comparable steps the check can't claim
+  // pass — the purchase-journey is effectively unverified.
+  if (totalSteps === 0 && issues.length === 0) {
+    issues.push({
+      id: "pj:zero-steps-evaluated",
+      severity: "critical",
+      category: "functional",
+      check: "purchase-journey-flow",
+      summary:
+        "purchase-journey rodou mas avaliou 0 step(s) — capturas existem mas estão vazias dos dois lados (selectors quebrados ou home não hidratou)",
+    });
   }
 
   const status: CheckResult["status"] =

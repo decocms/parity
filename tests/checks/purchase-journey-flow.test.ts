@@ -79,4 +79,38 @@ describe("purchaseJourneyFlow check", () => {
     expect(r.issues).toHaveLength(0);
     expect(r.status).toBe("pass");
   });
+
+  // ---------- Regressões anti silent-pass (issue: home quebrada com check pass) ----------
+
+  it("skipa (não pass) quando purchase-journey nem foi requisitada no run", () => {
+    // Nenhum dos lados produziu captura — o flow não estava no --flows
+    const r = purchaseJourneyFlow(ctx([], []));
+    expect(r.status).toBe("skipped");
+    expect(r.issues).toHaveLength(0);
+  });
+
+  it("falha com critical quando cand não produziu captura mas prod sim", () => {
+    // Home cand não hidratou, IntersectionObserver/Lazy/_serverFn quebrado,
+    // selectors não acharam nada → cand não emite FlowCapture
+    const prod = [step("visit-home", "ok"), step("add-to-cart", "ok")];
+    const r = purchaseJourneyFlow(ctx([flow("prod", prod)], []));
+    expect(r.status).toBe("fail");
+    expect(r.issues.some((i) => i.severity === "critical" && /missing-cand/.test(i.id))).toBe(true);
+  });
+
+  it("alerta com high quando prod não produziu captura mas cand sim", () => {
+    // Selectors quebrados contra prod (ex.: prod mudou markup) — não é crítico
+    // pra cand mas é regressão do harness; high é o severity certo.
+    const cand = [step("visit-home", "ok")];
+    const r = purchaseJourneyFlow(ctx([], [flow("cand", cand)]));
+    expect(r.status).toBe("warn");
+    expect(r.issues.some((i) => /missing-prod/.test(i.id))).toBe(true);
+  });
+
+  it("falha com critical quando flow requisitada mas com 0 steps em ambos os lados", () => {
+    // Capturas existem mas vazias — não há nada comparável, status não pode ser pass
+    const r = purchaseJourneyFlow(ctx([flow("prod", [])], [flow("cand", [])]));
+    expect(r.status).toBe("fail");
+    expect(r.issues.some((i) => i.id === "pj:zero-steps-evaluated")).toBe(true);
+  });
 });
