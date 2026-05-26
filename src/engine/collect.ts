@@ -259,68 +259,22 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
   const deadline = start + overallBudgetMs;
   const remaining = () => Math.max(500, deadline - Date.now());
 
-  let response: Response | null = null;
-  let finalUrl = opts.url;
-  let xRobotsTag: string | null = null;
-  try {
-    response = await page.goto(opts.url, {
-      waitUntil: "domcontentloaded",
-      timeout: Math.min(opts.timeoutMs ?? 30_000, remaining()),
-    });
-    finalUrl = page.url();
-    if (response) {
-      const headers = response.headers();
-      xRobotsTag = headers["x-robots-tag"] ?? null;
-    }
-    if (opts.fast) {
-      // Fast path: just settle a bit after DOM is ready, no full load wait, no scroll
-      await page
-        .waitForLoadState("networkidle", { timeout: Math.min(4_000, remaining()) })
-        .catch(() => undefined);
-      await page.waitForTimeout(Math.min(opts.settleMs ?? 1_200, remaining()));
-    } else {
-      // Wait for full load (images, fonts, etc.) — capped
-      await page.waitForLoadState("load", { timeout: Math.min(12_000, remaining()) }).catch(() => undefined);
-      // Then networkidle (background fetches settle)
-      await page.waitForLoadState("networkidle", { timeout: Math.min(6_000, remaining()) }).catch(() => undefined);
-      await page.waitForTimeout(Math.min(opts.settleMs ?? 2_000, remaining()));
-
-      // Auto-scroll to trigger lazy-loaded content (images, sections, analytics)
-      if (opts.scrollToLoad !== false && remaining() > 3_000) {
-        await Promise.race([
-          scrollFullPage(page).catch(() => undefined),
-          new Promise<void>((resolve) => setTimeout(resolve, Math.min(10_000, remaining()))),
-        ]);
-        // Brief settle after scrolling back to top
-        await page.waitForTimeout(Math.min(600, remaining()));
-      }
-    }
-  } catch (err) {
-    state.console.push({
-      type: "error",
-      text: `[navigation-error] ${(err as Error).message}`,
-    });
-  }
-
-  const vitals = await page
-    .evaluate(() => (window as unknown as { __parity_vitals?: WebVitals }).__parity_vitals)
-    .catch(() => null);
-
-  if (!opts.skipScreenshot) {
-    await Promise.race([
-      page.screenshot({ path: opts.screenshotPath, fullPage: true, animations: "disabled" }).catch(() => undefined),
-      new Promise<void>((resolve) => setTimeout(resolve, Math.min(15_000, remaining()))),
-    ]);
-  }
-
-  const html = await Promise.race([
-    page.content().catch(() => ""),
-    new Promise<string>((resolve) => setTimeout(() => resolve(""), Math.min(5_000, remaining()))),
-  ]);
-
-  await flushCollectors(state, Math.min(3_000, remaining()));
-
-  return {
+  // Lock the budget at the outermost level. Every internal step already has
+  // its own `Math.min(X, remaining())` timeout, but in practice some
+  // Playwright operations can outlive their declared timeout — most commonly
+  // `page.evaluate(...)` when the page JS engine is busy running a previously-
+  // dispatched evaluate (e.g. scrollFullPage's queued setTimeout chain),
+  // `page.waitForLoadState("networkidle")` against a page that never reaches
+  // idle (many concurrent deferred fetches), and `page.content()` while the
+  // DOM is being mutated by hydration. When any of those misbehave, the
+  // function would silently exceed its budget — we've observed 490+ second
+  // captures of CMS-heavy pages with 10+ deferred sections in flight.
+  //
+  // The outer `Promise.race` adds a final 10 second safety margin on top
+  // of `overallBudgetMs`. If anything inside takes longer than that, the
+  // race returns a partial PageCapture built from whatever the collectors
+  // managed to gather, so the rest of the crawl can proceed.
+  const buildPartial = (): PageCapture => ({
     url: opts.url,
     finalUrl,
     status: response?.status() ?? 0,
@@ -335,5 +289,99 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
     harPath: opts.harPath,
     tracePath: opts.tracePath,
     xRobotsTag,
+  });
+
+  let response: Response | null = null;
+  let finalUrl = opts.url;
+  let xRobotsTag: string | null = null;
+  let vitals: WebVitals | null = null;
+  let html = "";
+
+  const inner = async (): Promise<PageCapture> => {
+    try {
+      response = await page.goto(opts.url, {
+        waitUntil: "domcontentloaded",
+        timeout: Math.min(opts.timeoutMs ?? 30_000, remaining()),
+      });
+      finalUrl = page.url();
+      if (response) {
+        const headers = response.headers();
+        xRobotsTag = headers["x-robots-tag"] ?? null;
+      }
+      if (opts.fast) {
+        // Fast path: just settle a bit after DOM is ready, no full load wait, no scroll
+        await page
+          .waitForLoadState("networkidle", { timeout: Math.min(4_000, remaining()) })
+          .catch(() => undefined);
+        await page.waitForTimeout(Math.min(opts.settleMs ?? 1_200, remaining()));
+      } else {
+        // Wait for full load (images, fonts, etc.) — capped
+        await page.waitForLoadState("load", { timeout: Math.min(12_000, remaining()) }).catch(() => undefined);
+        // Then networkidle (background fetches settle)
+        await page.waitForLoadState("networkidle", { timeout: Math.min(6_000, remaining()) }).catch(() => undefined);
+        await page.waitForTimeout(Math.min(opts.settleMs ?? 2_000, remaining()));
+
+        // Auto-scroll to trigger lazy-loaded content (images, sections, analytics)
+        if (opts.scrollToLoad !== false && remaining() > 3_000) {
+          await Promise.race([
+            scrollFullPage(page).catch(() => undefined),
+            new Promise<void>((resolve) => setTimeout(resolve, Math.min(10_000, remaining()))),
+          ]);
+          // Brief settle after scrolling back to top
+          await page.waitForTimeout(Math.min(600, remaining()));
+        }
+      }
+    } catch (err) {
+      state.console.push({
+        type: "error",
+        text: `[navigation-error] ${(err as Error).message}`,
+      });
+    }
+
+    // `page.evaluate(...)` has no built-in timeout — if a previous evaluate
+    // is still pending in the page's JS queue (e.g. scrollFullPage's
+    // setTimeout chain that didn't resolve before its outer race fired),
+    // this call blocks until that previous evaluate settles. Wrap it in
+    // an explicit race so the budget is actually enforced.
+    vitals = (await Promise.race([
+      page
+        .evaluate(() => (window as unknown as { __parity_vitals?: WebVitals }).__parity_vitals)
+        .catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), Math.min(5_000, remaining()))),
+    ])) ?? null;
+
+    if (!opts.skipScreenshot) {
+      await Promise.race([
+        page.screenshot({ path: opts.screenshotPath, fullPage: true, animations: "disabled" }).catch(() => undefined),
+        new Promise<void>((resolve) => setTimeout(resolve, Math.min(15_000, remaining()))),
+      ]);
+    }
+
+    html = await Promise.race([
+      page.content().catch(() => ""),
+      new Promise<string>((resolve) => setTimeout(() => resolve(""), Math.min(5_000, remaining()))),
+    ]);
+
+    await flushCollectors(state, Math.min(3_000, remaining()));
+
+    return buildPartial();
   };
+
+  // Outer hard deadline = budget + 10s safety. If anything still hangs past
+  // its declared internal timeout, fall back to a partial capture rather
+  // than blocking the whole crawl.
+  const SAFETY_MARGIN_MS = 10_000;
+  const outerDeadlineMs = overallBudgetMs + SAFETY_MARGIN_MS;
+  return Promise.race([
+    inner(),
+    new Promise<PageCapture>((resolve) =>
+      setTimeout(() => {
+        state.console.push({
+          type: "error",
+          text: `[capture-timeout] capturePage exceeded ${outerDeadlineMs}ms outer deadline — returning partial capture`,
+        });
+        resolve(buildPartial());
+      }, outerDeadlineMs),
+    ),
+  ]);
 }
