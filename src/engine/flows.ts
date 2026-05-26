@@ -98,37 +98,43 @@ export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCap
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<FlowCapture>((resolve) => {
     timer = setTimeout(() => {
-      // Force-close every page in the BrowserContext so any in-flight
-      // Playwright op (page.click, page.waitForURL, page.evaluate, …)
-      // rejects with "Target closed" instead of continuing to mutate
-      // browser state in the background. The BrowserContext itself
-      // stays open — the next flow on this same context just calls
-      // newPage() and gets a fresh slate. Without this, a hung click
-      // could keep firing a delayed navigation and corrupt the next
-      // flow's home capture.
       const pages = ctx.ctx.pages();
-      Promise.allSettled(pages.map((p) => p.close())).finally(() => {
-        resolve(
-          finalize(
-            flow,
-            ctx,
-            [],
-            [
-              {
-                step: 0,
-                name: "visit-home",
-                side: ctx.side,
-                viewport: ctx.viewport,
-                status: "failed",
-                durationMs: deadlineMs,
-                screenshotPath: "",
-                actionDescription: `[flow-timeout] flow "${flow}" excedeu ${deadlineMs}ms — captura abortada pela safety net externa, ${pages.length} page(s) fechada(s) para liberar o contexto. Step interno provavelmente travou em uma operação Playwright que não respeitou seu timeout declarado.`,
-              },
-            ],
-            start,
-          ),
-        );
-      });
+      // Seal the timeout result FIRST, synchronously. Closing pages
+      // makes any in-flight Playwright op inside `inner()` reject with
+      // "Target closed" almost immediately; if we awaited those closes
+      // before resolving, Promise.race could pick up the inner
+      // rejection first and make runFlow throw instead of returning
+      // this timeout FlowCapture. Resolving first guarantees the race
+      // is won deterministically by the timeout.
+      resolve(
+        finalize(
+          flow,
+          ctx,
+          [],
+          [
+            {
+              step: 0,
+              name: "visit-home",
+              side: ctx.side,
+              viewport: ctx.viewport,
+              status: "failed",
+              durationMs: deadlineMs,
+              screenshotPath: "",
+              actionDescription: `[flow-timeout] flow "${flow}" excedeu ${deadlineMs}ms — captura abortada pela safety net externa, ${pages.length} page(s) fechada(s) para liberar o contexto. Step interno provavelmente travou em uma operação Playwright que não respeitou seu timeout declarado.`,
+            },
+          ],
+          start,
+        ),
+      );
+      // Now fire-and-forget close every page in the BrowserContext.
+      // This kills any in-flight Playwright op (page.click,
+      // page.waitForURL, page.evaluate, …) so it can't keep mutating
+      // browser state in the background. The context itself stays
+      // open — the next flow on it just calls newPage() and gets a
+      // fresh slate.
+      for (const p of pages) {
+        p.close().catch(() => undefined);
+      }
     }, deadlineMs);
   });
 
