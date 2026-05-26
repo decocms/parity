@@ -453,6 +453,17 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     }
 
     // Step 8: go to checkout
+    //
+    // The default selectors hard-code variants of "Finalizar compra" /
+    // "Ir para o checkout" / "Checkout" / `[data-checkout-button]`. Sites
+    // with non-standard cart CTAs (e.g. miess uses just "Finalizar")
+    // either don't match any default OR match a wrong element that
+    // happens to satisfy the selector but doesn't navigate to /checkout.
+    //
+    // The single-shot click + URL check below catches the second case
+    // (wrong element matched, URL stays on cart). When that happens we
+    // now retry with an LLM recovery call that sees the current cart
+    // HTML — that's the context the up-front discovery phase never had.
     reportStart(8, "go-checkout");
     let checkoutHit = await firstVisibleLocator(page, selFor(ctx, "checkoutButton"));
     let checkoutRecovered = false;
@@ -469,20 +480,71 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       reportEnd(8, "go-checkout", "skipped", 0, "no checkout button found");
       return { pages, steps };
     }
+
+    /**
+     * One attempt at the checkout flow:
+     *   1. Take a "before" screenshot.
+     *   2. Race the click against `waitForURL(/checkout/)` so the click+nav
+     *      finish together when the button is correct.
+     *   3. Settle, take an "after" screenshot, check the final URL.
+     *
+     * Returns the screenshot paths + final URL + text the button had, so
+     * the caller can decide whether to retry with a different selector
+     * (LLM-discovered) when the URL didn't actually reach checkout.
+     */
+    const tryCheckoutClick = async (
+      hit: NonNullable<typeof checkoutHit>,
+      attempt: number,
+    ): Promise<{ url: string; spBefore: string; spAfter: string; clickedText: string }> => {
+      const spBefore = screenshotPath(ctx, `pj-8-checkout-before-${attempt}`);
+      await page.screenshot({ path: spBefore, fullPage: false }).catch(() => undefined);
+      const clickedText = await hit.locator.innerText().catch(() => "");
+      await Promise.all([
+        page.waitForURL(/checkout/i, { timeout: 10_000 }).catch(() => undefined),
+        hit.locator.click({ timeout: 5_000 }).catch(() => undefined),
+      ]);
+      await page.waitForTimeout(1_500);
+      const spAfter = screenshotPath(ctx, `pj-8-checkout-reached-${attempt}`);
+      await page.screenshot({ path: spAfter, fullPage: false }).catch(() => undefined);
+      return { url: page.url(), spBefore, spAfter, clickedText };
+    };
+
     const t8 = Date.now();
     const beforeUrl8 = page.url();
-    const spBefore8 = screenshotPath(ctx, "pj-8-checkout-before");
-    await page.screenshot({ path: spBefore8, fullPage: false }).catch(() => undefined);
-    const checkoutText = await checkoutHit.locator.innerText().catch(() => "");
-    await Promise.all([
-      page.waitForURL(/checkout/i, { timeout: 10_000 }).catch(() => undefined),
-      checkoutHit.locator.click({ timeout: 5_000 }).catch(() => undefined),
-    ]);
-    await page.waitForTimeout(1_500);
-    const sp8 = screenshotPath(ctx, "pj-8-checkout-reached");
-    await page.screenshot({ path: sp8, fullPage: false }).catch(() => undefined);
-    const checkoutUrl = page.url();
-    const reachedCheckout = /\/checkout/i.test(checkoutUrl);
+    let attempt = 1;
+    let result = await tryCheckoutClick(checkoutHit, attempt);
+    let reachedCheckout = /\/checkout/i.test(result.url);
+    let usedSelector = checkoutHit.selector;
+    let clickedText = result.clickedText;
+
+    // If we clicked something but the URL didn't change to /checkout, the
+    // selector likely picked a button that ISN'T the real checkout CTA.
+    // Burn one recovery slot on a fresh LLM call that sees the cart HTML
+    // as it stands NOW (post-failed-click) and ask for the actual
+    // navigation trigger. This is the "LLM should see the rendered cart,
+    // not just the home" path the discovery phase can't take on its own.
+    if (!reachedCheckout && recoveryBudget > 0 && !/\/checkout/i.test(beforeUrl8)) {
+      attempt++;
+      const retrySuggestion = await attemptRecovery(
+        page,
+        ctx,
+        "go-checkout-retry",
+        `Cliquei em '${clickedText.slice(0, 40).trim()}' (selector \`${usedSelector}\`), mas a URL ficou em ${result.url} e não foi pra /checkout. Achar o botão que de fato navega pra /checkout neste cart/minicart aberto.`,
+        [usedSelector, ...selFor(ctx, "checkoutButton")],
+      );
+      if (retrySuggestion) {
+        recoveryBudget--;
+        checkoutRecovered = true;
+        const retryResult = await tryCheckoutClick(retrySuggestion, attempt);
+        if (/\/checkout/i.test(retryResult.url)) {
+          reachedCheckout = true;
+          usedSelector = retrySuggestion.selector;
+          clickedText = retryResult.clickedText;
+          result = retryResult;
+        }
+      }
+    }
+
     const step8Status: StepCapture["status"] = reachedCheckout ? "ok" : "failed";
     steps.push({
       step: 8,
@@ -491,13 +553,13 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       viewport: ctx.viewport,
       status: step8Status,
       durationMs: Date.now() - t8,
-      url: checkoutUrl,
-      screenshotPath: sp8,
-      screenshotBeforePath: spBefore8,
+      url: result.url,
+      screenshotPath: result.spAfter,
+      screenshotBeforePath: result.spBefore,
       beforeUrl: beforeUrl8,
-      actionDescription: `Clicou em${checkoutText ? ` '${checkoutText.slice(0, 30).trim()}'` : ""} (\`${checkoutHit.selector}\`); URL final: ${checkoutUrl}${reachedCheckout ? " ✓ atingiu /checkout" : " ✗ não foi pra checkout"}`,
+      actionDescription: `Clicou em${clickedText ? ` '${clickedText.slice(0, 30).trim()}'` : ""} (\`${usedSelector}\`); URL final: ${result.url}${reachedCheckout ? " ✓ atingiu /checkout" : " ✗ não foi pra checkout"}${attempt > 1 ? ` (após ${attempt} tentativas com recovery LLM)` : ""}`,
       selectorKey: "checkoutButton",
-      usedSelector: checkoutHit.selector,
+      usedSelector,
       recoveredByLlm: checkoutRecovered || undefined,
     });
     reportEnd(8, "go-checkout", step8Status, Date.now() - t8);
