@@ -1,0 +1,38 @@
+name: Release Please
+
+# Watches `main` for Conventional Commits and keeps an open "release PR"
+# that bumps `package.json` + writes `CHANGELOG.md` entries. Merging that
+# release PR creates a `vX.Y.Z` tag and a GitHub release; the tag push
+# then fires `release.yml`, which actually publishes to npm via OIDC.
+#
+# What you do as a maintainer:
+#   1. Write commits with conventional prefixes (`feat:`, `fix:`, …) — the
+#      squash-merge default of GitHub copies the PR title into the merge
+#      commit, so a PR titled `feat(css-trace): inspect CSS rules` already
+#      lands as a minor bump.
+#   2. Eventually merge the release PR this workflow keeps fresh — that's
+#      the only manual step.
+#
+# Bump rules:
+#   feat:        → minor
+#   fix:         → patch
+#   refactor:    → patch
+#   perf:        → patch
+#   docs/chore:  → no bump (still listed in CHANGELOG when grouped)
+#   `BREAKING CHANGE:` footer OR `!` after type → major
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
