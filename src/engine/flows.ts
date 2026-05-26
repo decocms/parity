@@ -96,6 +96,11 @@ export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCap
   innerPromise.catch(() => undefined);
 
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // When the deadline fires, the timeout handler initiates page
+  // closures and stashes the resulting promise here so the awaiter
+  // below can block on them before returning. Defaults to a resolved
+  // promise so the inner-wins (success) path is a no-op.
+  let cleanup: Promise<unknown> = Promise.resolve();
   const timeoutPromise = new Promise<FlowCapture>((resolve) => {
     timer = setTimeout(() => {
       const pages = ctx.ctx.pages();
@@ -126,20 +131,28 @@ export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCap
           start,
         ),
       );
-      // Now fire-and-forget close every page in the BrowserContext.
-      // This kills any in-flight Playwright op (page.click,
-      // page.waitForURL, page.evaluate, …) so it can't keep mutating
-      // browser state in the background. The context itself stays
-      // open — the next flow on it just calls newPage() and gets a
-      // fresh slate.
-      for (const p of pages) {
-        p.close().catch(() => undefined);
-      }
+      // Now kick off close on every page in the BrowserContext and
+      // expose the promise so runFlow can await it before returning.
+      // The context stays open — next flow on it calls newPage() and
+      // gets a fresh slate. Awaiting here matters because:
+      //   - cookies/storage are shared across pages on the same
+      //     context, so an in-flight VTEX cart action could finish
+      //     between resolve() and the next flow's first interaction.
+      //   - newPage() doesn't wait for sibling pages to finish
+      //     closing, so without this await the next flow's home
+      //     capture could overlap stale network handlers.
+      cleanup = Promise.allSettled(pages.map((p) => p.close()));
     }, deadlineMs);
   });
 
   try {
-    return await Promise.race([innerPromise, timeoutPromise]);
+    const result = await Promise.race([innerPromise, timeoutPromise]);
+    // On the timeout path, await the close promises before returning
+    // so the caller can start the next flow against a quiesced
+    // context. On the success path `cleanup` is the default
+    // Promise.resolve() and this is a no-op.
+    await cleanup;
+    return result;
   } finally {
     // Always clear the deadline timer when the race ends, so we don't
     // leave a pending Node timer keeping the event loop alive until the
