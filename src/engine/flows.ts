@@ -47,20 +47,75 @@ function selFor(ctx: FlowContext, key: SelectorKey): string[] {
 /**
  * Run a named flow. Returns all pages visited and (for purchase-journey) ordered steps.
  */
+/**
+ * Per-flow hard deadlines so a single misbehaving page can never freeze the
+ * whole crawl. `capturePage` already has its own 60s + 10s outer race in
+ * `collect.ts`, but a flow can include several page captures plus selector
+ * discovery, click + navigation waits, and LLM recovery calls. Real-world
+ * runs against CMS-heavy sites have hung for 1h+ at `running flow "plp"`
+ * because something inside the flow was waiting on a Playwright op that
+ * doesn't honor its declared timeout (most commonly `page.click` followed
+ * by an implicit navigation wait when the target page never reaches a
+ * settled state).
+ *
+ * Budget scales with how much each flow has to do — homepage is a single
+ * capture, plp/pdp add a navigation step, purchase-journey runs 8 steps.
+ * Each individual step has its own timeout caps; this is the safety net
+ * for the case where those caps misbehave.
+ */
+const FLOW_DEADLINE_MS: Record<FlowName, number> = {
+  homepage: 90_000, // single capturePage worst case
+  plp: 180_000, // home → click category → capturePage
+  pdp: 240_000, // home → PLP → click product → capturePage
+  "purchase-journey": 360_000, // 8 steps × ~30s + LLM recovery
+};
+
 export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCapture> {
   const start = Date.now();
-  switch (flow) {
-    case "homepage":
-      return finalize(flow, ctx, await flowHomepage(ctx), [], start);
-    case "plp":
-      return finalize(flow, ctx, await flowPlp(ctx), [], start);
-    case "pdp":
-      return finalize(flow, ctx, await flowPdp(ctx), [], start);
-    case "purchase-journey": {
-      const { pages, steps } = await flowPurchaseJourney(ctx);
-      return finalize(flow, ctx, pages, steps, start);
+  const deadlineMs = FLOW_DEADLINE_MS[flow];
+  const inner = async (): Promise<FlowCapture> => {
+    switch (flow) {
+      case "homepage":
+        return finalize(flow, ctx, await flowHomepage(ctx), [], start);
+      case "plp":
+        return finalize(flow, ctx, await flowPlp(ctx), [], start);
+      case "pdp":
+        return finalize(flow, ctx, await flowPdp(ctx), [], start);
+      case "purchase-journey": {
+        const { pages, steps } = await flowPurchaseJourney(ctx);
+        return finalize(flow, ctx, pages, steps, start);
+      }
     }
-  }
+  };
+  return Promise.race([
+    inner(),
+    new Promise<FlowCapture>((resolve) =>
+      setTimeout(
+        () =>
+          resolve(
+            finalize(
+              flow,
+              ctx,
+              [],
+              [
+                {
+                  step: 0,
+                  name: "visit-home",
+                  side: ctx.side,
+                  viewport: ctx.viewport,
+                  status: "failed",
+                  durationMs: deadlineMs,
+                  screenshotPath: "",
+                  actionDescription: `[flow-timeout] flow "${flow}" excedeu ${deadlineMs}ms — captura abortada pela safety net externa. Step interno provavelmente travou em uma operação Playwright que não respeitou seu timeout declarado.`,
+                },
+              ],
+              start,
+            ),
+          ),
+        deadlineMs,
+      ),
+    ),
+  ]);
 }
 
 function finalize(
