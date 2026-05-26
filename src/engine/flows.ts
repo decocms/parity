@@ -87,35 +87,59 @@ export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCap
       }
     }
   };
-  return Promise.race([
-    inner(),
-    new Promise<FlowCapture>((resolve) =>
-      setTimeout(
-        () =>
-          resolve(
-            finalize(
-              flow,
-              ctx,
-              [],
-              [
-                {
-                  step: 0,
-                  name: "visit-home",
-                  side: ctx.side,
-                  viewport: ctx.viewport,
-                  status: "failed",
-                  durationMs: deadlineMs,
-                  screenshotPath: "",
-                  actionDescription: `[flow-timeout] flow "${flow}" excedeu ${deadlineMs}ms — captura abortada pela safety net externa. Step interno provavelmente travou em uma operação Playwright que não respeitou seu timeout declarado.`,
-                },
-              ],
-              start,
-            ),
+
+  // Run the flow exactly once. If it rejects after the deadline has
+  // already won the race (e.g. because we closed its pages), swallow
+  // the rejection silently — Promise.race already returned the
+  // timeout's FlowCapture and the inner rejection isn't actionable.
+  const innerPromise = inner();
+  innerPromise.catch(() => undefined);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<FlowCapture>((resolve) => {
+    timer = setTimeout(() => {
+      // Force-close every page in the BrowserContext so any in-flight
+      // Playwright op (page.click, page.waitForURL, page.evaluate, …)
+      // rejects with "Target closed" instead of continuing to mutate
+      // browser state in the background. The BrowserContext itself
+      // stays open — the next flow on this same context just calls
+      // newPage() and gets a fresh slate. Without this, a hung click
+      // could keep firing a delayed navigation and corrupt the next
+      // flow's home capture.
+      const pages = ctx.ctx.pages();
+      Promise.allSettled(pages.map((p) => p.close())).finally(() => {
+        resolve(
+          finalize(
+            flow,
+            ctx,
+            [],
+            [
+              {
+                step: 0,
+                name: "visit-home",
+                side: ctx.side,
+                viewport: ctx.viewport,
+                status: "failed",
+                durationMs: deadlineMs,
+                screenshotPath: "",
+                actionDescription: `[flow-timeout] flow "${flow}" excedeu ${deadlineMs}ms — captura abortada pela safety net externa, ${pages.length} page(s) fechada(s) para liberar o contexto. Step interno provavelmente travou em uma operação Playwright que não respeitou seu timeout declarado.`,
+              },
+            ],
+            start,
           ),
-        deadlineMs,
-      ),
-    ),
-  ]);
+        );
+      });
+    }, deadlineMs);
+  });
+
+  try {
+    return await Promise.race([innerPromise, timeoutPromise]);
+  } finally {
+    // Always clear the deadline timer when the race ends, so we don't
+    // leave a pending Node timer keeping the event loop alive until the
+    // deadline naturally fires.
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function finalize(
@@ -619,7 +643,6 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     // navigation trigger. This is the "LLM should see the rendered cart,
     // not just the home" path the discovery phase can't take on its own.
     if (!reachedCheckout && recoveryBudget > 0 && !/\/checkout/i.test(beforeUrl8)) {
-      attempt++;
       const retrySuggestion = await attemptRecovery(
         page,
         ctx,
@@ -630,13 +653,16 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       if (retrySuggestion) {
         recoveryBudget--;
         checkoutRecovered = true;
+        attempt++;
         const retryResult = await tryCheckoutClick(retrySuggestion, attempt);
-        if (/\/checkout/i.test(retryResult.url)) {
-          reachedCheckout = true;
-          usedSelector = retrySuggestion.selector;
-          clickedText = retryResult.clickedText;
-          result = retryResult;
-        }
+        // Always promote the retry to the "current" attempt — it IS the
+        // most recent action, so the reported URL, screenshot paths,
+        // selector and clicked text must reflect it. Whether the retry
+        // *succeeded* is decided by URL match alone.
+        result = retryResult;
+        usedSelector = retrySuggestion.selector;
+        clickedText = retryResult.clickedText;
+        reachedCheckout = /\/checkout/i.test(retryResult.url);
       }
     }
 
