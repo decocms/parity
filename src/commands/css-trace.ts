@@ -206,7 +206,7 @@ function printResult(result: TraceResult, header: string): void {
   console.log(chalk.dim(`URL: ${result.url}`));
   console.log(chalk.dim(`Selector: ${result.selector}`));
   if (!result.found) {
-    console.log(chalk.red(`✖ Element not found`));
+    console.log(chalk.red("✖ Element not found"));
     return;
   }
   const computedKeys = Object.keys(result.computed);
@@ -228,7 +228,7 @@ function printResult(result: TraceResult, header: string): void {
       const bang = p.important ? chalk.red(" !important") : "";
       console.log(`        ${p.name}: ${p.value}${bang};`);
     }
-    console.log(`      }`);
+    console.log("      }");
   }
 }
 
@@ -253,7 +253,7 @@ function printComparison(prod: TraceResult, cand: TraceResult): void {
   printResult(prod, "── PROD ──────────────────────────────────────────────");
   printResult(cand, "── CAND ──────────────────────────────────────────────");
   const diffs = diffComputed(prod, cand);
-  console.log(chalk.bold(`\n── DIFF (computed) ───────────────────────────────────`));
+  console.log(chalk.bold("\n── DIFF (computed) ───────────────────────────────────"));
   if (diffs.length === 0) {
     console.log(chalk.green("  No computed-style differences in the filtered set."));
     return;
