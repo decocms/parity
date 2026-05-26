@@ -297,8 +297,31 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     steps[steps.length - 1]!.beforeUrl = plpHit.url;
 
     // Step 4 (conditional): shipping calc on PDP
+    //
+    // The default cepInputPdp selectors target the common attribute
+    // patterns (`name='zipcode'`, `placeholder*='CEP'`, etc). Sites with
+    // a custom CMS markup (label-only, custom name, framework-specific
+    // input wrappers) silently miss all of them — the step says "no CEP
+    // input on PDP" and skips, when the input is actually visible on
+    // screen. Fall through to the same LLM recovery the click steps use
+    // before declaring there's no CEP input.
     reportStart(4, "shipping-calc-pdp");
-    const cepInputPdp = await firstVisible(page, selFor(ctx, "cepInputPdp"));
+    let cepInputPdp = await firstVisible(page, selFor(ctx, "cepInputPdp"));
+    let cepPdpRecovered = false;
+    if (!cepInputPdp && recoveryBudget > 0) {
+      const recovery = await attemptRecovery(
+        page,
+        ctx,
+        "shipping-calc-pdp",
+        "Achar o input de CEP / código postal nesta PDP (deve ser um input visível com label/placeholder relacionado a frete, entrega ou CEP)",
+        selFor(ctx, "cepInputPdp"),
+      );
+      if (recovery) {
+        cepInputPdp = recovery.selector;
+        cepPdpRecovered = true;
+        recoveryBudget--;
+      }
+    }
     if (cepInputPdp) {
       const t4 = Date.now();
       const beforeUrl4 = page.url();
@@ -319,14 +342,15 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         screenshotPath: sp,
         screenshotBeforePath: spBefore4,
         beforeUrl: beforeUrl4,
-        actionDescription: `Preencheu CEP '${ctx.rc.cep}' no input \`${cepInputPdp}\` e disparou cálculo de frete`,
+        actionDescription: `Preencheu CEP '${ctx.rc.cep}' no input \`${cepInputPdp}\` e disparou cálculo de frete${cepPdpRecovered ? " (selector via LLM recovery)" : ""}`,
         detail: { cepUsed: ctx.rc.cep },
         selectorKey: "cepInputPdp",
         usedSelector: cepInputPdp,
+        recoveredByLlm: cepPdpRecovered || undefined,
       });
       reportEnd(4, "shipping-calc-pdp", step4Status, Date.now() - t4);
     } else {
-      steps.push(makeSkipStep(4, "shipping-calc-pdp", ctx, "no CEP input on PDP"));
+      steps.push(makeSkipStep(4, "shipping-calc-pdp", ctx, "no CEP input on PDP (recovery exhausted)"));
       reportEnd(4, "shipping-calc-pdp", "skipped", 0, "no CEP input on PDP");
     }
 
@@ -420,7 +444,22 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
 
     // Step 7: shipping calc in cart
     reportStart(7, "shipping-calc-cart");
-    const cepInputCart = await firstVisible(page, selFor(ctx, "cepInputCart"));
+    let cepInputCart = await firstVisible(page, selFor(ctx, "cepInputCart"));
+    let cepCartRecovered = false;
+    if (!cepInputCart && recoveryBudget > 0) {
+      const recovery = await attemptRecovery(
+        page,
+        ctx,
+        "shipping-calc-cart",
+        "Achar o input de CEP / código postal dentro do carrinho ou minicart aberto agora (input visível com label/placeholder de frete, entrega ou CEP)",
+        selFor(ctx, "cepInputCart"),
+      );
+      if (recovery) {
+        cepInputCart = recovery.selector;
+        cepCartRecovered = true;
+        recoveryBudget--;
+      }
+    }
     if (cepInputCart) {
       const t7 = Date.now();
       const beforeUrl7 = page.url();
@@ -441,14 +480,15 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         screenshotPath: sp7,
         screenshotBeforePath: spBefore7,
         beforeUrl: beforeUrl7,
-        actionDescription: `Preencheu CEP '${ctx.rc.cep}' no carrinho (\`${cepInputCart}\`)`,
+        actionDescription: `Preencheu CEP '${ctx.rc.cep}' no carrinho (\`${cepInputCart}\`)${cepCartRecovered ? " (selector via LLM recovery)" : ""}`,
         detail: { cepUsed: ctx.rc.cep },
         selectorKey: "cepInputCart",
         usedSelector: cepInputCart,
+        recoveredByLlm: cepCartRecovered || undefined,
       });
       reportEnd(7, "shipping-calc-cart", step7Status, Date.now() - t7);
     } else {
-      steps.push(makeSkipStep(7, "shipping-calc-cart", ctx, "no CEP input in cart"));
+      steps.push(makeSkipStep(7, "shipping-calc-cart", ctx, "no CEP input in cart (recovery exhausted)"));
       reportEnd(7, "shipping-calc-cart", "skipped", 0, "no CEP input in cart");
     }
 
