@@ -27,10 +27,19 @@ name: Release Please
 #
 # IMPORTANT: the publish step runs INSIDE this workflow rather than in a
 # separate tag-triggered workflow because GitHub's default `GITHUB_TOKEN`
-# does not cascade-trigger other workflows. If we relied on a separate
-# `release.yml` to react to the tag release-please pushes, that workflow
-# would never run and npm would never see the release. Keeping publish
-# in-line removes that footgun and removes the need for a PAT.
+# does not cascade-trigger other workflows. A `release.yml` listening on
+# `push: tags: ["v*"]` would never fire from a tag release-please pushes,
+# so npm would never see the release. Keeping publish in-line removes
+# that footgun and avoids the need for a PAT.
+#
+# Manual break-glass: if you need to publish without going through the
+# release PR (e.g. urgent hotfix, release-please is misbehaving), run
+# `npm publish --access public` directly from a maintainer machine.
+# Conventions:
+#   - bump the version in package.json first (`npm version <ver>`)
+#   - update CHANGELOG.md manually
+#   - commit + push the tag (`git push origin main --follow-tags`)
+# release-please will catch up on the next push to main.
 on:
   push:
     branches: [main]
@@ -38,11 +47,17 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  id-token: write
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    # Only the bare minimum needed to push the release PR + tag.
+    # `id-token` is NOT requested here — only the publish job below
+    # needs it, and OIDC permissions must be scoped to the smallest
+    # job that actually exchanges the token with npm.
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
