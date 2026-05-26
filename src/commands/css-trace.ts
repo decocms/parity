@@ -56,6 +56,16 @@ interface MatchedRule {
   properties: CssProperty[];
   /** Specificity tuple as reported by CDP, [a, b, c]. */
   specificity?: [number, number, number];
+  /**
+   * Distance up the ancestor chain when this rule comes from an inherited
+   * match. `0` (or undefined) means the rule applied directly to the target
+   * element. `1` = parent, `2` = grandparent, etc. The CDP
+   * `CSS.getMatchedStylesForNode` response groups inherited matches by
+   * ancestor; preserve that grouping so the reader can distinguish "the
+   * element matched this rule" from "the element inherits this value from
+   * an ancestor that matched it".
+   */
+  inheritedFromDistance?: number;
 }
 
 interface TraceResult {
@@ -117,7 +127,17 @@ async function tracePage(
       matchingSelectors: number[];
     }>;
     inherited?: Array<{
-      matchedCSSRules: Array<unknown>;
+      matchedCSSRules?: Array<{
+        rule: {
+          styleSheetId?: string;
+          selectorList: { selectors: Array<{ text: string }> };
+          style: {
+            cssProperties: Array<{ name: string; value: string; important?: boolean; disabled?: boolean }>;
+          };
+          origin: string;
+        };
+        matchingSelectors: number[];
+      }>;
     }>;
   };
 
@@ -153,15 +173,19 @@ async function tracePage(
     }
   }
 
-  const rules: MatchedRule[] = [];
-  for (const m of matched.matchedCSSRules ?? []) {
+  // Shared rule-extraction logic for both direct matches and matches on
+  // ancestors that inherit into the target element.
+  const buildRule = async (
+    m: { rule: { styleSheetId?: string; selectorList: { selectors: Array<{ text: string }> }; style: { cssProperties: Array<{ name: string; value: string; important?: boolean; disabled?: boolean }> }; origin: string }; matchingSelectors: number[] },
+    inheritedFromDistance?: number,
+  ): Promise<MatchedRule> => {
     const r = m.rule;
     // Resolve the specific selector that matched (CDP gives indices).
     const selectors = r.selectorList.selectors.map((s) => s.text);
     const matchedSelectors = m.matchingSelectors.map((i) => selectors[i]).filter(Boolean);
     const sel = matchedSelectors.join(", ") || selectors.join(", ") || "(no selector text)";
     const source = await sheetSource(r.styleSheetId, r.origin);
-    rules.push({
+    return {
       source,
       selector: sel,
       properties: (r.style.cssProperties ?? [])
@@ -178,7 +202,33 @@ async function tracePage(
             disabled: p.disabled,
           };
         }),
-    });
+      ...(inheritedFromDistance !== undefined ? { inheritedFromDistance } : {}),
+    };
+  };
+
+  const rules: MatchedRule[] = [];
+  for (const m of matched.matchedCSSRules ?? []) {
+    rules.push(await buildRule(m));
+  }
+
+  // Inherited matches: CDP returns an array indexed by ancestor distance
+  // (index 0 = direct parent, 1 = grandparent, …). Each ancestor entry has
+  // its own `matchedCSSRules` listing the rules that applied to *that*
+  // ancestor. CSS inheritance then carries inheritable properties (color,
+  // font-*, line-height, visibility, etc.) down to the target element, so a
+  // value in `computed` that doesn't appear in any direct rule almost
+  // certainly came from one of these inherited rules. Skipping them was
+  // making the diff output incomplete on properties that propagate from a
+  // wrapper (often the case for typography and theme tokens applied to
+  // `<html>` / `<body>`).
+  const inheritedGroups = matched.inherited ?? [];
+  for (let i = 0; i < inheritedGroups.length; i++) {
+    const group = inheritedGroups[i];
+    if (!group?.matchedCSSRules?.length) continue;
+    const distance = i + 1;
+    for (const m of group.matchedCSSRules) {
+      rules.push(await buildRule(m, distance));
+    }
   }
 
   await cdp.detach();
@@ -222,7 +272,11 @@ function printResult(result: TraceResult, header: string): void {
   }
   console.log(chalk.bold("\n  Rules (ordered by CDP — most specific last):"));
   for (const r of result.rules) {
-    console.log(`    ${chalk.magenta(r.source)}`);
+    const inheritLabel =
+      r.inheritedFromDistance !== undefined
+        ? chalk.yellow(` ↑ inherited from ancestor (${r.inheritedFromDistance})`)
+        : "";
+    console.log(`    ${chalk.magenta(r.source)}${inheritLabel}`);
     console.log(`      ${chalk.green(r.selector)} {`);
     for (const p of r.properties) {
       const bang = p.important ? chalk.red(" !important") : "";
@@ -273,11 +327,32 @@ export async function cssTraceCommand(opts: CssTraceOptions): Promise<number> {
     console.error(chalk.red("--selector is required"));
     return 1;
   }
-  const isCompare = !!(opts.prod && opts.cand);
-  if (!isCompare && !opts.url) {
-    console.error(chalk.red("Provide either --url or both --prod and --cand"));
+
+  // Enforce the mutual exclusion that --help documents on `--url`:
+  // either single-URL mode (`--url`) or comparison mode (`--prod` AND
+  // `--cand`), never a mix. Silently picking one when the user passed
+  // both is the worst behavior — it makes "why is `--url` being
+  // ignored?" debugging painful.
+  const hasUrl = !!opts.url;
+  const hasProd = !!opts.prod;
+  const hasCand = !!opts.cand;
+  if (hasUrl && (hasProd || hasCand)) {
+    console.error(
+      chalk.red("--url is mutually exclusive with --prod / --cand. Pass one mode only."),
+    );
     return 1;
   }
+  if ((hasProd && !hasCand) || (!hasProd && hasCand)) {
+    console.error(
+      chalk.red("Comparison mode needs both --prod and --cand (got only one)."),
+    );
+    return 1;
+  }
+  if (!hasUrl && !hasProd && !hasCand) {
+    console.error(chalk.red("Provide either --url or both --prod and --cand."));
+    return 1;
+  }
+  const isCompare = hasProd && hasCand;
 
   let browser: Browser | null = null;
   try {
