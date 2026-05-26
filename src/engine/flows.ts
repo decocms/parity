@@ -47,19 +47,117 @@ function selFor(ctx: FlowContext, key: SelectorKey): string[] {
 /**
  * Run a named flow. Returns all pages visited and (for purchase-journey) ordered steps.
  */
+/**
+ * Per-flow hard deadlines so a single misbehaving page can never freeze the
+ * whole crawl. `capturePage` already has its own 60s + 10s outer race in
+ * `collect.ts`, but a flow can include several page captures plus selector
+ * discovery, click + navigation waits, and LLM recovery calls. Real-world
+ * runs against CMS-heavy sites have hung for 1h+ at `running flow "plp"`
+ * because something inside the flow was waiting on a Playwright op that
+ * doesn't honor its declared timeout (most commonly `page.click` followed
+ * by an implicit navigation wait when the target page never reaches a
+ * settled state).
+ *
+ * Budget scales with how much each flow has to do — homepage is a single
+ * capture, plp/pdp add a navigation step, purchase-journey runs 8 steps.
+ * Each individual step has its own timeout caps; this is the safety net
+ * for the case where those caps misbehave.
+ */
+const FLOW_DEADLINE_MS: Record<FlowName, number> = {
+  homepage: 90_000, // single capturePage worst case
+  plp: 180_000, // home → click category → capturePage
+  pdp: 240_000, // home → PLP → click product → capturePage
+  "purchase-journey": 360_000, // 8 steps × ~30s + LLM recovery
+};
+
 export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCapture> {
   const start = Date.now();
-  switch (flow) {
-    case "homepage":
-      return finalize(flow, ctx, await flowHomepage(ctx), [], start);
-    case "plp":
-      return finalize(flow, ctx, await flowPlp(ctx), [], start);
-    case "pdp":
-      return finalize(flow, ctx, await flowPdp(ctx), [], start);
-    case "purchase-journey": {
-      const { pages, steps } = await flowPurchaseJourney(ctx);
-      return finalize(flow, ctx, pages, steps, start);
+  const deadlineMs = FLOW_DEADLINE_MS[flow];
+  const inner = async (): Promise<FlowCapture> => {
+    switch (flow) {
+      case "homepage":
+        return finalize(flow, ctx, await flowHomepage(ctx), [], start);
+      case "plp":
+        return finalize(flow, ctx, await flowPlp(ctx), [], start);
+      case "pdp":
+        return finalize(flow, ctx, await flowPdp(ctx), [], start);
+      case "purchase-journey": {
+        const { pages, steps } = await flowPurchaseJourney(ctx);
+        return finalize(flow, ctx, pages, steps, start);
+      }
     }
+  };
+
+  // Run the flow exactly once. If it rejects after the deadline has
+  // already won the race (e.g. because we closed its pages), swallow
+  // the rejection silently — Promise.race already returned the
+  // timeout's FlowCapture and the inner rejection isn't actionable.
+  const innerPromise = inner();
+  innerPromise.catch(() => undefined);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // When the deadline fires, the timeout handler initiates page
+  // closures and stashes the resulting promise here so the awaiter
+  // below can block on them before returning. Defaults to a resolved
+  // promise so the inner-wins (success) path is a no-op.
+  let cleanup: Promise<unknown> = Promise.resolve();
+  const timeoutPromise = new Promise<FlowCapture>((resolve) => {
+    timer = setTimeout(() => {
+      const pages = ctx.ctx.pages();
+      // Seal the timeout result FIRST, synchronously. Closing pages
+      // makes any in-flight Playwright op inside `inner()` reject with
+      // "Target closed" almost immediately; if we awaited those closes
+      // before resolving, Promise.race could pick up the inner
+      // rejection first and make runFlow throw instead of returning
+      // this timeout FlowCapture. Resolving first guarantees the race
+      // is won deterministically by the timeout.
+      resolve(
+        finalize(
+          flow,
+          ctx,
+          [],
+          [
+            {
+              step: 0,
+              name: "visit-home",
+              side: ctx.side,
+              viewport: ctx.viewport,
+              status: "failed",
+              durationMs: deadlineMs,
+              screenshotPath: "",
+              actionDescription: `[flow-timeout] flow "${flow}" excedeu ${deadlineMs}ms — captura abortada pela safety net externa, ${pages.length} page(s) fechada(s) para liberar o contexto. Step interno provavelmente travou em uma operação Playwright que não respeitou seu timeout declarado.`,
+            },
+          ],
+          start,
+        ),
+      );
+      // Now kick off close on every page in the BrowserContext and
+      // expose the promise so runFlow can await it before returning.
+      // The context stays open — next flow on it calls newPage() and
+      // gets a fresh slate. Awaiting here matters because:
+      //   - cookies/storage are shared across pages on the same
+      //     context, so an in-flight VTEX cart action could finish
+      //     between resolve() and the next flow's first interaction.
+      //   - newPage() doesn't wait for sibling pages to finish
+      //     closing, so without this await the next flow's home
+      //     capture could overlap stale network handlers.
+      cleanup = Promise.allSettled(pages.map((p) => p.close()));
+    }, deadlineMs);
+  });
+
+  try {
+    const result = await Promise.race([innerPromise, timeoutPromise]);
+    // On the timeout path, await the close promises before returning
+    // so the caller can start the next flow against a quiesced
+    // context. On the success path `cleanup` is the default
+    // Promise.resolve() and this is a no-op.
+    await cleanup;
+    return result;
+  } finally {
+    // Always clear the deadline timer when the race ends, so we don't
+    // leave a pending Node timer keeping the event loop alive until the
+    // deadline naturally fires.
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
@@ -297,8 +395,31 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     steps[steps.length - 1]!.beforeUrl = plpHit.url;
 
     // Step 4 (conditional): shipping calc on PDP
+    //
+    // The default cepInputPdp selectors target the common attribute
+    // patterns (`name='zipcode'`, `placeholder*='CEP'`, etc). Sites with
+    // a custom CMS markup (label-only, custom name, framework-specific
+    // input wrappers) silently miss all of them — the step says "no CEP
+    // input on PDP" and skips, when the input is actually visible on
+    // screen. Fall through to the same LLM recovery the click steps use
+    // before declaring there's no CEP input.
     reportStart(4, "shipping-calc-pdp");
-    const cepInputPdp = await firstVisible(page, selFor(ctx, "cepInputPdp"));
+    let cepInputPdp = await firstVisible(page, selFor(ctx, "cepInputPdp"));
+    let cepPdpRecovered = false;
+    if (!cepInputPdp && recoveryBudget > 0) {
+      const recovery = await attemptRecovery(
+        page,
+        ctx,
+        "shipping-calc-pdp",
+        "Achar o input de CEP / código postal nesta PDP (deve ser um input visível com label/placeholder relacionado a frete, entrega ou CEP)",
+        selFor(ctx, "cepInputPdp"),
+      );
+      if (recovery) {
+        cepInputPdp = recovery.selector;
+        cepPdpRecovered = true;
+        recoveryBudget--;
+      }
+    }
     if (cepInputPdp) {
       const t4 = Date.now();
       const beforeUrl4 = page.url();
@@ -319,14 +440,15 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         screenshotPath: sp,
         screenshotBeforePath: spBefore4,
         beforeUrl: beforeUrl4,
-        actionDescription: `Preencheu CEP '${ctx.rc.cep}' no input \`${cepInputPdp}\` e disparou cálculo de frete`,
+        actionDescription: `Preencheu CEP '${ctx.rc.cep}' no input \`${cepInputPdp}\` e disparou cálculo de frete${cepPdpRecovered ? " (selector via LLM recovery)" : ""}`,
         detail: { cepUsed: ctx.rc.cep },
         selectorKey: "cepInputPdp",
         usedSelector: cepInputPdp,
+        recoveredByLlm: cepPdpRecovered || undefined,
       });
       reportEnd(4, "shipping-calc-pdp", step4Status, Date.now() - t4);
     } else {
-      steps.push(makeSkipStep(4, "shipping-calc-pdp", ctx, "no CEP input on PDP"));
+      steps.push(makeSkipStep(4, "shipping-calc-pdp", ctx, "no CEP input on PDP (recovery exhausted)"));
       reportEnd(4, "shipping-calc-pdp", "skipped", 0, "no CEP input on PDP");
     }
 
@@ -420,7 +542,22 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
 
     // Step 7: shipping calc in cart
     reportStart(7, "shipping-calc-cart");
-    const cepInputCart = await firstVisible(page, selFor(ctx, "cepInputCart"));
+    let cepInputCart = await firstVisible(page, selFor(ctx, "cepInputCart"));
+    let cepCartRecovered = false;
+    if (!cepInputCart && recoveryBudget > 0) {
+      const recovery = await attemptRecovery(
+        page,
+        ctx,
+        "shipping-calc-cart",
+        "Achar o input de CEP / código postal dentro do carrinho ou minicart aberto agora (input visível com label/placeholder de frete, entrega ou CEP)",
+        selFor(ctx, "cepInputCart"),
+      );
+      if (recovery) {
+        cepInputCart = recovery.selector;
+        cepCartRecovered = true;
+        recoveryBudget--;
+      }
+    }
     if (cepInputCart) {
       const t7 = Date.now();
       const beforeUrl7 = page.url();
@@ -441,18 +578,30 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         screenshotPath: sp7,
         screenshotBeforePath: spBefore7,
         beforeUrl: beforeUrl7,
-        actionDescription: `Preencheu CEP '${ctx.rc.cep}' no carrinho (\`${cepInputCart}\`)`,
+        actionDescription: `Preencheu CEP '${ctx.rc.cep}' no carrinho (\`${cepInputCart}\`)${cepCartRecovered ? " (selector via LLM recovery)" : ""}`,
         detail: { cepUsed: ctx.rc.cep },
         selectorKey: "cepInputCart",
         usedSelector: cepInputCart,
+        recoveredByLlm: cepCartRecovered || undefined,
       });
       reportEnd(7, "shipping-calc-cart", step7Status, Date.now() - t7);
     } else {
-      steps.push(makeSkipStep(7, "shipping-calc-cart", ctx, "no CEP input in cart"));
+      steps.push(makeSkipStep(7, "shipping-calc-cart", ctx, "no CEP input in cart (recovery exhausted)"));
       reportEnd(7, "shipping-calc-cart", "skipped", 0, "no CEP input in cart");
     }
 
     // Step 8: go to checkout
+    //
+    // The default selectors hard-code variants of "Finalizar compra" /
+    // "Ir para o checkout" / "Checkout" / `[data-checkout-button]`. Sites
+    // with non-standard cart CTAs (e.g. miess uses just "Finalizar")
+    // either don't match any default OR match a wrong element that
+    // happens to satisfy the selector but doesn't navigate to /checkout.
+    //
+    // The single-shot click + URL check below catches the second case
+    // (wrong element matched, URL stays on cart). When that happens we
+    // now retry with an LLM recovery call that sees the current cart
+    // HTML — that's the context the up-front discovery phase never had.
     reportStart(8, "go-checkout");
     let checkoutHit = await firstVisibleLocator(page, selFor(ctx, "checkoutButton"));
     let checkoutRecovered = false;
@@ -469,20 +618,73 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       reportEnd(8, "go-checkout", "skipped", 0, "no checkout button found");
       return { pages, steps };
     }
+
+    /**
+     * One attempt at the checkout flow:
+     *   1. Take a "before" screenshot.
+     *   2. Race the click against `waitForURL(/checkout/)` so the click+nav
+     *      finish together when the button is correct.
+     *   3. Settle, take an "after" screenshot, check the final URL.
+     *
+     * Returns the screenshot paths + final URL + text the button had, so
+     * the caller can decide whether to retry with a different selector
+     * (LLM-discovered) when the URL didn't actually reach checkout.
+     */
+    const tryCheckoutClick = async (
+      hit: NonNullable<typeof checkoutHit>,
+      attempt: number,
+    ): Promise<{ url: string; spBefore: string; spAfter: string; clickedText: string }> => {
+      const spBefore = screenshotPath(ctx, `pj-8-checkout-before-${attempt}`);
+      await page.screenshot({ path: spBefore, fullPage: false }).catch(() => undefined);
+      const clickedText = await hit.locator.innerText().catch(() => "");
+      await Promise.all([
+        page.waitForURL(/checkout/i, { timeout: 10_000 }).catch(() => undefined),
+        hit.locator.click({ timeout: 5_000 }).catch(() => undefined),
+      ]);
+      await page.waitForTimeout(1_500);
+      const spAfter = screenshotPath(ctx, `pj-8-checkout-reached-${attempt}`);
+      await page.screenshot({ path: spAfter, fullPage: false }).catch(() => undefined);
+      return { url: page.url(), spBefore, spAfter, clickedText };
+    };
+
     const t8 = Date.now();
     const beforeUrl8 = page.url();
-    const spBefore8 = screenshotPath(ctx, "pj-8-checkout-before");
-    await page.screenshot({ path: spBefore8, fullPage: false }).catch(() => undefined);
-    const checkoutText = await checkoutHit.locator.innerText().catch(() => "");
-    await Promise.all([
-      page.waitForURL(/checkout/i, { timeout: 10_000 }).catch(() => undefined),
-      checkoutHit.locator.click({ timeout: 5_000 }).catch(() => undefined),
-    ]);
-    await page.waitForTimeout(1_500);
-    const sp8 = screenshotPath(ctx, "pj-8-checkout-reached");
-    await page.screenshot({ path: sp8, fullPage: false }).catch(() => undefined);
-    const checkoutUrl = page.url();
-    const reachedCheckout = /\/checkout/i.test(checkoutUrl);
+    let attempt = 1;
+    let result = await tryCheckoutClick(checkoutHit, attempt);
+    let reachedCheckout = /\/checkout/i.test(result.url);
+    let usedSelector = checkoutHit.selector;
+    let clickedText = result.clickedText;
+
+    // If we clicked something but the URL didn't change to /checkout, the
+    // selector likely picked a button that ISN'T the real checkout CTA.
+    // Burn one recovery slot on a fresh LLM call that sees the cart HTML
+    // as it stands NOW (post-failed-click) and ask for the actual
+    // navigation trigger. This is the "LLM should see the rendered cart,
+    // not just the home" path the discovery phase can't take on its own.
+    if (!reachedCheckout && recoveryBudget > 0 && !/\/checkout/i.test(beforeUrl8)) {
+      const retrySuggestion = await attemptRecovery(
+        page,
+        ctx,
+        "go-checkout-retry",
+        `Cliquei em '${clickedText.slice(0, 40).trim()}' (selector \`${usedSelector}\`), mas a URL ficou em ${result.url} e não foi pra /checkout. Achar o botão que de fato navega pra /checkout neste cart/minicart aberto.`,
+        [usedSelector, ...selFor(ctx, "checkoutButton")],
+      );
+      if (retrySuggestion) {
+        recoveryBudget--;
+        checkoutRecovered = true;
+        attempt++;
+        const retryResult = await tryCheckoutClick(retrySuggestion, attempt);
+        // Always promote the retry to the "current" attempt — it IS the
+        // most recent action, so the reported URL, screenshot paths,
+        // selector and clicked text must reflect it. Whether the retry
+        // *succeeded* is decided by URL match alone.
+        result = retryResult;
+        usedSelector = retrySuggestion.selector;
+        clickedText = retryResult.clickedText;
+        reachedCheckout = /\/checkout/i.test(retryResult.url);
+      }
+    }
+
     const step8Status: StepCapture["status"] = reachedCheckout ? "ok" : "failed";
     steps.push({
       step: 8,
@@ -491,13 +693,13 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       viewport: ctx.viewport,
       status: step8Status,
       durationMs: Date.now() - t8,
-      url: checkoutUrl,
-      screenshotPath: sp8,
-      screenshotBeforePath: spBefore8,
+      url: result.url,
+      screenshotPath: result.spAfter,
+      screenshotBeforePath: result.spBefore,
       beforeUrl: beforeUrl8,
-      actionDescription: `Clicou em${checkoutText ? ` '${checkoutText.slice(0, 30).trim()}'` : ""} (\`${checkoutHit.selector}\`); URL final: ${checkoutUrl}${reachedCheckout ? " ✓ atingiu /checkout" : " ✗ não foi pra checkout"}`,
+      actionDescription: `Clicou em${clickedText ? ` '${clickedText.slice(0, 30).trim()}'` : ""} (\`${usedSelector}\`); URL final: ${result.url}${reachedCheckout ? " ✓ atingiu /checkout" : " ✗ não foi pra checkout"}${attempt > 1 ? ` (após ${attempt} tentativas com recovery LLM)` : ""}`,
       selectorKey: "checkoutButton",
-      usedSelector: checkoutHit.selector,
+      usedSelector,
       recoveredByLlm: checkoutRecovered || undefined,
     });
     reportEnd(8, "go-checkout", step8Status, Date.now() - t8);
