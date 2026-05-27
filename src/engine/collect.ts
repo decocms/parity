@@ -369,7 +369,7 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
         page.screenshot({ path: opts.screenshotPath, fullPage: true, animations: "disabled" }).catch(() => undefined),
         new Promise<void>((resolve) => setTimeout(resolve, Math.min(15_000, remaining()))),
       ]);
-      dlog(opts.side, opts.viewport, `    capturePage: screenshot done`);
+      dlog(opts.side, opts.viewport, "    capturePage: screenshot done");
     }
 
     dlog(opts.side, opts.viewport, `    capturePage: page.content() (cap=${Math.min(5_000, remaining())}ms)`);

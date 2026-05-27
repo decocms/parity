@@ -618,9 +618,9 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       };
       dlog(ctx, `step 6 open-minicart: cart validation → found=${v.found} (${v.method})${reasonText ? ` — ${reasonText.slice(0, 80)}` : ""}`);
     } else if (!expectedProductTitle) {
-      dlog(ctx, `step 6 open-minicart: skipping validation — no PDP title captured`);
+      dlog(ctx, "step 6 open-minicart: skipping validation — no PDP title captured");
     } else {
-      dlog(ctx, `step 6 open-minicart: skipping validation — cart UI not revealed`);
+      dlog(ctx, "step 6 open-minicart: skipping validation — cart UI not revealed");
     }
     const sp6 = screenshotPath(ctx, "pj-6-minicart");
     await page.screenshot({ path: sp6, fullPage: false }).catch(() => undefined);
@@ -643,7 +643,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         ? `Abriu minicart via ${cartOpenMethod}${miniText ? ` em '${miniText.slice(0, 30).trim()}'` : ""} (\`${miniHit.selector}\`)${miniRecovered ? " — selector via recovery LLM" : ""}${
             step6Validation
               ? step6Validation.found
-                ? ` ✓ produto encontrado no cart`
+                ? " ✓ produto encontrado no cart"
                 : ` ✗ produto ESPERADO não encontrado (${step6Validation.observedTitles?.length ?? 0} itens observados)`
               : ""
           }`
@@ -750,14 +750,14 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         "[class*='cart-drawer'][class*='open']",
       ]);
       if (!drawerStillOpen) {
-        dlog(ctx, `step 8 go-checkout: drawer appears closed, re-clicking minicart trigger`);
+        dlog(ctx, "step 8 go-checkout: drawer appears closed, re-clicking minicart trigger");
         const reTrigger = await firstVisibleLocator(page, selFor(ctx, "minicartTrigger"));
         if (reTrigger) {
           await reTrigger.locator.click({ timeout: 3_000 }).catch(() => undefined);
           await page.waitForTimeout(1_500);
           dlog(ctx, `step 8 go-checkout: re-opened drawer via ${reTrigger.selector}`);
         } else {
-          dlog(ctx, `step 8 go-checkout: minicartTrigger not found — drawer state unknown`);
+          dlog(ctx, "step 8 go-checkout: minicartTrigger not found — drawer state unknown");
         }
       } else {
         dlog(ctx, `step 8 go-checkout: drawer still open (matched ${drawerStillOpen})`);
@@ -819,7 +819,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       }
     }
     if (!checkoutHit) {
-      dlog(ctx, `step 8 go-checkout: no button found, skipping`);
+      dlog(ctx, "step 8 go-checkout: no button found, skipping");
       steps.push(makeSkipStep(8, "go-checkout", ctx, "no checkout button found (recovery exhausted)"));
       reportEnd(8, "go-checkout", "skipped", 0, "no checkout button found");
       return { pages, steps };
@@ -864,12 +864,15 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     const t8 = Date.now();
     const beforeUrl8 = page.url();
     // Success criterion changes by mode:
-    //   - drawer-finalize: URL must now contain /checkout (we reached
-    //     a checkout-flow URL from a product/cart drawer overlay).
+    //   - drawer-finalize: URL must now contain /checkout specifically.
+    //     A bare /cart URL means the user landed on a cart PAGE — they
+    //     still have to click another CTA to enter the checkout flow.
+    //     So /cart alone is NOT step 8 success.
     //   - advance-checkout: URL must have changed AND still be a
-    //     checkout-flow URL (i.e. we advanced to a new step).
+    //     /checkout URL (advanced to a new substep, e.g. cart→email).
+    //     Bare /cart change wouldn't qualify here either.
     const isReachedCheckout = (finalUrl: string): boolean => {
-      if (!/\/(checkout|cart|carrinho)(\/|#|$|\?)/i.test(finalUrl)) return false;
+      if (!/\/checkout(\/|#|$|\?)/i.test(finalUrl)) return false;
       if (!alreadyInCheckoutPage) return true;
       return finalUrl !== beforeUrl8;
     };
@@ -1012,7 +1015,7 @@ async function findCategoryUrl(
   const candidates = await collectCandidateLinks(page, selectors, 12);
   dlog(ctx, `  findCategoryUrl: collectCandidateLinks done in ${Date.now() - t0}ms → ${candidates.length} candidates`);
   if (candidates.length === 0) return null;
-  dlog(ctx, `  findCategoryUrl: pickCategoryLink LLM call start`);
+  dlog(ctx, "  findCategoryUrl: pickCategoryLink LLM call start");
   const picked = await pickCategoryLink(candidates.map((c) => ({ text: c.text, href: c.href })));
   dlog(ctx, `  findCategoryUrl: pickCategoryLink LLM done → ${picked?.href ?? "null"}`);
   if (!picked) return null;
@@ -1228,7 +1231,7 @@ async function extractProductTitle(page: Page): Promise<string | null> {
             const data = JSON.parse((s as HTMLScriptElement).textContent ?? "{}");
             const items = Array.isArray(data) ? data : [data];
             for (const item of items) {
-              const product = item?.["@graph"]?.find?.((x: { ["@type"]?: string }) => x?.["@type"] === "Product") ?? item;
+              const product = item?.["@graph"]?.find?.((x: { "@type"?: string }) => x?.["@type"] === "Product") ?? item;
               if (product?.["@type"] === "Product" && typeof product.name === "string") {
                 return product.name as string;
               }
@@ -1392,7 +1395,7 @@ async function dismissOverlays(page: Page, ctx: FlowContext): Promise<void> {
     }
   }
   if (dismissedAny) {
-    dlog(ctx, `  openMinicart: dismissed overlay(s) before interacting`);
+    dlog(ctx, "  openMinicart: dismissed overlay(s) before interacting");
     await page.waitForTimeout(500);
   }
 }
@@ -1401,11 +1404,19 @@ async function dismissOverlays(page: Page, ctx: FlowContext): Promise<void> {
  * Wait for VTEX/FastStore checkout APIs to render the cart line items
  * before validation runs. Without this, `page.goto('/checkout/#/cart')`
  * settles on `load`/`networkidle` long before the orderForm XHR resolves
- * and validation sees an empty DOM. Both promises catch their errors so
- * a missed XHR (or a non-VTEX cart) doesn't block the flow.
+ * and validation sees an empty DOM.
+ *
+ * Either signal (the orderForm XHR completing OR the first cart-item
+ * selector becoming visible) is sufficient evidence the cart hydrated.
+ * Race them with `Promise.race` so a missed XHR (non-VTEX cart, regex
+ * miss) doesn't force the test to wait 8s for the slowest probe — the
+ * faster signal returns immediately. A hard 5s outer cap protects
+ * against pathological cases where neither probe fires at all (still
+ * lets `waitForTimeout(800)` settle render). All inner timeouts catch
+ * so they never throw past this helper.
  */
 async function waitForCartHydration(page: Page): Promise<void> {
-  await Promise.all([
+  await Promise.race([
     page
       .waitForResponse(
         (r) => /\/api\/checkout\/pub\/orderForm|orderForm|cart\/api/i.test(r.url()) && r.ok(),
@@ -1415,6 +1426,7 @@ async function waitForCartHydration(page: Page): Promise<void> {
     page
       .waitForSelector(".cart-items, [class*='cart-item' i], #cart-fixed .item, [data-cart-item]", { timeout: 8_000 })
       .catch(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
   ]);
   await page.waitForTimeout(800);
 }
@@ -1540,7 +1552,7 @@ async function openMinicart(
       }
     }
   }
-  dlog(ctx, `  openMinicart: failed — no cart revealed by hover/click/goto`);
+  dlog(ctx, "  openMinicart: failed — no cart revealed by hover/click/goto");
   return { method: "failed", url: page.url(), visibleMarker: null };
 }
 
@@ -1591,11 +1603,18 @@ async function validateCartContainsTitle(
   ctx: FlowContext,
 ): Promise<{ found: boolean; observedTitles: string[]; method: "selector" | "none" }> {
   const titleSelectors = [
-    // Generic data attributes
+    // Generic data attributes (scoped to cart/checkout context — the
+    // unscoped `[data-product-name]` would also match the PDP <h1> on
+    // sites that didn't navigate away, producing a false-positive
+    // "cart contains product" when validation runs while still on the
+    // product page).
     "[data-cart-item-name]",
     "[data-cart-item] [class*='title' i]",
     "[data-cart-item] [class*='name' i]",
-    "[data-product-name]",
+    "[class*='cart' i] [data-product-name]",
+    "[role='dialog'] [data-product-name]",
+    "[class*='checkout' i] [data-product-name]",
+    "[class*='minicart' i] [data-product-name]",
     "[data-testid='cart-item-name']",
     "[data-testid='product-name']",
     // Drawer / dialog context
@@ -1665,7 +1684,7 @@ async function validateCartContainsTitle(
   // with a 2s wait catches the common "rendered slightly late" case
   // without bloating happy-path latency.
   if (observed.length === 0) {
-    dlog(ctx, `  validateCartContainsTitle: 0 titles on first pass, retrying after 2s`);
+    dlog(ctx, "  validateCartContainsTitle: 0 titles on first pass, retrying after 2s");
     await page.waitForTimeout(2_000);
     observed = await sweepTitles();
   }

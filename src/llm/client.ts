@@ -242,15 +242,15 @@ function tryRepairJson(raw: string): string | null {
   let depthObj = 0;
   let depthArr = 0;
   let inString = false;
-  let escape = false;
+  let isEscaped = false;
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
-    if (escape) {
-      escape = false;
+    if (isEscaped) {
+      isEscaped = false;
       continue;
     }
     if (ch === "\\") {
-      escape = true;
+      isEscaped = true;
       continue;
     }
     if (ch === '"') {
