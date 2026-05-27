@@ -11,6 +11,12 @@ export const SelectorKey = z.enum([
   "cepInputPdp",
   "cepInputCart",
   "checkoutButton",
+  "sizeSwatch",
+  "colorSwatch",
+  "variantRow",
+  "quantityIncrement",
+  "quantityInput",
+  "minicartCount",
 ]);
 export type SelectorKey = z.infer<typeof SelectorKey>;
 

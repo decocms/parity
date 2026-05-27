@@ -345,6 +345,12 @@ export const ParityRc = z.object({
       cepInputPdp: z.string().optional(),
       cepInputCart: z.string().optional(),
       checkoutButton: z.string().optional(),
+      sizeSwatch: z.string().optional(),
+      colorSwatch: z.string().optional(),
+      variantRow: z.string().optional(),
+      quantityIncrement: z.string().optional(),
+      quantityInput: z.string().optional(),
+      minicartCount: z.string().optional(),
     })
     .default({}),
   skipSteps: z.array(z.string()).default([]),

@@ -5,6 +5,7 @@ const STEP_LABELS: Record<string, string> = {
   "visit-home": "Visitar home",
   "navigate-plp": "Navegar para categoria (PLP)",
   "enter-pdp": "Entrar em PDP",
+  "select-variant": "Selecionar variante (tamanho/cor/quantidade)",
   "shipping-calc-pdp": "Cálculo de frete na PDP",
   "add-to-cart": "Adicionar ao carrinho",
   "open-minicart": "Abrir minicart",

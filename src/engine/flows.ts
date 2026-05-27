@@ -38,7 +38,7 @@ export interface FlowContext {
   onStep?: (event: StepProgressEvent) => void;
 }
 
-const PURCHASE_JOURNEY_TOTAL_STEPS = 8;
+const PURCHASE_JOURNEY_TOTAL_STEPS = 9;
 
 const DEBUG_PARITY = process.env.DEBUG_PARITY === "1" || process.env.DEBUG_PARITY === "true";
 const DEBUG_START = Date.now();
@@ -48,13 +48,51 @@ function dlog(ctx: FlowContext, msg: string): void {
   process.stderr.write(`[+${elapsed}s ${ctx.viewport}/${ctx.side}] ${msg}\n`);
 }
 
+/** Race a Playwright op against a hard timer, since some CDP-backed ops
+ *  outlive their declared timeouts when the page is wedged. */
+function withCap<T>(p: Promise<T>, capMs: number, fallback: T): Promise<T> {
+  return Promise.race([
+    p.catch(() => fallback),
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), capMs)),
+  ]);
+}
+
+const VARIANT_REQUIRED_TEXT_PATTERNS: RegExp[] = [
+  /selecione um produto/i,
+  /selecione um tamanho/i,
+  /selecione uma cor/i,
+  /selecione uma op[cç][aã]o/i,
+  /select a size/i,
+  /select a color/i,
+  /select an option/i,
+  /choose an option/i,
+  /please select/i,
+  /select size/i,
+  /select color/i,
+];
+
+const ADD_TO_CART_ERROR_PATTERNS: RegExp[] = [
+  ...VARIANT_REQUIRED_TEXT_PATTERNS,
+  /estoque esgotado/i,
+  /out of stock/i,
+  /indispon[ií]vel/i,
+  /unavailable/i,
+];
+
+const ADD_TO_CART_SUCCESS_PATTERNS: RegExp[] = [
+  /produto adicionado/i,
+  /adicionado ao carrinho/i,
+  /adicionado [aà]\s+sacola/i,
+  /added to cart/i,
+  /added to bag/i,
+  /item added/i,
+  /successfully added/i,
+];
+
 function selFor(ctx: FlowContext, key: SelectorKey): string[] {
   return selectorsFor(key, { rc: ctx.rc, learned: ctx.learned, platform: ctx.platform });
 }
 
-/**
- * Run a named flow. Returns all pages visited and (for purchase-journey) ordered steps.
- */
 /**
  * Per-flow hard deadlines so a single misbehaving page can never freeze the
  * whole crawl. `capturePage` already has its own 60s + 10s outer race in
@@ -67,17 +105,20 @@ function selFor(ctx: FlowContext, key: SelectorKey): string[] {
  * settled state).
  *
  * Budget scales with how much each flow has to do — homepage is a single
- * capture, plp/pdp add a navigation step, purchase-journey runs 8 steps.
+ * capture, plp/pdp add a navigation step, purchase-journey runs 9 steps.
  * Each individual step has its own timeout caps; this is the safety net
  * for the case where those caps misbehave.
  */
 const FLOW_DEADLINE_MS: Record<FlowName, number> = {
-  homepage: 90_000, // single capturePage worst case
-  plp: 180_000, // home → click category → capturePage
-  pdp: 240_000, // home → PLP → click product → capturePage
-  "purchase-journey": 360_000, // 8 steps × ~30s + LLM recovery
+  homepage: 90_000,
+  plp: 180_000,
+  pdp: 240_000,
+  "purchase-journey": 420_000, // 9 steps × ~30s + LLM recovery + variant heuristic scroll
 };
 
+/**
+ * Run a named flow. Returns all pages visited and (for purchase-journey) ordered steps.
+ */
 export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCapture> {
   const start = Date.now();
   const deadlineMs = FLOW_DEADLINE_MS[flow];
@@ -104,10 +145,6 @@ export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCap
   innerPromise.catch(() => undefined);
 
   let timer: ReturnType<typeof setTimeout> | undefined;
-  // When the deadline fires, the timeout handler initiates page
-  // closures and stashes the resulting promise here so the awaiter
-  // below can block on them before returning. Defaults to a resolved
-  // promise so the inner-wins (success) path is a no-op.
   let cleanup: Promise<unknown> = Promise.resolve();
   const timeoutPromise = new Promise<FlowCapture>((resolve) => {
     timer = setTimeout(() => {
@@ -117,8 +154,7 @@ export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCap
       // "Target closed" almost immediately; if we awaited those closes
       // before resolving, Promise.race could pick up the inner
       // rejection first and make runFlow throw instead of returning
-      // this timeout FlowCapture. Resolving first guarantees the race
-      // is won deterministically by the timeout.
+      // this timeout FlowCapture.
       resolve(
         finalize(
           flow,
@@ -133,32 +169,19 @@ export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCap
               status: "failed",
               durationMs: deadlineMs,
               screenshotPath: "",
-              actionDescription: `[flow-timeout] flow "${flow}" excedeu ${deadlineMs}ms — captura abortada pela safety net externa, ${pages.length} page(s) fechada(s) para liberar o contexto. Step interno provavelmente travou em uma operação Playwright que não respeitou seu timeout declarado.`,
+              actionDescription: `[flow-timeout] flow "${flow}" excedeu ${deadlineMs}ms — captura abortada pela safety net externa, ${pages.length} page(s) fechada(s) para liberar o contexto.`,
             },
           ],
           start,
         ),
       );
-      // Now kick off close on every page in the BrowserContext and
-      // expose the promise so runFlow can await it before returning.
-      // The context stays open — next flow on it calls newPage() and
-      // gets a fresh slate. Awaiting here matters because:
-      //   - cookies/storage are shared across pages on the same
-      //     context, so an in-flight VTEX cart action could finish
-      //     between resolve() and the next flow's first interaction.
-      //   - newPage() doesn't wait for sibling pages to finish
-      //     closing, so without this await the next flow's home
-      //     capture could overlap stale network handlers.
-      //
-      // `page.close()` can hang on a wedged page (V8 main thread
-      // stuck in a tight loop = beforeunload handler never runs).
-      // Cap each close at 5s so the cleanup awaitable can always
-      // resolve and the next flow gets to start.
+      // Kick off close on every page in the BrowserContext. Cap each
+      // close at 5s so the cleanup awaitable always resolves.
       const CLOSE_CAP_MS = 5_000;
       const cappedClose = (p: (typeof pages)[number]): Promise<void> =>
         Promise.race([
           p.close().catch(() => undefined),
-          new Promise<void>((resolve) => setTimeout(resolve, CLOSE_CAP_MS)),
+          new Promise<void>((resolveClose) => setTimeout(resolveClose, CLOSE_CAP_MS)),
         ]);
       cleanup = Promise.allSettled(pages.map(cappedClose));
     }, deadlineMs);
@@ -166,16 +189,9 @@ export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCap
 
   try {
     const result = await Promise.race([innerPromise, timeoutPromise]);
-    // On the timeout path, await the close promises before returning
-    // so the caller can start the next flow against a quiesced
-    // context. On the success path `cleanup` is the default
-    // Promise.resolve() and this is a no-op.
     await cleanup;
     return result;
   } finally {
-    // Always clear the deadline timer when the race ends, so we don't
-    // leave a pending Node timer keeping the event loop alive until the
-    // deadline naturally fires.
     if (timer !== undefined) clearTimeout(timer);
   }
 }
@@ -301,7 +317,9 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
   const pages: PageCapture[] = [];
   const steps: StepCapture[] = [];
   const page = await ctx.ctx.newPage();
-  let recoveryBudget = ctx.recoveryBudget ?? 3;
+  // Mutable ref so any nested helper that calls the LLM can decrement
+  // the shared budget without prop-drilling and reassignment.
+  const budget = { remaining: ctx.recoveryBudget ?? 5 };
   const total = PURCHASE_JOURNEY_TOTAL_STEPS;
 
   const reportStart = (idx: number, name: string) => {
@@ -319,27 +337,13 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
 
   try {
     // Step 1: home
-    //
-    // For purchase-journey we don't need a full-page visual asset — what
-    // we need is interactive elements (header nav, buy buttons, minicart
-    // trigger) to be findable. The full scrollFullPage at the end of
-    // capturePage rolls the viewport to the bottom of the page, which
-    // on mobile commonly hides sticky headers behind the auto-hide
-    // header behavior. By the time we run findCategoryUrl the header
-    // nav is no longer visible and `isVisible()` returns false for every
-    // category link. Skipping the scroll keeps the viewport at top and
-    // the nav reachable. Screenshots in journey mode are only for
-    // evidence/debugging anyway, not visual-diff.
     reportStart(1, "visit-home");
-    dlog(ctx, `step 1 visit-home: capturePage(${ctx.baseUrl}) start (scrollToLoad=false)`);
     const homeCap = await capturePage(page, {
       url: ctx.baseUrl,
       side: ctx.side,
       viewport: ctx.viewport,
       screenshotPath: screenshotPath(ctx, "pj-1-home"),
-      scrollToLoad: false,
     });
-    dlog(ctx, `step 1 visit-home: capturePage done status=${homeCap.status}`);
     pages.push(homeCap);
     const step1Status: StepCapture["status"] = homeCap.status >= 200 && homeCap.status < 400 ? "ok" : "failed";
     steps.push({
@@ -360,26 +364,21 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
 
     // Step 2: navigate to a PLP (with LLM semantic pick)
     reportStart(2, "navigate-plp");
-    dlog(ctx, `step 2 navigate-plp: findCategoryUrl start (hint=${ctx.rc.plpUrlHint ?? "—"})`);
     const plpHit = ctx.rc.plpUrlHint
       ? { url: new URL(ctx.rc.plpUrlHint, ctx.baseUrl).toString(), selector: "__hint__" }
       : await findCategoryUrl(page, ctx);
-    dlog(ctx, `step 2 navigate-plp: findCategoryUrl done → ${plpHit?.url ?? "null"}`);
     if (!plpHit) {
       steps.push(makeSkipStep(2, "navigate-plp", ctx, "no category link found"));
       reportEnd(2, "navigate-plp", "skipped", 0, "no category link found");
       return { pages, steps };
     }
     const t2 = Date.now();
-    dlog(ctx, `step 2 navigate-plp: capturePage(${plpHit.url}) start (scrollToLoad=false)`);
     const plpCap = await capturePage(page, {
       url: plpHit.url,
       side: ctx.side,
       viewport: ctx.viewport,
       screenshotPath: screenshotPath(ctx, "pj-2-plp"),
-      scrollToLoad: false,
     });
-    dlog(ctx, `step 2 navigate-plp: capturePage done status=${plpCap.status}`);
     pages.push(plpCap);
     const step2Status: StepCapture["status"] = plpCap.status >= 200 && plpCap.status < 400 ? "ok" : "failed";
     steps.push({
@@ -401,9 +400,39 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
 
     // Step 3: enter PDP
     reportStart(3, "enter-pdp");
-    const pdpHit = await findProductUrl(page, ctx);
+    let pdpHit = await findProductUrl(page, ctx);
+    let pdpRecoveredByLlm = false;
+    if (!pdpHit && budget.remaining > 0) {
+      // No product card matched. Ask the LLM to find an anchor that leads
+      // to a product detail page, then read its href to navigate.
+      const html = await page.content().catch(() => "");
+      if (html) {
+        const suggestion = await suggestRecovery({
+          stepName: "enter-pdp",
+          intendedAction: "Encontrar um link <a> que leve para a página de detalhes (PDP) de algum produto listado na PLP atual",
+          html,
+          alreadyTried: selFor(ctx, "productCard"),
+        });
+        if (suggestion) {
+          budget.remaining--;
+          try {
+            const el = page.locator(suggestion.selector).first();
+            if (await el.isVisible({ timeout: 2_000 }).catch(() => false)) {
+              const href = await el.getAttribute("href");
+              if (href) {
+                const abs = new URL(href, page.url()).toString();
+                pdpHit = { url: abs, selector: suggestion.selector };
+                pdpRecoveredByLlm = true;
+              }
+            }
+          } catch {
+            /* invalid selector */
+          }
+        }
+      }
+    }
     if (!pdpHit) {
-      steps.push(makeSkipStep(3, "enter-pdp", ctx, "no product card found"));
+      steps.push(makeSkipStep(3, "enter-pdp", ctx, "no product card found (recovery exhausted)"));
       reportEnd(3, "enter-pdp", "skipped", 0, "no product card found");
       return { pages, steps };
     }
@@ -413,7 +442,6 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       side: ctx.side,
       viewport: ctx.viewport,
       screenshotPath: screenshotPath(ctx, "pj-3-pdp"),
-      scrollToLoad: false,
     });
     pages.push(pdpCap);
     const step3Status: StepCapture["status"] = pdpCap.status >= 200 && pdpCap.status < 400 ? "ok" : "failed";
@@ -428,15 +456,16 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       screenshotPath: pdpCap.screenshotPath,
       selectorKey: "productCard",
       usedSelector: pdpHit.selector,
+      recoveredByLlm: pdpRecoveredByLlm || undefined,
     });
     reportEnd(3, "enter-pdp", step3Status, Date.now() - t3);
-    steps[steps.length - 1]!.actionDescription = `Abriu PDP \`${pdpHit.url}\` (via \`${pdpHit.selector}\`)`;
+    steps[steps.length - 1]!.actionDescription = `Abriu PDP \`${pdpHit.url}\` (via \`${pdpHit.selector}\`${pdpRecoveredByLlm ? " — recovery LLM" : ""})`;
     steps[steps.length - 1]!.beforeUrl = plpHit.url;
 
-    // Pull the product title now while we're on the PDP — used later
-    // (steps 6 and 8) to validate the same product appears in the cart
-    // drawer and on the checkout page. If we can't extract a title,
-    // cart validation is skipped (recorded in step.cartValidation).
+    // Pull the product title while we're still on the PDP — used later
+    // (steps 7 and 9) to verify the SAME product shows up in the cart
+    // drawer and on the checkout page. Validates the cart actually has
+    // what we added (not a phantom item, not empty due to lost session).
     const expectedProductTitle = await extractProductTitle(page);
     dlog(ctx, `step 3 enter-pdp: extracted product title → ${expectedProductTitle ? `"${expectedProductTitle.slice(0, 60)}"` : "null"}`);
     if (expectedProductTitle) {
@@ -446,135 +475,234 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       };
     }
 
-    // Step 4 (conditional): shipping calc on PDP
-    //
-    // The default cepInputPdp selectors target the common attribute
-    // patterns (`name='zipcode'`, `placeholder*='CEP'`, etc). Sites with
-    // a custom CMS markup (label-only, custom name, framework-specific
-    // input wrappers) silently miss all of them — the step says "no CEP
-    // input on PDP" and skips, when the input is actually visible on
-    // screen. Fall through to the same LLM recovery the click steps use
-    // before declaring there's no CEP input.
-    reportStart(4, "shipping-calc-pdp");
-    let cepInputPdp = await firstVisible(page, selFor(ctx, "cepInputPdp"));
-    let cepPdpRecovered = false;
-    if (!cepInputPdp && recoveryBudget > 0) {
-      const recovery = await attemptRecovery(
+    // Step 4: select variant (size/color/quantity) — non-critical, makes the
+    // flow work against stores that gate the buy button on a SKU selection.
+    reportStart(4, "select-variant");
+    const t4 = Date.now();
+    const beforeUrl4 = page.url();
+    const spBefore4 = screenshotPath(ctx, "pj-4-select-variant-before");
+    await page.screenshot({ path: spBefore4, fullPage: false }).catch(() => undefined);
+    const variantResult = await selectVariant(page, ctx);
+    let variantLlmAction: StepActionResult | null = null;
+    // LLM fallback ONLY when the page explicitly demands a variant choice
+    // and the heuristic found nothing. This avoids burning budget on
+    // single-SKU PDPs where the heuristic correctly skips.
+    if (variantResult.actions.length === 0 && variantResult.variantRequired && budget.remaining > 0) {
+      variantLlmAction = await attemptStepAction({
         page,
         ctx,
-        "shipping-calc-pdp",
-        "Achar o input de CEP / código postal nesta PDP (deve ser um input visível com label/placeholder relacionado a frete, entrega ou CEP)",
-        selFor(ctx, "cepInputPdp"),
-      );
-      if (recovery) {
-        cepInputPdp = recovery.selector;
-        cepPdpRecovered = true;
-        recoveryBudget--;
+        stepName: "select-variant",
+        intendedAction:
+          "Selecionar uma variante disponível (tamanho, cor, sabor) ou clicar no botão '+' para incrementar a quantidade da primeira variante listada na PDP. Não clique no botão de comprar.",
+        selectorKey: "quantityIncrement",
+        action: "click",
+        recoveryBudget: budget,
+      });
+    }
+    const sp4 = screenshotPath(ctx, "pj-4-select-variant");
+    await page.screenshot({ path: sp4, fullPage: false }).catch(() => undefined);
+    if (variantResult.actions.length > 0 || variantLlmAction?.performed) {
+      const llmDesc = variantLlmAction?.performed
+        ? `Recovery LLM: ${variantLlmAction.action} em \`${variantLlmAction.selector}\``
+        : null;
+      const desc = variantResult.actions.length > 0
+        ? variantResult.actions.join("; ")
+        : llmDesc ?? "(variante selecionada)";
+      steps.push({
+        step: 4,
+        name: "select-variant",
+        side: ctx.side,
+        viewport: ctx.viewport,
+        status: "ok",
+        durationMs: Date.now() - t4,
+        url: page.url(),
+        screenshotPath: sp4,
+        screenshotBeforePath: spBefore4,
+        beforeUrl: beforeUrl4,
+        actionDescription: llmDesc && variantResult.actions.length > 0 ? `${desc}; ${llmDesc}` : desc,
+        selectorKey: variantLlmAction?.performed
+          ? "quantityIncrement"
+          : variantResult.primarySelectorKey,
+        usedSelector: variantLlmAction?.performed
+          ? variantLlmAction.selector
+          : variantResult.primarySelector,
+        recoveredByLlm: variantLlmAction?.recoveredByLlm || undefined,
+        detail: { actions: variantResult.actions, llmRecovery: !!variantLlmAction?.performed },
+      });
+      reportEnd(4, "select-variant", "ok", Date.now() - t4);
+    } else {
+      const skipNote = variantResult.variantRequired
+        ? "variant required by store but no selectors matched (LLM recovery also failed)"
+        : "no variant selectors found on PDP (assuming single-SKU product)";
+      steps.push(makeSkipStep(4, "select-variant", ctx, skipNote));
+      reportEnd(4, "select-variant", "skipped", 0, skipNote);
+    }
+
+    // Step 5 (conditional): shipping calc on PDP
+    reportStart(5, "shipping-calc-pdp");
+    let cepInputPdp = await firstVisible(page, selFor(ctx, "cepInputPdp"));
+    let cepPdpRecoveredByLlm = false;
+    if (!cepInputPdp && budget.remaining > 0) {
+      // LLM fallback for stores with non-standard CEP input on PDP.
+      const html = await page.content().catch(() => "");
+      if (html) {
+        const suggestion = await suggestRecovery({
+          stepName: "shipping-calc-pdp",
+          intendedAction:
+            "Encontre o <input> de CEP (código postal de ENDEREÇO de entrega) na PDP, usado pra CALCULAR FRETE — placeholder normalmente é 'CEP', 'Digite seu CEP', 'Cód. postal', 'Postal code', aria-label='CEP' ou name='zip'/'cep'/'postal'. **NÃO** retorne o input de CUPOM de desconto / código promocional / 'Digite o cupom' / 'Insira código' — esses são pra desconto, não pra frete.",
+          html,
+          alreadyTried: selFor(ctx, "cepInputPdp"),
+        });
+        if (suggestion) {
+          budget.remaining--;
+          const el = page.locator(suggestion.selector).first();
+          if (await el.isVisible({ timeout: 2_000 }).catch(() => false)) {
+            cepInputPdp = suggestion.selector;
+            cepPdpRecoveredByLlm = true;
+          }
+        }
       }
     }
     if (cepInputPdp) {
-      const t4 = Date.now();
-      const beforeUrl4 = page.url();
-      const spBefore4 = screenshotPath(ctx, "pj-4-shipping-pdp-before");
-      await page.screenshot({ path: spBefore4, fullPage: false }).catch(() => undefined);
+      const t5 = Date.now();
+      const beforeUrl5 = page.url();
+      const spBefore5 = screenshotPath(ctx, "pj-5-shipping-pdp-before");
+      await page.screenshot({ path: spBefore5, fullPage: false }).catch(() => undefined);
       const ok = await fillCep(page, cepInputPdp, ctx.rc.cep);
-      const sp = screenshotPath(ctx, "pj-4-shipping-pdp");
+      const sp = screenshotPath(ctx, "pj-5-shipping-pdp");
       await page.screenshot({ path: sp, fullPage: false }).catch(() => undefined);
-      const step4Status: StepCapture["status"] = ok ? "ok" : "failed";
+      const step5Status: StepCapture["status"] = ok ? "ok" : "failed";
       steps.push({
-        step: 4,
+        step: 5,
         name: "shipping-calc-pdp",
         side: ctx.side,
         viewport: ctx.viewport,
-        status: step4Status,
-        durationMs: Date.now() - t4,
+        status: step5Status,
+        durationMs: Date.now() - t5,
         url: page.url(),
         screenshotPath: sp,
-        screenshotBeforePath: spBefore4,
-        beforeUrl: beforeUrl4,
-        actionDescription: `Preencheu CEP '${ctx.rc.cep}' no input \`${cepInputPdp}\` e disparou cálculo de frete${cepPdpRecovered ? " (selector via LLM recovery)" : ""}`,
+        screenshotBeforePath: spBefore5,
+        beforeUrl: beforeUrl5,
+        actionDescription: `Preencheu CEP '${ctx.rc.cep}' no input \`${cepInputPdp}\`${cepPdpRecoveredByLlm ? " (via recovery LLM)" : ""}`,
         detail: { cepUsed: ctx.rc.cep },
         selectorKey: "cepInputPdp",
         usedSelector: cepInputPdp,
-        recoveredByLlm: cepPdpRecovered || undefined,
+        recoveredByLlm: cepPdpRecoveredByLlm || undefined,
       });
-      reportEnd(4, "shipping-calc-pdp", step4Status, Date.now() - t4);
+      reportEnd(5, "shipping-calc-pdp", step5Status, Date.now() - t5);
     } else {
-      steps.push(makeSkipStep(4, "shipping-calc-pdp", ctx, "no CEP input on PDP (recovery exhausted)"));
-      reportEnd(4, "shipping-calc-pdp", "skipped", 0, "no CEP input on PDP");
+      steps.push(makeSkipStep(5, "shipping-calc-pdp", ctx, "no CEP input on PDP (recovery exhausted)"));
+      reportEnd(5, "shipping-calc-pdp", "skipped", 0, "no CEP input on PDP");
     }
 
-    // Step 5: add to cart (with LLM recovery)
-    reportStart(5, "add-to-cart");
+    // Step 6: add to cart (with LLM recovery + post-click validation)
+    reportStart(6, "add-to-cart");
     let buyHit = await firstVisibleLocator(page, selFor(ctx, "buyButton"));
     let buyRecovered = false;
-    if (!buyHit && recoveryBudget > 0) {
+    if (!buyHit && budget.remaining > 0) {
       const recovery = await attemptRecovery(page, ctx, "add-to-cart", "Clicar no botão de comprar/adicionar ao carrinho", selFor(ctx, "buyButton"));
       if (recovery) {
         buyHit = recovery;
         buyRecovered = true;
-        recoveryBudget--;
+        budget.remaining--;
       }
     }
     if (!buyHit) {
-      steps.push(makeSkipStep(5, "add-to-cart", ctx, "no buy button found (recovery exhausted)"));
-      reportEnd(5, "add-to-cart", "skipped", 0, "no buy button found");
+      steps.push(makeSkipStep(6, "add-to-cart", ctx, "no buy button found (recovery exhausted)"));
+      reportEnd(6, "add-to-cart", "skipped", 0, "no buy button found");
       return { pages, steps };
     }
-    const t5 = Date.now();
-    const beforeUrl5 = page.url();
-    const spBefore5 = screenshotPath(ctx, "pj-5-add-cart-before");
-    await page.screenshot({ path: spBefore5, fullPage: false }).catch(() => undefined);
+    const t6 = Date.now();
+    const beforeUrl6 = page.url();
+    const spBefore6 = screenshotPath(ctx, "pj-6-add-cart-before");
+    await page.screenshot({ path: spBefore6, fullPage: false }).catch(() => undefined);
+    const cartCountBefore = await readCartCount(page, ctx);
     const buyText = await buyHit.locator.innerText().catch(() => "");
     await buyHit.locator.click({ timeout: 5_000 }).catch(() => undefined);
-    await page.waitForTimeout(2_000);
-    const sp5 = screenshotPath(ctx, "pj-5-add-cart");
-    await page.screenshot({ path: sp5, fullPage: false }).catch(() => undefined);
+    let validation = await validateAddToCart(page, ctx, cartCountBefore, beforeUrl6);
+
+    // If the click triggered a "select a variant" warning, the variant
+    // picker is now guaranteed to be rendered (the warning is shown next
+    // to it). Try the heuristic; if it fails and budget allows, ask the
+    // LLM where the variant picker is, then retry the buy click once.
+    let variantRetryNote: string | undefined;
+    if (
+      validation.status === "failed" &&
+      validation.errorText &&
+      VARIANT_REQUIRED_TEXT_PATTERNS.some((re) => re.test(validation.errorText!))
+    ) {
+      const retryHit = await findAndIncrementZeroQtyInput(page, ctx);
+      if (retryHit) {
+        variantRetryNote = `Retry: ${retryHit.description}`;
+      } else if (budget.remaining > 0) {
+        const llmRetry = await attemptStepAction({
+          page,
+          ctx,
+          stepName: "add-to-cart-retry-variant",
+          intendedAction:
+            "A loja rejeitou o add-to-cart com a mensagem 'Selecione um produto/tamanho/cor'. Encontre o picker de variante visível e selecione UMA opção (clicar num swatch, em '+' ao lado de uma quantidade '0', em um botão de tamanho). Não clique no botão de comprar.",
+          selectorKey: "quantityIncrement",
+          action: "click",
+          recoveryBudget: budget,
+        });
+        if (llmRetry.performed) {
+          variantRetryNote = `Retry via LLM: ${llmRetry.action} em \`${llmRetry.selector}\``;
+        }
+      }
+      if (variantRetryNote) {
+        await page.waitForTimeout(500);
+        await buyHit.locator.click({ timeout: 5_000 }).catch(() => undefined);
+        validation = await validateAddToCart(page, ctx, cartCountBefore, beforeUrl6);
+      }
+    }
+
+    const sp6 = screenshotPath(ctx, "pj-6-add-cart");
+    await page.screenshot({ path: sp6, fullPage: false }).catch(() => undefined);
+    const buyActionDesc = `Clicou no botão${buyText ? ` '${buyText.slice(0, 40).trim()}'` : ""} (\`${buyHit.selector}\`)${buyRecovered ? " — selector veio de recovery LLM" : ""}`;
+    const fullActionDesc = variantRetryNote
+      ? `${buyActionDesc} — ${variantRetryNote} — ${validation.note}`
+      : `${buyActionDesc} — ${validation.note}`;
     steps.push({
-      step: 5,
+      step: 6,
       name: "add-to-cart",
       side: ctx.side,
       viewport: ctx.viewport,
-      status: "ok",
-      durationMs: Date.now() - t5,
+      status: validation.status,
+      durationMs: Date.now() - t6,
       url: page.url(),
-      screenshotPath: sp5,
-      screenshotBeforePath: spBefore5,
-      beforeUrl: beforeUrl5,
-      actionDescription: `Clicou no botão${buyText ? ` '${buyText.slice(0, 40).trim()}'` : ""} (\`${buyHit.selector}\`)${buyRecovered ? " — selector veio de recovery LLM" : ""}`,
+      screenshotPath: sp6,
+      screenshotBeforePath: spBefore6,
+      beforeUrl: beforeUrl6,
+      actionDescription: fullActionDesc,
       selectorKey: "buyButton",
       usedSelector: buyHit.selector,
       recoveredByLlm: buyRecovered || undefined,
+      note: validation.status === "ok" ? undefined : validation.note,
+      detail: { signal: validation.signal, errorText: validation.errorText, variantRetry: variantRetryNote },
     });
-    reportEnd(5, "add-to-cart", "ok", Date.now() - t5);
+    reportEnd(6, "add-to-cart", validation.status, Date.now() - t6, validation.status === "ok" ? undefined : validation.note);
+    // If add-to-cart silently failed, downstream steps will be meaningless;
+    // bail early so we don't report cascading "minicart not found" noise.
+    if (validation.status === "failed") {
+      return { pages, steps };
+    }
 
-    // Step 6: open minicart
-    //
-    // Three real-world patterns observed:
-    //   (a) click on cart icon → drawer overlay slides in (most sites)
-    //   (b) click on cart icon → navigates to /cart or /checkout (miess
-    //       mobile prod, simple Wake stores)
-    //   (c) hover on cart icon → minicart popup (miess desktop prod,
-    //       desktop VTEX with the mega-menu cart hover)
-    //
-    // `openMinicart` handles all three, falling back to hover when
-    // click doesn't reveal anything. After the cart UI is visible we
-    // validate that the product added in step 5 is actually listed —
-    // this is what makes the journey a real e2e check instead of just
-    // "did clicks succeed".
-    reportStart(6, "open-minicart");
-    const t6 = Date.now();
-    const beforeUrl6 = page.url();
-    const spBefore6 = screenshotPath(ctx, "pj-6-minicart-before");
-    await page.screenshot({ path: spBefore6, fullPage: false }).catch(() => undefined);
+    // Step 7: open minicart — multi-strategy (click / hover / tap / goto
+    // fallback) + cart-content validation against the product title we
+    // captured at step 3.
+    reportStart(7, "open-minicart");
+    const t7 = Date.now();
+    const beforeUrl7 = page.url();
+    const spBefore7 = screenshotPath(ctx, "pj-7-minicart-before");
+    await page.screenshot({ path: spBefore7, fullPage: false }).catch(() => undefined);
     let miniHit = await firstVisibleLocator(page, selFor(ctx, "minicartTrigger"));
     let miniRecovered = false;
-    if (!miniHit && recoveryBudget > 0) {
+    if (!miniHit && budget.remaining > 0) {
       const recovery = await attemptRecovery(page, ctx, "open-minicart", "Abrir o minicart/drawer do carrinho", selFor(ctx, "minicartTrigger"));
       if (recovery) {
         miniHit = recovery;
         miniRecovered = true;
-        recoveryBudget--;
+        budget.remaining--;
       }
     }
     let cartOpenMethod: NonNullable<StepCapture["cartOpenMethod"]> = "failed";
@@ -584,18 +712,15 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       const openResult = await openMinicart(page, miniHit, ctx, expectedProductTitle);
       cartOpenMethod = openResult.method;
     } else {
-      // No trigger needed — the drawer may already be open from step 5
-      // (some sites auto-open the minicart after add-to-cart).
+      // No trigger needed — drawer may already be open from add-to-cart.
       const alreadyOpen = await isCartRevealed(page, expectedProductTitle);
       if (alreadyOpen) {
         cartOpenMethod = "already-open";
-        dlog(ctx, `step 6 open-minicart: no trigger, but drawer already visible (matched ${alreadyOpen})`);
+        dlog(ctx, `step 7 open-minicart: no trigger, drawer already visible (${alreadyOpen})`);
       }
     }
-    // Validate that the product added in step 5 is now visible in the
-    // cart UI. Only runs when we successfully revealed the cart and
-    // captured the product title back in step 3.
-    let step6Validation: StepCapture["cartValidation"];
+    // Validate the product from step 3 is now visible in the cart UI.
+    let step7Validation: StepCapture["cartValidation"];
     if (expectedProductTitle && cartOpenMethod !== "failed") {
       const v = await validateCartContainsTitle(page, expectedProductTitle, ctx);
       let reasonText: string | undefined;
@@ -603,48 +728,44 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         if (v.observedTitles.length === 0) {
           const emptyBanner = await detectEmptyCartBanner(page);
           reasonText = emptyBanner
-            ? `cart genuinely empty — upstream add-to-cart didn't persist (session/cookie may not have carried over). Banner observed: "${emptyBanner}"`
-            : "no cart line items visible after open (selectors may not match markup)";
+            ? `cart genuinely empty — add-to-cart didn't persist. Banner: "${emptyBanner}"`
+            : "no cart line items visible (selectors may not match markup)";
         } else {
           reasonText = `expected title not found among ${v.observedTitles.length} observed`;
         }
       }
-      step6Validation = {
+      step7Validation = {
         expectedTitle: expectedProductTitle,
         found: v.found,
         method: v.method,
         observedTitles: v.observedTitles.slice(0, 8),
         reason: reasonText,
       };
-      dlog(ctx, `step 6 open-minicart: cart validation → found=${v.found} (${v.method})${reasonText ? ` — ${reasonText.slice(0, 80)}` : ""}`);
-    } else if (!expectedProductTitle) {
-      dlog(ctx, "step 6 open-minicart: skipping validation — no PDP title captured");
-    } else {
-      dlog(ctx, "step 6 open-minicart: skipping validation — cart UI not revealed");
+      dlog(ctx, `step 7 open-minicart: validation → found=${v.found} (${v.method})${reasonText ? ` — ${reasonText.slice(0, 80)}` : ""}`);
     }
-    const sp6 = screenshotPath(ctx, "pj-6-minicart");
-    await page.screenshot({ path: sp6, fullPage: false }).catch(() => undefined);
-    const step6Status: StepCapture["status"] =
-      cartOpenMethod === "failed" ? "failed" : step6Validation && !step6Validation.found ? "failed" : "ok";
+    const sp7 = screenshotPath(ctx, "pj-7-minicart");
+    await page.screenshot({ path: sp7, fullPage: false }).catch(() => undefined);
+    const step7Status: StepCapture["status"] =
+      cartOpenMethod === "failed" ? "failed" : step7Validation && !step7Validation.found ? "failed" : "ok";
     steps.push({
-      step: 6,
+      step: 7,
       name: "open-minicart",
       side: ctx.side,
       viewport: ctx.viewport,
-      status: step6Status,
-      durationMs: Date.now() - t6,
+      status: step7Status,
+      durationMs: Date.now() - t7,
       url: page.url(),
-      screenshotPath: sp6,
-      screenshotBeforePath: spBefore6,
-      beforeUrl: beforeUrl6,
+      screenshotPath: sp7,
+      screenshotBeforePath: spBefore7,
+      beforeUrl: beforeUrl7,
       cartOpenMethod,
-      cartValidation: step6Validation,
+      cartValidation: step7Validation,
       actionDescription: miniHit
         ? `Abriu minicart via ${cartOpenMethod}${miniText ? ` em '${miniText.slice(0, 30).trim()}'` : ""} (\`${miniHit.selector}\`)${miniRecovered ? " — selector via recovery LLM" : ""}${
-            step6Validation
-              ? step6Validation.found
+            step7Validation
+              ? step7Validation.found
                 ? " ✓ produto encontrado no cart"
-                : ` ✗ produto ESPERADO não encontrado (${step6Validation.observedTitles?.length ?? 0} itens observados)`
+                : ` ✗ produto ESPERADO não encontrado (${step7Validation.observedTitles?.length ?? 0} itens observados)`
               : ""
           }`
         : cartOpenMethod === "already-open"
@@ -654,335 +775,207 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       usedSelector: miniHit?.selector,
       recoveredByLlm: miniRecovered || undefined,
     });
-    reportEnd(6, "open-minicart", step6Status, Date.now() - t6);
+    reportEnd(7, "open-minicart", step7Status, Date.now() - t7);
 
-    // Step 7: shipping calc in cart
-    reportStart(7, "shipping-calc-cart");
+    // Step 8: shipping calc in cart
+    reportStart(8, "shipping-calc-cart");
     let cepInputCart = await firstVisible(page, selFor(ctx, "cepInputCart"));
-    let cepCartRecovered = false;
-    if (!cepInputCart && recoveryBudget > 0) {
-      const recovery = await attemptRecovery(
-        page,
-        ctx,
-        "shipping-calc-cart",
-        "Achar o input de CEP / código postal dentro do carrinho ou minicart aberto agora (input visível com label/placeholder de frete, entrega ou CEP)",
-        selFor(ctx, "cepInputCart"),
-      );
-      if (recovery) {
-        cepInputCart = recovery.selector;
-        cepCartRecovered = true;
-        recoveryBudget--;
+    let cepCartRecoveredByLlm = false;
+    if (!cepInputCart && budget.remaining > 0) {
+      const html = await page.content().catch(() => "");
+      if (html) {
+        const suggestion = await suggestRecovery({
+          stepName: "shipping-calc-cart",
+          intendedAction:
+            "Encontre o <input> de CEP (código postal de ENDEREÇO de entrega) dentro do minicart drawer ou da página de carrinho — usado pra CALCULAR FRETE antes do checkout. Placeholder normalmente é 'CEP', 'Digite seu CEP', 'Cód. postal', 'Postal code', aria-label='CEP' ou name='zip'/'cep'/'postal'. **NÃO** retorne o input de CUPOM de desconto / 'Digite o cupom' / código promocional — esses são pra desconto, não pra frete. Também NÃO retorne campo de e-mail/newsletter.",
+          html,
+          alreadyTried: selFor(ctx, "cepInputCart"),
+        });
+        if (suggestion) {
+          budget.remaining--;
+          const el = page.locator(suggestion.selector).first();
+          if (await el.isVisible({ timeout: 2_000 }).catch(() => false)) {
+            cepInputCart = suggestion.selector;
+            cepCartRecoveredByLlm = true;
+          }
+        }
       }
     }
     if (cepInputCart) {
-      const t7 = Date.now();
-      const beforeUrl7 = page.url();
-      const spBefore7 = screenshotPath(ctx, "pj-7-shipping-cart-before");
-      await page.screenshot({ path: spBefore7, fullPage: false }).catch(() => undefined);
+      const t8 = Date.now();
+      const beforeUrl8 = page.url();
+      const spBefore8 = screenshotPath(ctx, "pj-8-shipping-cart-before");
+      await page.screenshot({ path: spBefore8, fullPage: false }).catch(() => undefined);
       const ok = await fillCep(page, cepInputCart, ctx.rc.cep);
-      const sp7 = screenshotPath(ctx, "pj-7-shipping-cart");
-      await page.screenshot({ path: sp7, fullPage: false }).catch(() => undefined);
-      const step7Status: StepCapture["status"] = ok ? "ok" : "failed";
+      const sp8 = screenshotPath(ctx, "pj-8-shipping-cart");
+      await page.screenshot({ path: sp8, fullPage: false }).catch(() => undefined);
+      const step8Status: StepCapture["status"] = ok ? "ok" : "failed";
       steps.push({
-        step: 7,
+        step: 8,
         name: "shipping-calc-cart",
         side: ctx.side,
         viewport: ctx.viewport,
-        status: step7Status,
-        durationMs: Date.now() - t7,
+        status: step8Status,
+        durationMs: Date.now() - t8,
         url: page.url(),
-        screenshotPath: sp7,
-        screenshotBeforePath: spBefore7,
-        beforeUrl: beforeUrl7,
-        actionDescription: `Preencheu CEP '${ctx.rc.cep}' no carrinho (\`${cepInputCart}\`)${cepCartRecovered ? " (selector via LLM recovery)" : ""}`,
+        screenshotPath: sp8,
+        screenshotBeforePath: spBefore8,
+        beforeUrl: beforeUrl8,
+        actionDescription: `Preencheu CEP '${ctx.rc.cep}' no carrinho (\`${cepInputCart}\`)${cepCartRecoveredByLlm ? " — recovery LLM" : ""}`,
         detail: { cepUsed: ctx.rc.cep },
         selectorKey: "cepInputCart",
         usedSelector: cepInputCart,
-        recoveredByLlm: cepCartRecovered || undefined,
+        recoveredByLlm: cepCartRecoveredByLlm || undefined,
       });
-      reportEnd(7, "shipping-calc-cart", step7Status, Date.now() - t7);
+      reportEnd(8, "shipping-calc-cart", step8Status, Date.now() - t8);
     } else {
-      steps.push(makeSkipStep(7, "shipping-calc-cart", ctx, "no CEP input in cart (recovery exhausted)"));
-      reportEnd(7, "shipping-calc-cart", "skipped", 0, "no CEP input in cart");
+      steps.push(makeSkipStep(8, "shipping-calc-cart", ctx, "no CEP input in cart (recovery exhausted)"));
+      reportEnd(8, "shipping-calc-cart", "skipped", 0, "no CEP input in cart");
     }
 
-    // Step 8: go to checkout
-    //
-    // The default selectors hard-code variants of "Finalizar compra" /
-    // "Ir para o checkout" / "Checkout" / `[data-checkout-button]`. Sites
-    // with non-standard cart CTAs (e.g. miess uses just "Finalizar")
-    // either don't match any default OR match a wrong element that
-    // happens to satisfy the selector but doesn't navigate to /checkout.
-    //
-    // The single-shot click + URL check below catches the second case
-    // (wrong element matched, URL stays on cart). When that happens we
-    // now retry with an LLM recovery call that sees the current cart
-    // HTML — that's the context the up-front discovery phase never had.
-    reportStart(8, "go-checkout");
-    // Two scenarios at the start of step 8:
-    //
-    //   (a) **drawer-mode**: we're still on the product/cart page, the
-    //       minicart is a popup/drawer overlay. Look for a "Finalizar"
-    //       / "Ir para o checkout" CTA inside that drawer.
-    //
-    //   (b) **cart-is-a-page mode**: step 6 navigated us to /cart or
-    //       /checkout/#/cart (miess prod desktop pattern). We're
-    //       already on a checkout subpage. The "next step" CTA here is
-    //       labeled differently — "Continuar para pagamento", "Avançar",
-    //       "Próxima etapa" — and clicking it advances to /checkout/#/email
-    //       or similar. NOT a minicart drawer trigger.
-    //
-    // Detect (b) by URL containing /checkout, /cart, or /carrinho. In
-    // mode (b), skip the drawer-re-open block (there's no minicart on
-    // a checkout page) and look for a next-step CTA. In mode (a),
-    // re-open the drawer in case it auto-closed during step 7.
-    const beforeStep8Url = page.url();
-    const alreadyInCheckoutPage = /\/(checkout|cart|carrinho)(\/|#|$|\?)/i.test(beforeStep8Url);
-    dlog(ctx, `step 8 go-checkout: beforeUrl=${beforeStep8Url} alreadyInCheckoutPage=${alreadyInCheckoutPage}`);
-    if (!alreadyInCheckoutPage) {
-      const drawerStillOpen = await firstVisible(page, [
-        "[role='dialog']:visible",
-        "[aria-modal='true']:visible",
-        "[data-minicart][aria-hidden='false']",
-        ".minicart--open",
-        ".minicart-drawer:not([hidden])",
-        "[class*='minicart'][class*='open']",
-        "[class*='cart-drawer'][class*='open']",
-      ]);
-      if (!drawerStillOpen) {
-        dlog(ctx, "step 8 go-checkout: drawer appears closed, re-clicking minicart trigger");
-        const reTrigger = await firstVisibleLocator(page, selFor(ctx, "minicartTrigger"));
-        if (reTrigger) {
-          await reTrigger.locator.click({ timeout: 3_000 }).catch(() => undefined);
-          await page.waitForTimeout(1_500);
-          dlog(ctx, `step 8 go-checkout: re-opened drawer via ${reTrigger.selector}`);
-        } else {
-          dlog(ctx, "step 8 go-checkout: minicartTrigger not found — drawer state unknown");
-        }
-      } else {
-        dlog(ctx, `step 8 go-checkout: drawer still open (matched ${drawerStillOpen})`);
+    // Step 9: go to checkout
+    reportStart(9, "go-checkout");
+    const t9 = Date.now();
+    const beforeUrl9 = page.url();
+    // Early exit: some stores wire the minicart trigger as a direct link to
+    // /checkout, so by the time we arrive here the user is already on the
+    // checkout page. Trust the URL and validate the product is still in
+    // the order summary.
+    if (/\/(checkout|carrinho)(\/|$|\?)/i.test(beforeUrl9)) {
+      await waitForCartHydration(page);
+      let step9EarlyValidation: StepCapture["cartValidation"];
+      if (expectedProductTitle) {
+        const v = await validateCartContainsTitle(page, expectedProductTitle, ctx);
+        step9EarlyValidation = {
+          expectedTitle: expectedProductTitle,
+          found: v.found,
+          method: v.method,
+          observedTitles: v.observedTitles.slice(0, 8),
+          reason: v.found ? undefined : `expected title not found among ${v.observedTitles.length} observed on checkout`,
+        };
       }
+      const sp9early = screenshotPath(ctx, "pj-9-checkout-reached");
+      await page.screenshot({ path: sp9early, fullPage: false }).catch(() => undefined);
+      const earlyStatus: StepCapture["status"] =
+        step9EarlyValidation && !step9EarlyValidation.found ? "failed" : "ok";
+      steps.push({
+        step: 9,
+        name: "go-checkout",
+        side: ctx.side,
+        viewport: ctx.viewport,
+        status: earlyStatus,
+        durationMs: Date.now() - t9,
+        url: page.url(),
+        screenshotPath: sp9early,
+        cartValidation: step9EarlyValidation,
+        actionDescription: `Já estava em \`${beforeUrl9}\` (minicart navegou direto para checkout)${
+          step9EarlyValidation
+            ? step9EarlyValidation.found
+              ? " ✓ produto persiste no checkout"
+              : ` ✗ produto ESPERADO ausente (${step9EarlyValidation.observedTitles?.length ?? 0} observados)`
+            : ""
+        }`,
+        detail: { reachedVia: "minicart-direct-link" },
+      });
+      reportEnd(9, "go-checkout", earlyStatus, Date.now() - t9);
+      return { pages, steps };
     }
-
-    // When already on a checkout page, prepend "advance step" CTA
-    // patterns to the selector list. These are common across VTEX,
-    // FastStore, Shopify checkout and homegrown carts.
-    const nextStepSelectors = alreadyInCheckoutPage
-      ? [
-          // Text-based (most semantic, language-agnostic to button vs link)
-          "button:has-text('Continuar para pagamento')",
-          "a:has-text('Continuar para pagamento')",
-          "button:has-text('Ir para o pagamento')",
-          "a:has-text('Ir para o pagamento')",
-          "button:has-text('Continuar')",
-          "a:has-text('Continuar')",
-          "button:has-text('Avançar')",
-          "a:has-text('Avançar')",
-          "button:has-text('Próxima etapa')",
-          "a:has-text('Próxima etapa')",
-          "button:has-text('Confirmar')",
-          "button:has-text('Finalizar')",
-          "a:has-text('Finalizar')",
-          // VTEX legacy checkout6.js (/checkout/#/cart) — these IDs/classes
-          // are stable across miess, decathlon-br, riachuelo, and most
-          // VTEX stores still on checkout6.
-          "#cart-to-orderform",
-          "#btn-go-to-payment",
-          ".btn-go-to-payment",
-          "a.btn-place-order",
-          "a.orange-btn",
-          ".cart-links-bottom a",
-          // Generic submit-CTA patterns
-          "button[type='submit'][class*='checkout' i]",
-          "button[type='submit'][class*='continue' i]",
-          "[data-checkout-next]",
-          "[data-fs-cart-checkout-button]",
-        ]
-      : [];
-    const baseSelectors = selFor(ctx, "checkoutButton");
-    const checkoutSelectors = [...nextStepSelectors, ...baseSelectors];
-    dlog(ctx, `step 8 go-checkout: firstVisibleLocator on ${checkoutSelectors.length} selectors${alreadyInCheckoutPage ? ` (${nextStepSelectors.length} next-step prefixed)` : ""}`);
-    let checkoutHit = await firstVisibleLocator(page, checkoutSelectors);
-    dlog(ctx, `step 8 go-checkout: default match → ${checkoutHit ? `selector=${checkoutHit.selector}` : "null"}`);
+    let checkoutHit = await firstVisibleLocator(page, selFor(ctx, "checkoutButton"));
     let checkoutRecovered = false;
-    if (!checkoutHit && recoveryBudget > 0) {
-      const recoveryIntent = alreadyInCheckoutPage
-        ? "Já estou no checkout (URL contém /checkout ou /cart). Achar o botão visível que avança pra próxima etapa do checkout (geralmente 'Continuar para pagamento', 'Continuar', 'Avançar', 'Próxima etapa', 'Confirmar', ou similar). NÃO é o ícone do header — é uma CTA primary na página."
-        : "Clicar no botão 'Finalizar compra' / 'Ir para o checkout' / 'Finalizar' dentro do drawer/popup do carrinho aberto.";
-      dlog(ctx, `step 8 go-checkout: defaults missed, calling attemptRecovery (budget=${recoveryBudget}, mode=${alreadyInCheckoutPage ? "advance-checkout" : "drawer-finalize"})`);
-      const recovery = await attemptRecovery(page, ctx, "go-checkout", recoveryIntent, checkoutSelectors);
-      dlog(ctx, `step 8 go-checkout: LLM recovery → ${recovery ? `selector=${recovery.selector}` : "null"}`);
+    if (!checkoutHit && budget.remaining > 0) {
+      const recovery = await attemptRecovery(page, ctx, "go-checkout", "Clicar no botão 'Finalizar compra' / 'Ir para o checkout' / 'Finalizar'", selFor(ctx, "checkoutButton"));
       if (recovery) {
         checkoutHit = recovery;
         checkoutRecovered = true;
-        recoveryBudget--;
+        budget.remaining--;
       }
     }
     if (!checkoutHit) {
-      dlog(ctx, "step 8 go-checkout: no button found, skipping");
-      steps.push(makeSkipStep(8, "go-checkout", ctx, "no checkout button found (recovery exhausted)"));
-      reportEnd(8, "go-checkout", "skipped", 0, "no checkout button found");
+      steps.push(makeSkipStep(9, "go-checkout", ctx, "no checkout button found (recovery exhausted)"));
+      reportEnd(9, "go-checkout", "skipped", 0, "no checkout button found");
       return { pages, steps };
     }
-
-    /**
-     * One attempt at the checkout flow:
-     *   1. Take a "before" screenshot.
-     *   2. Race the click against `waitForURL(/checkout/)` so the click+nav
-     *      finish together when the button is correct.
-     *   3. Settle, take an "after" screenshot, check the final URL.
-     *
-     * Returns the screenshot paths + final URL + text the button had, so
-     * the caller can decide whether to retry with a different selector
-     * (LLM-discovered) when the URL didn't actually reach checkout.
-     */
-    const tryCheckoutClick = async (
-      hit: NonNullable<typeof checkoutHit>,
-      attempt: number,
-    ): Promise<{ url: string; spBefore: string; spAfter: string; clickedText: string }> => {
-      const spBefore = screenshotPath(ctx, `pj-8-checkout-before-${attempt}`);
-      await page.screenshot({ path: spBefore, fullPage: false }).catch(() => undefined);
-      const clickedText = await hit.locator.innerText().catch(() => "");
-      const urlBefore = page.url();
-      // If we're already on /checkout, the click is supposed to take us
-      // to a *different* checkout subpage (e.g. /checkout/#/cart →
-      // /checkout/#/email). Wait for a URL change instead of a generic
-      // /checkout match (which is trivially true here).
-      const urlChangePredicate = alreadyInCheckoutPage
-        ? (u: URL) => u.toString() !== urlBefore
-        : /checkout/i;
+    const spBefore9 = screenshotPath(ctx, "pj-9-checkout-before");
+    await page.screenshot({ path: spBefore9, fullPage: false }).catch(() => undefined);
+    // Click + URL race, with up to 2 LLM-recovery retries when the click
+    // misses (selector matched a wrong button — common when discovery
+    // confused the cart icon for the checkout button).
+    let usedSelector = checkoutHit.selector;
+    let clickedText = await checkoutHit.locator.innerText().catch(() => "");
+    let reachedCheckout = false;
+    let attempt = 0;
+    const triedSelectors = new Set<string>([usedSelector]);
+    while (attempt < 3) {
+      attempt++;
       await Promise.all([
-        page.waitForURL(urlChangePredicate, { timeout: 10_000 }).catch(() => undefined),
-        hit.locator.click({ timeout: 5_000 }).catch(() => undefined),
+        page.waitForURL(/\/(checkout|carrinho)/i, { timeout: 10_000 }).catch(() => undefined),
+        checkoutHit!.locator.click({ timeout: 5_000 }).catch(() => undefined),
       ]);
       await page.waitForTimeout(1_500);
-      const spAfter = screenshotPath(ctx, `pj-8-checkout-reached-${attempt}`);
-      await page.screenshot({ path: spAfter, fullPage: false }).catch(() => undefined);
-      return { url: page.url(), spBefore, spAfter, clickedText };
-    };
-
-    const t8 = Date.now();
-    const beforeUrl8 = page.url();
-    // Success criterion: URL changed AND the new URL contains a
-    // recognizable checkout-flow marker. The "URL changed" half rejects
-    // misclicks that bounced back to the start; the "checkout marker"
-    // half rejects bare cart pages (`/cart`, `/carrinho`, `/sacola`)
-    // since clicking the cart icon brings you there without actually
-    // entering the checkout flow.
-    //
-    // Markers accepted (covers VTEX legacy /checkout, FastStore
-    // /checkout, Shopify /checkouts, Wake /pedido, Magento /onepage,
-    // Nuvemshop /finalizar, plus various Latin-American checkout
-    // platforms that use /pagamento or /payment URLs):
-    const CHECKOUT_URL_MARKERS = /\/(checkout|checkouts|finalize|finalizar|pagamento|payment|pedido|order|orderform|onepage|secure|seguro)(\/|#|$|\?|-)/i;
-    const isReachedCheckout = (finalUrl: string): boolean => {
-      if (finalUrl === beforeUrl8) return false;
-      return CHECKOUT_URL_MARKERS.test(finalUrl);
-    };
-    let attempt = 1;
-    dlog(ctx, `step 8 go-checkout: tryCheckoutClick attempt 1 — selector=${checkoutHit.selector}, beforeUrl=${beforeUrl8}`);
-    let result = await tryCheckoutClick(checkoutHit, attempt);
-    let reachedCheckout = isReachedCheckout(result.url);
-    let usedSelector = checkoutHit.selector;
-    let clickedText = result.clickedText;
-    dlog(ctx, `step 8 go-checkout: attempt 1 result — finalUrl=${result.url} reached=${reachedCheckout} clicked='${clickedText.slice(0, 40).trim()}'`);
-
-    // If we clicked something but the URL didn't change to /checkout, the
-    // selector likely picked a button that ISN'T the real checkout CTA.
-    // Burn one recovery slot on a fresh LLM call that sees the cart HTML
-    // as it stands NOW (post-failed-click) and ask for the actual
-    // navigation trigger. This is the "LLM should see the rendered cart,
-    // not just the home" path the discovery phase can't take on its own.
-    if (!reachedCheckout && recoveryBudget > 0) {
-      dlog(ctx, `step 8 go-checkout: attempt 1 missed target — calling attemptRecovery for retry (budget=${recoveryBudget}, mode=${alreadyInCheckoutPage ? "advance-checkout" : "drawer-finalize"})`);
-      const retryIntent = alreadyInCheckoutPage
-        ? `Já estou no checkout, em ${beforeUrl8}. Cliquei em '${clickedText.slice(0, 40).trim()}' (selector \`${usedSelector}\`), mas a URL não mudou ou foi pra ${result.url}. Achar o botão que avança pra próxima etapa do checkout (Continuar para pagamento, Avançar, Próxima etapa, Confirmar, etc).`
-        : `Cliquei em '${clickedText.slice(0, 40).trim()}' (selector \`${usedSelector}\`), mas a URL ficou em ${result.url} e não foi pra /checkout. Achar o botão que de fato navega pra /checkout neste cart/minicart aberto.`;
-      const retrySuggestion = await attemptRecovery(
+      reachedCheckout = /\/(checkout|carrinho)(\/|$|\?)/i.test(page.url());
+      if (reachedCheckout) break;
+      // Click landed but didn't navigate — try LLM recovery for a different
+      // selector before giving up. Some sites have a non-checkout button that
+      // happens to match generic text selectors.
+      if (budget.remaining <= 0) break;
+      dlog(ctx, `step 9 go-checkout: click on \`${usedSelector}\` didn't navigate (attempt ${attempt}). URL still ${page.url()}. Asking LLM for another selector.`);
+      const triedList = Array.from(triedSelectors);
+      const recovery = await attemptRecovery(
         page,
         ctx,
-        "go-checkout-retry",
-        retryIntent,
-        [usedSelector, ...checkoutSelectors],
+        "go-checkout",
+        `O click anterior em \`${usedSelector}\` não navegou para /checkout (URL continua em ${page.url()}). Encontre OUTRO selector — o botão real de finalizar compra deve ser visível agora (no drawer aberto ou na página). Não retorne ${triedList.join(", ")} novamente.`,
+        triedList,
       );
-      dlog(ctx, `step 8 go-checkout: retry LLM suggestion → ${retrySuggestion ? `selector=${retrySuggestion.selector}` : "null"}`);
-      if (retrySuggestion) {
-        recoveryBudget--;
-        checkoutRecovered = true;
-        attempt++;
-        dlog(ctx, `step 8 go-checkout: tryCheckoutClick attempt 2 — selector=${retrySuggestion.selector}`);
-        const retryResult = await tryCheckoutClick(retrySuggestion, attempt);
-        // Always promote the retry to the "current" attempt — it IS the
-        // most recent action, so the reported URL, screenshot paths,
-        // selector and clicked text must reflect it. Whether the retry
-        // *succeeded* is decided by URL match alone.
-        result = retryResult;
-        usedSelector = retrySuggestion.selector;
-        clickedText = retryResult.clickedText;
-        reachedCheckout = isReachedCheckout(retryResult.url);
-        dlog(ctx, `step 8 go-checkout: attempt 2 result — finalUrl=${retryResult.url} reached=${reachedCheckout} clicked='${retryResult.clickedText.slice(0, 40).trim()}'`);
-      }
-    } else if (!reachedCheckout) {
-      dlog(ctx, `step 8 go-checkout: not retrying — recoveryBudget=${recoveryBudget}`);
+      if (!recovery) break;
+      checkoutHit = recovery;
+      checkoutRecovered = true;
+      usedSelector = recovery.selector;
+      triedSelectors.add(usedSelector);
+      clickedText = await recovery.locator.innerText().catch(() => "");
+      budget.remaining--;
     }
-
-    // Once we're on /checkout, validate the SAME product is still
-    // listed. This catches cart-state-not-persisted bugs (e.g. cart is
-    // session-cookie-scoped and the cookie didn't carry over to the
-    // checkout subdomain, or the platform creates a fresh order form
-    // on /checkout and the previously-added item didn't survive).
-    let step8Validation: StepCapture["cartValidation"];
-    if (expectedProductTitle && reachedCheckout) {
-      // Give the checkout page a chance to render its line items.
-      await page.waitForTimeout(1_500);
+    // Reached checkout? Validate the product is there.
+    let step9Validation: StepCapture["cartValidation"];
+    if (reachedCheckout && expectedProductTitle) {
+      await waitForCartHydration(page);
       const v = await validateCartContainsTitle(page, expectedProductTitle, ctx);
-      let reasonText: string | undefined;
-      if (!v.found) {
-        if (v.observedTitles.length === 0) {
-          const emptyBanner = await detectEmptyCartBanner(page);
-          reasonText = emptyBanner
-            ? `checkout shows empty cart banner — upstream session lost. Banner: "${emptyBanner}"`
-            : "checkout page has no visible line items (selectors may not match markup)";
-        } else {
-          reasonText = `expected title not found among ${v.observedTitles.length} observed on checkout`;
-        }
-      }
-      step8Validation = {
+      step9Validation = {
         expectedTitle: expectedProductTitle,
         found: v.found,
         method: v.method,
         observedTitles: v.observedTitles.slice(0, 8),
-        reason: reasonText,
+        reason: v.found ? undefined : `expected title not found among ${v.observedTitles.length} observed on checkout`,
       };
-      dlog(ctx, `step 8 go-checkout: checkout validation → found=${v.found} (${v.method})${reasonText ? ` — ${reasonText.slice(0, 80)}` : ""}`);
     }
-
-    // Reach checkout is required; if we reached but the product is
-    // missing, that's still a failure because the user wouldn't have
-    // anything to pay for.
-    const step8Status: StepCapture["status"] = reachedCheckout
-      ? step8Validation && !step8Validation.found
-        ? "failed"
-        : "ok"
-      : "failed";
+    const sp9 = screenshotPath(ctx, "pj-9-checkout-reached");
+    await page.screenshot({ path: sp9, fullPage: false }).catch(() => undefined);
+    const step9Status: StepCapture["status"] =
+      !reachedCheckout ? "failed" : step9Validation && !step9Validation.found ? "failed" : "ok";
     steps.push({
-      step: 8,
+      step: 9,
       name: "go-checkout",
       side: ctx.side,
       viewport: ctx.viewport,
-      status: step8Status,
-      durationMs: Date.now() - t8,
-      url: result.url,
-      screenshotPath: result.spAfter,
-      screenshotBeforePath: result.spBefore,
-      beforeUrl: beforeUrl8,
-      cartValidation: step8Validation,
-      actionDescription: `Clicou em${clickedText ? ` '${clickedText.slice(0, 30).trim()}'` : ""} (\`${usedSelector}\`); URL final: ${result.url}${reachedCheckout ? " ✓ atingiu /checkout" : " ✗ não foi pra checkout"}${attempt > 1 ? ` (após ${attempt} tentativas com recovery LLM)` : ""}${step8Validation ? (step8Validation.found ? " ✓ produto persiste no checkout" : ` ✗ produto ESPERADO ausente no checkout (${step8Validation.observedTitles?.length ?? 0} itens observados)`) : ""}`,
+      status: step9Status,
+      durationMs: Date.now() - t9,
+      url: page.url(),
+      screenshotPath: sp9,
+      screenshotBeforePath: spBefore9,
+      beforeUrl: beforeUrl9,
+      cartValidation: step9Validation,
+      actionDescription: `Clicou em${clickedText ? ` '${clickedText.slice(0, 30).trim()}'` : ""} (\`${usedSelector}\`); URL final: ${page.url()}${reachedCheckout ? " ✓ atingiu checkout" : " ✗ não foi pra checkout"}${attempt > 1 ? ` (após ${attempt} tentativas com recovery LLM)` : ""}${
+        step9Validation
+          ? step9Validation.found
+            ? " ✓ produto persiste no checkout"
+            : ` ✗ produto ESPERADO ausente no checkout (${step9Validation.observedTitles?.length ?? 0} observados)`
+          : ""
+      }`,
       selectorKey: "checkoutButton",
       usedSelector,
       recoveredByLlm: checkoutRecovered || undefined,
     });
-    reportEnd(8, "go-checkout", step8Status, Date.now() - t8);
+    reportEnd(9, "go-checkout", step9Status, Date.now() - t9);
 
     return { pages, steps };
   } finally {
@@ -1013,14 +1006,9 @@ async function findCategoryUrl(
   ctx: FlowContext,
 ): Promise<{ url: string; selector: string } | null> {
   const selectors = selFor(ctx, "categoryLink");
-  dlog(ctx, `  findCategoryUrl: collectCandidateLinks(${selectors.length} selectors) start`);
-  const t0 = Date.now();
   const candidates = await collectCandidateLinks(page, selectors, 12);
-  dlog(ctx, `  findCategoryUrl: collectCandidateLinks done in ${Date.now() - t0}ms → ${candidates.length} candidates`);
   if (candidates.length === 0) return null;
-  dlog(ctx, "  findCategoryUrl: pickCategoryLink LLM call start");
   const picked = await pickCategoryLink(candidates.map((c) => ({ text: c.text, href: c.href })));
-  dlog(ctx, `  findCategoryUrl: pickCategoryLink LLM done → ${picked?.href ?? "null"}`);
   if (!picked) return null;
   const original = candidates.find((c) => c.href === picked.href);
   return original ? { url: original.href, selector: original.selector } : null;
@@ -1088,26 +1076,6 @@ async function firstVisibleLocator(
   return null;
 }
 
-/**
- * Hard total budget for the candidate-link crawl. Each individual
- * Playwright op below has its own tight timeout (count/isVisible) but
- * if the page's V8 engine is wedged (memory leak, infinite hydration
- * loop, etc), CDP messages queue up behind the wedged main thread and
- * `locator.count()` / `isVisible` / `getAttribute` can outlast their
- * declared timeouts. The deadline below short-circuits the whole loop
- * so a hung page can never freeze the parent flow indefinitely.
- */
-const COLLECT_CANDIDATES_BUDGET_MS = 15_000;
-
-/** Race a Playwright op against a hard timer, since some CDP-backed ops
- *  outlive their declared timeouts when the page is wedged. */
-function withCap<T>(p: Promise<T>, capMs: number, fallback: T): Promise<T> {
-  return Promise.race([
-    p.catch(() => fallback),
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), capMs)),
-  ]);
-}
-
 export async function collectCandidateLinks(
   page: Page,
   selectors: string[],
@@ -1115,27 +1083,15 @@ export async function collectCandidateLinks(
 ): Promise<{ text: string; href: string; selector: string }[]> {
   const out: { text: string; href: string; selector: string }[] = [];
   const seenHrefs = new Set<string>();
-  const deadline = Date.now() + COLLECT_CANDIDATES_BUDGET_MS;
-  const expired = () => Date.now() >= deadline;
-
   for (const sel of selectors) {
     if (out.length >= limit) break;
-    if (expired()) break;
     try {
       const elements = page.locator(sel);
-      // page.locator.count() has no timeout argument and can hang past
-      // page.setDefaultTimeout on a wedged page — cap it manually.
-      const count = await withCap(elements.count(), 1_000, 0);
+      const count = await elements.count();
       for (let i = 0; i < count && out.length < limit; i++) {
-        if (expired()) break;
         const el = elements.nth(i);
-        const visible = await withCap(
-          el.isVisible({ timeout: 250 }).catch(() => false),
-          400,
-          false,
-        );
-        if (!visible) continue;
-        const href = await withCap(el.getAttribute("href").catch(() => null), 400, null);
+        if (!(await el.isVisible({ timeout: 250 }).catch(() => false))) continue;
+        const href = await el.getAttribute("href").catch(() => null);
         if (!href) continue;
         let abs = href;
         try {
@@ -1145,7 +1101,7 @@ export async function collectCandidateLinks(
         }
         if (seenHrefs.has(abs)) continue;
         seenHrefs.add(abs);
-        const text = (await withCap(el.innerText().catch(() => ""), 400, "")).slice(0, 60).trim();
+        const text = (await el.innerText().catch(() => "")).slice(0, 60).trim();
         out.push({ text, href: abs, selector: sel });
       }
     } catch {
@@ -1166,14 +1122,533 @@ async function fillCep(page: Page, selector: string, cep: string): Promise<boole
   }
 }
 
+interface VariantSelectionResult {
+  /** Human-readable description of every action taken (joined into actionDescription). */
+  actions: string[];
+  /** First selector key that produced an action, for learned-selectors promotion. */
+  primarySelectorKey?: string;
+  /** First selector string that produced an action. */
+  primarySelector?: string;
+  /** True when we detected a "select-first" warning text on the page (so a skip is suspicious). */
+  variantRequired: boolean;
+}
+
 /**
- * Patterns that signal a generic page-template title rather than a
- * specific product name. Mostly seen on migrated SPAs that haven't
- * customized SEO meta tags yet — the `<title>` and `og:title` come from
- * the route template ("Página de Produto | Miess") instead of the
- * actual product. We reject these so the test doesn't try to validate
- * the cart against a meaningless string.
+ * Pure heuristic: attempts size / color / variant-row / quantity-input selection
+ * on the current PDP. Does NOT consume the LLM recovery budget — only baked-in
+ * selectors. Returns a list of actions actually performed plus a hint about
+ * whether the page is *demanding* variant selection (so the caller can decide
+ * how alarmed to be about a skip).
  */
+async function selectVariant(page: Page, ctx: FlowContext): Promise<VariantSelectionResult> {
+  const actions: string[] = [];
+  let primarySelectorKey: string | undefined;
+  let primarySelector: string | undefined;
+
+  const trackPrimary = (key: string, sel: string) => {
+    if (!primarySelectorKey) {
+      primarySelectorKey = key;
+      primarySelector = sel;
+    }
+  };
+
+  // 1) Variant rows with their own quantity controls (e.g. Miees-style COR×U tables).
+  // We only touch the FIRST visible row to keep the cart deterministic.
+  try {
+    const rowSelectors = selFor(ctx, "variantRow");
+    const incrementSelectors = selFor(ctx, "quantityIncrement");
+    rowLoop: for (const rowSel of rowSelectors) {
+      const rows = page.locator(rowSel);
+      const count = await rows.count().catch(() => 0);
+      for (let i = 0; i < Math.min(count, 5); i++) {
+        const row = rows.nth(i);
+        if (!(await row.isVisible({ timeout: 500 }).catch(() => false))) continue;
+        const rowText = (await row.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+        for (const incSel of incrementSelectors) {
+          const plus = row.locator(incSel).first();
+          if (!(await plus.isVisible({ timeout: 500 }).catch(() => false))) continue;
+          if (await plus.isDisabled().catch(() => false)) continue;
+          await plus.click({ timeout: 2_000 }).catch(() => undefined);
+          await page.waitForTimeout(400);
+          actions.push(`Incrementou quantidade da variante \`${rowSel}\`[${i}]${rowText ? ` (${rowText.slice(0, 40)})` : ""} via \`${incSel}\``);
+          trackPrimary("variantRow", rowSel);
+          break rowLoop;
+        }
+      }
+    }
+  } catch {
+    /* continue */
+  }
+
+  // 2) Size swatch — first available.
+  if (actions.length === 0) {
+    const sizeHit = await firstVisibleLocator(page, selFor(ctx, "sizeSwatch"));
+    if (sizeHit && !(await sizeHit.locator.isDisabled().catch(() => false))) {
+      const sizeText = (await sizeHit.locator.innerText().catch(() => "")).slice(0, 20).trim();
+      await sizeHit.locator.click({ timeout: 2_000 }).catch(() => undefined);
+      await page.waitForTimeout(400);
+      actions.push(`Selecionou tamanho${sizeText ? ` '${sizeText}'` : ""} (\`${sizeHit.selector}\`)`);
+      trackPrimary("sizeSwatch", sizeHit.selector);
+    }
+  }
+
+  // 3) Color swatch — first available (independent of size; some PDPs require both).
+  const colorHit = await firstVisibleLocator(page, selFor(ctx, "colorSwatch"));
+  if (colorHit && !(await colorHit.locator.isDisabled().catch(() => false))) {
+    const colorText = (await colorHit.locator.innerText().catch(() => "")).slice(0, 20).trim();
+    const colorLabel = colorText || (await colorHit.locator.getAttribute("aria-label").catch(() => null)) || "";
+    await colorHit.locator.click({ timeout: 2_000 }).catch(() => undefined);
+    await page.waitForTimeout(400);
+    actions.push(`Selecionou cor${colorLabel ? ` '${colorLabel}'` : ""} (\`${colorHit.selector}\`)`);
+    trackPrimary("colorSwatch", colorHit.selector);
+  }
+
+  // 4) Quantity inputs — covers both single-SKU (one input) and "variant
+  // table" layouts (N inputs, one per row, all starting at 0) used by stores
+  // like Miess that render the SKU picker as a list where each row has
+  // an `<input type='number' value='0'>` plus a separate `+` button.
+  if (actions.length === 0) {
+    await scrollPageInChunks(page);
+    const result = await findAndIncrementZeroQtyInput(page, ctx);
+    if (result) {
+      actions.push(result.description);
+      trackPrimary(result.selectorKey, result.usedSelector);
+    }
+  }
+
+  let variantRequired = false;
+  try {
+    const bodyText = await page.locator("body").innerText({ timeout: 1_000 }).catch(() => "");
+    variantRequired = VARIANT_REQUIRED_TEXT_PATTERNS.some((re) => re.test(bodyText));
+  } catch {
+    /* ignore */
+  }
+
+  return { actions, primarySelectorKey, primarySelector, variantRequired };
+}
+
+/**
+ * Step through the page in chunks to trigger IntersectionObserver-based lazy
+ * hydration (Deco f-partial, Fresh islands with `threshold` triggers, etc).
+ * Variant pickers are commonly rendered this way and aren't in the DOM
+ * immediately after navigation.
+ */
+async function scrollPageInChunks(page: Page): Promise<void> {
+  await page
+    .evaluate(async () => {
+      const height = document.body.scrollHeight;
+      const stops = [0.2, 0.4, 0.6, 0.8, 1.0, 0.4];
+      for (const frac of stops) {
+        window.scrollTo({ top: height * frac, behavior: "instant" as ScrollBehavior });
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+    })
+    .catch(() => undefined);
+  await page.waitForTimeout(1_200);
+}
+
+interface VariantIncrementResult {
+  description: string;
+  selectorKey: string;
+  usedSelector: string;
+}
+
+/**
+ * Search the page for a quantity input that's currently at 0/empty, then
+ * click the nearest `+` button. The `+` is usually NOT a direct sibling of
+ * the input (Miess wraps each in its own flex container) so we walk the
+ * input's ancestry to find a wrapping row that also contains the `+`.
+ */
+async function findAndIncrementZeroQtyInput(
+  page: Page,
+  ctx: FlowContext,
+): Promise<VariantIncrementResult | null> {
+  const qtySelectors = selFor(ctx, "quantityInput");
+
+  // Try inside the main product section first to avoid related-product carousels.
+  const scopeSelectors = [
+    "[data-manifest-key*='ProductDetails' i]",
+    "[data-manifest-key*='Product/' i]",
+    "main",
+  ];
+  const scopeRoots: Array<{ root: Locator | null; tag: "main" | "page" }> = [];
+  for (const sel of scopeSelectors) {
+    const cand = page.locator(sel).first();
+    if (await cand.count().then((n) => n > 0).catch(() => false)) {
+      scopeRoots.push({ root: cand, tag: "main" });
+      break;
+    }
+  }
+  scopeRoots.push({ root: null, tag: "page" });
+
+  for (const { root, tag } of scopeRoots) {
+    for (const sel of qtySelectors) {
+      const all = root ? root.locator(sel) : page.locator(sel);
+      const count = await all.count().catch(() => 0);
+      for (let i = 0; i < Math.min(count, 20); i++) {
+        const el = all.nth(i);
+        if (!(await el.isVisible({ timeout: 300 }).catch(() => false))) continue;
+        const value = (await el.inputValue().catch(() => "")).trim();
+        // Strict: only act on 0/empty inputs. A qty=1 input is either
+        // a carousel card (wrong target) or a single-SKU already valid.
+        if (value !== "" && value !== "0") continue;
+
+        const plus = await findPlusButtonNear(el);
+        if (plus) {
+          if (await plus.isDisabled().catch(() => false)) continue;
+          await plus.click({ timeout: 2_000 }).catch(() => undefined);
+          await page.waitForTimeout(500);
+          // Record the INPUT selector (which IS a reusable CSS selector)
+          // rather than the composite walk. Next run can find the input
+          // again via this learned hint, and the heuristic re-locates
+          // the '+' button relative to it.
+          return {
+            description: `Incrementou variante via botão '+' próximo ao input \`${sel}\` (scope=${tag}, índice ${i})`,
+            selectorKey: "quantityInput",
+            usedSelector: sel,
+          };
+        }
+        // Fallback: type "1" directly into the input.
+        await el.fill("1", { timeout: 1_500 }).catch(() => undefined);
+        await el.dispatchEvent("input").catch(() => undefined);
+        await el.dispatchEvent("change").catch(() => undefined);
+        await page.waitForTimeout(400);
+        return {
+          description: `Ajustou quantidade do input \`${sel}\` para 1 (scope=${tag}, índice ${i})`,
+          selectorKey: "quantityInput",
+          usedSelector: sel,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Walk the input's ancestry looking for the closest container that ALSO
+ * holds a button whose text is `+`. Handles the Miess layout where the `+`
+ * is nested in a sibling div, not a direct sibling of the input.
+ */
+async function findPlusButtonNear(input: Locator): Promise<Locator | null> {
+  // First try: closest ancestor li / tr / form / fieldset / data-row that
+  // contains a + button. Walk up to 6 levels.
+  const ancestorXPath =
+    "xpath=ancestor::*[self::li or self::tr or self::form or self::fieldset or @data-sku-row or @data-variant-row][1]//button[normalize-space(.)='+']";
+  const inAncestor = input.locator(ancestorXPath).first();
+  if (await inAncestor.isVisible({ timeout: 600 }).catch(() => false)) {
+    return inAncestor;
+  }
+  // Second try: walk N levels up looking for a + button. Stops at the first
+  // ancestor that contains one.
+  for (let depth = 1; depth <= 6; depth++) {
+    const climb = `xpath=ancestor::*[${depth}]//button[normalize-space(.)='+']`;
+    const cand = input.locator(climb).first();
+    if (await cand.isVisible({ timeout: 300 }).catch(() => false)) {
+      return cand;
+    }
+  }
+  // Third try: immediate following-sibling (legacy / simple layouts).
+  const sibling = input.locator("xpath=following-sibling::button[1]").first();
+  if (await sibling.isVisible({ timeout: 300 }).catch(() => false)) {
+    const text = (await sibling.innerText().catch(() => "")).trim();
+    if (text === "+") return sibling;
+  }
+  return null;
+}
+
+async function readCartCount(page: Page, ctx: FlowContext): Promise<number> {
+  const selectors = selFor(ctx, "minicartCount");
+  for (const sel of selectors) {
+    try {
+      const el = page.locator(sel).first();
+      if (!(await el.isVisible({ timeout: 500 }).catch(() => false))) continue;
+      const raw = (await el.innerText().catch(() => "")).trim();
+      const match = raw.match(/\d+/);
+      if (match) return Number.parseInt(match[0], 10);
+    } catch {
+      /* try next */
+    }
+  }
+  return 0;
+}
+
+interface AddToCartValidation {
+  status: StepCapture["status"];
+  signal:
+    | "count-increased"
+    | "drawer-open"
+    | "url-changed"
+    | "success-toast"
+    | "no-signal"
+    | "error-text";
+  note: string;
+  errorText?: string;
+}
+
+/**
+ * After clicking the buy button, decide whether the cart actually received the
+ * item. We poll for up to ~3s looking for ANY positive signal; in parallel we
+ * sniff for error text that indicates the store rejected the click (missing
+ * variant, out of stock, etc). Only "ok" if a positive signal materialized
+ * without an accompanying error.
+ */
+async function validateAddToCart(
+  page: Page,
+  ctx: FlowContext,
+  cartCountBefore: number,
+  beforeUrl: string,
+): Promise<AddToCartValidation> {
+  const deadline = Date.now() + 3_000;
+  let lastErrorText: string | undefined;
+
+  while (Date.now() < deadline) {
+    // URL change to cart/checkout is a strong positive.
+    const currentUrl = page.url();
+    if (currentUrl !== beforeUrl && /\/(cart|carrinho|checkout)(\/|$|\?)/i.test(currentUrl)) {
+      return {
+        status: "ok",
+        signal: "url-changed",
+        note: `URL mudou para \`${currentUrl}\` (carrinho/checkout)`,
+      };
+    }
+
+    // Cart count badge increased.
+    const cartCountNow = await readCartCount(page, ctx);
+    if (cartCountNow > cartCountBefore) {
+      return {
+        status: "ok",
+        signal: "count-increased",
+        note: `Contador do minicart foi de ${cartCountBefore} para ${cartCountNow}`,
+      };
+    }
+
+    // A dialog/drawer that wasn't visible before became visible.
+    const drawerSelectors = [
+      "[role='dialog']",
+      "[data-minicart][aria-expanded='true']",
+      "[data-cart-drawer].open",
+      "[data-minicart-drawer]:not([hidden])",
+      ".minicart--open",
+      ".cart-drawer--open",
+    ];
+    for (const sel of drawerSelectors) {
+      const el = page.locator(sel).first();
+      if (await el.isVisible({ timeout: 200 }).catch(() => false)) {
+        return {
+          status: "ok",
+          signal: "drawer-open",
+          note: `Drawer/modal do carrinho abriu (\`${sel}\`)`,
+        };
+      }
+    }
+
+    // Body text scan — used for both positive (success toast) and negative
+    // (variant required, out of stock) signals. Success wins because some
+    // stores show a "PRODUTO ADICIONADO!" toast on the same page where
+    // unrelated "out of stock" or "selecione" copy already exists in
+    // descriptions/related products.
+    try {
+      const bodyText = await page.locator("body").innerText({ timeout: 500 }).catch(() => "");
+      for (const re of ADD_TO_CART_SUCCESS_PATTERNS) {
+        const match = bodyText.match(re);
+        if (match) {
+          return {
+            status: "ok",
+            signal: "success-toast",
+            note: `Toast de sucesso visível: '${match[0]}'`,
+          };
+        }
+      }
+      for (const re of ADD_TO_CART_ERROR_PATTERNS) {
+        const match = bodyText.match(re);
+        if (match) {
+          lastErrorText = match[0];
+          break;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    await page.waitForTimeout(250);
+  }
+
+  if (lastErrorText) {
+    return {
+      status: "failed",
+      signal: "error-text",
+      note: `add-to-cart silenciosamente falhou: '${lastErrorText}' visível na página`,
+      errorText: lastErrorText,
+    };
+  }
+  return {
+    status: "failed",
+    signal: "no-signal",
+    note: "add-to-cart sem confirmação visível (minicart não atualizou, sem drawer, sem mudança de URL)",
+  };
+}
+
+/**
+ * Ask the LLM to recover from a failed selector lookup. Returns a usable
+ * locator + the suggested selector string, or null if the recovery failed.
+ */
+async function attemptRecovery(
+  page: Page,
+  _ctx: FlowContext,
+  stepName: string,
+  intendedAction: string,
+  alreadyTried: string[],
+): Promise<{ locator: Locator; selector: string } | null> {
+  let html = "";
+  try {
+    html = await page.content();
+  } catch {
+    return null;
+  }
+  const suggestion = await suggestRecovery({ stepName, intendedAction, html, alreadyTried });
+  if (!suggestion) return null;
+  try {
+    const el = page.locator(suggestion.selector).first();
+    if (await el.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return { locator: el, selector: suggestion.selector };
+    }
+  } catch {
+    /* selector invalid or not found */
+  }
+  return null;
+}
+
+export interface StepActionResult {
+  /** True if some action was actually performed (click/fill/press). */
+  performed: boolean;
+  /** Selector string that worked (CSS or Playwright). Empty if nothing matched. */
+  selector: string;
+  /** Action actually executed. */
+  action: "click" | "fill" | "press";
+  /** Whether the selector came from LLM recovery (so the caller can promote). */
+  recoveredByLlm: boolean;
+}
+
+/**
+ * Generic per-step action driver: tries the baked-in/learned selectors first,
+ * then calls the LLM as a fallback when nothing matched (budget permitting),
+ * and performs the requested action (click | fill | press) so the caller
+ * doesn't have to. Returns what was done + the selector used so the
+ * promotion loop can persist it across runs.
+ *
+ * Use this for ANY step where a missing element should trigger an LLM
+ * recovery attempt — the user explicitly wants every failing step retried.
+ */
+async function attemptStepAction(args: {
+  page: Page;
+  ctx: FlowContext;
+  stepName: string;
+  intendedAction: string;
+  selectorKey: SelectorKey;
+  action: "click" | "fill" | "press";
+  /** Value to fill (for "fill") or key to press (for "press"). */
+  value?: string;
+  /** Mutable counter — decremented when LLM is invoked. */
+  recoveryBudget: { remaining: number };
+}): Promise<StepActionResult> {
+  const { page, ctx, stepName, intendedAction, selectorKey, action, value, recoveryBudget } = args;
+  const selectors = selFor(ctx, selectorKey);
+
+  // Phase 1: try the baked-in/learned cascade.
+  for (const sel of selectors) {
+    try {
+      const el = page.locator(sel).first();
+      if (!(await el.isVisible({ timeout: 800 }).catch(() => false))) continue;
+      const ok = await performAction(el, action, value);
+      if (ok) {
+        return { performed: true, selector: sel, action, recoveredByLlm: false };
+      }
+    } catch {
+      /* try next */
+    }
+  }
+
+  // Phase 2: LLM fallback (budget-gated).
+  if (recoveryBudget.remaining <= 0) {
+    return { performed: false, selector: "", action, recoveredByLlm: false };
+  }
+  let html = "";
+  try {
+    html = await page.content();
+  } catch {
+    return { performed: false, selector: "", action, recoveredByLlm: false };
+  }
+  const suggestion = await suggestRecovery({
+    stepName,
+    intendedAction,
+    html,
+    alreadyTried: selectors,
+  });
+  if (!suggestion) {
+    return { performed: false, selector: "", action, recoveredByLlm: false };
+  }
+  recoveryBudget.remaining--;
+  // The LLM is allowed to override the requested action (e.g. it may decide
+  // "fill" makes more sense than "click" given the markup). Trust it within
+  // the bounds of what performAction supports.
+  const llmAction = suggestion.action ?? action;
+  const llmValue = suggestion.value ?? value;
+  try {
+    const el = page.locator(suggestion.selector).first();
+    if (!(await el.isVisible({ timeout: 2_000 }).catch(() => false))) {
+      return { performed: false, selector: "", action: llmAction, recoveredByLlm: false };
+    }
+    const ok = await performAction(el, llmAction, llmValue);
+    if (ok) {
+      return {
+        performed: true,
+        selector: suggestion.selector,
+        action: llmAction,
+        recoveredByLlm: true,
+      };
+    }
+  } catch {
+    /* invalid selector or runtime error */
+  }
+  return { performed: false, selector: "", action: llmAction, recoveredByLlm: false };
+}
+
+async function performAction(
+  el: Locator,
+  action: "click" | "fill" | "press",
+  value: string | undefined,
+): Promise<boolean> {
+  try {
+    if (action === "click") {
+      await el.click({ timeout: 3_000 });
+      return true;
+    }
+    if (action === "fill") {
+      await el.fill(value ?? "", { timeout: 3_000 });
+      // Some controls only react to keyboard "Enter" (zip-code triggers).
+      await el.press("Enter", { timeout: 1_500 }).catch(() => undefined);
+      return true;
+    }
+    if (action === "press") {
+      await el.press(value ?? "Enter", { timeout: 1_500 });
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Product title extraction + cart validation
+//
+// Ported from upstream (PR #10) so this branch keeps the "did the right
+// product end up in the cart?" assertion. Without it the cart steps
+// only check that a cart UI opened, which lets a broken add-to-cart
+// (wrong SKU added, session not persisted, etc) slip through silently.
+// ─────────────────────────────────────────────────────────────────────
+
 const GENERIC_TITLE_PATTERNS = [
   /^p[áa]gina de produto/i,
   /^product page/i,
@@ -1188,16 +1663,7 @@ function looksGeneric(s: string): boolean {
   return GENERIC_TITLE_PATTERNS.some((re) => re.test(t));
 }
 
-/**
- * Extract the product title from the current PDP, used later to validate
- * that the same product appears in the cart drawer and on the checkout
- * page. Strategy: h1 first (most specific), then JSON-LD Product.name,
- * then platform-specific data attributes, then og:title (filtered for
- * generic template values), then document.title (also filtered).
- */
 async function extractProductTitle(page: Page): Promise<string | null> {
-  // Wait briefly for the h1 to render — on TanStack/React SPAs the
-  // product title section can hydrate slightly after DOMContentLoaded.
   await page.waitForSelector("h1", { timeout: 2_500, state: "attached" }).catch(() => undefined);
 
   const visibleSelectors = [
@@ -1223,8 +1689,7 @@ async function extractProductTitle(page: Page): Promise<string | null> {
       /* try next */
     }
   }
-  // JSON-LD Product.name — present in the SSR HTML even when the h1
-  // hasn't hydrated yet. Robust against React/SPA hydration timing.
+  // JSON-LD Product.name fallback.
   try {
     const jsonLdName = await withCap(
       page.evaluate(() => {
@@ -1254,8 +1719,6 @@ async function extractProductTitle(page: Page): Promise<string | null> {
   } catch {
     /* fall through */
   }
-  // og:title — only accept if not generic (some migrated sites have
-  // template og:title = "Página de Produto | Site Name").
   try {
     const og = await withCap(
       page.locator("meta[property='og:title']").first().getAttribute("content").catch(() => null),
@@ -1266,17 +1729,11 @@ async function extractProductTitle(page: Page): Promise<string | null> {
   } catch {
     /* fall through */
   }
-  // Last resort: document.title — also filtered for generic values.
   const docTitle = await withCap(page.title().catch(() => ""), 500, "");
   if (docTitle.trim().length > 3 && !looksGeneric(docTitle)) return docTitle.trim();
   return null;
 }
 
-/**
- * Detect whether the cart UI is currently visible (drawer/dialog open, or
- * we already navigated to a cart/checkout page). Used to decide whether
- * step 6 needs to keep trying (click → hover) or has already succeeded.
- */
 async function isCartUiVisible(page: Page): Promise<string | null> {
   return firstVisible(page, [
     "[role='dialog']:visible",
@@ -1291,32 +1748,10 @@ async function isCartUiVisible(page: Page): Promise<string | null> {
   ]);
 }
 
-/**
- * Open the minicart with a multi-strategy approach:
- *   1. **click**: most sites. Drawer opens as overlay.
- *   2. **click-navigate**: some sites (miess mobile prod) make the cart
- *      icon a real link that NAVIGATES to /checkout/#/cart or /cart.
- *      We detect this by URL change.
- *   3. **hover**: desktop pattern (miess prod desktop): the minicart
- *      appears as a hover-popup, no click required. Falls back here when
- *      click didn't reveal a drawer and didn't change URL.
- *
- * Returns the method that worked plus the URL after the action.
- */
-/**
- * Resolve "is the cart UI revealed?" against the ground truth that
- * matters for the test: can we see the product we just added? Falls
- * back to drawer-markup heuristics when no expected title is provided,
- * for platforms with truly empty/minimal cart UI markup.
- */
 async function isCartRevealed(
   page: Page,
   expectedProductTitle: string | null,
 ): Promise<string | null> {
-  // Product-title-found-on-page is the strongest signal — if the item
-  // we just added is visible, the cart is open *enough* for the test,
-  // even when the actual drawer container uses unfamiliar markup
-  // (miess prod legacy minicart popup, custom Wake themes, etc).
   if (expectedProductTitle) {
     const v = await validateCartContainsTitleQuick(page, expectedProductTitle);
     if (v) return `title-found:${v}`;
@@ -1324,10 +1759,6 @@ async function isCartRevealed(
   return isCartUiVisible(page);
 }
 
-/** Lightweight pass of validateCartContainsTitle — single-shot, no
- *  exhaustive selector sweep, returns the first matching selector as
- *  proof of life. Used to decide if a cart UI is "open enough" without
- *  doing the full validation work. */
 async function validateCartContainsTitleQuick(
   page: Page,
   expectedTitle: string,
@@ -1353,18 +1784,6 @@ async function validateCartContainsTitleQuick(
   return null;
 }
 
-/**
- * Best-effort dismiss of overlays that commonly land in front of the
- * cart icon right after add-to-cart and intercept clicks/taps:
- *   - "ADICIONADO COM SUCESSO" toast / popover
- *   - cookie consent banner
- *   - generic role="alertdialog"
- *
- * For each match: try a visible close button inside the overlay first,
- * then press Escape as a fallback. Both are non-fatal — overlays that
- * don't react are simply left alone (the force-click below will deal
- * with them by bypassing actionability checks).
- */
 async function dismissOverlays(page: Page, ctx: FlowContext): Promise<void> {
   const overlaySelectors = [
     "[class*='cookie' i][class*='banner' i]",
@@ -1381,7 +1800,6 @@ async function dismissOverlays(page: Page, ctx: FlowContext): Promise<void> {
     try {
       const overlay = page.locator(sel).first();
       if (!(await withCap(overlay.isVisible({ timeout: 200 }).catch(() => false), 400, false))) continue;
-      // Try to find a close affordance inside the overlay.
       const closer = overlay.locator(
         "button[aria-label*='close' i], button[aria-label*='fechar' i], button[class*='close' i], [data-close], [aria-label='Close']",
       ).first();
@@ -1390,7 +1808,6 @@ async function dismissOverlays(page: Page, ctx: FlowContext): Promise<void> {
         dismissedAny = true;
         continue;
       }
-      // Fallback: Escape key. Works for most modal dialogs.
       await page.keyboard.press("Escape").catch(() => undefined);
       dismissedAny = true;
     } catch {
@@ -1403,22 +1820,6 @@ async function dismissOverlays(page: Page, ctx: FlowContext): Promise<void> {
   }
 }
 
-/**
- * Wait for VTEX/FastStore checkout APIs to render the cart line items
- * before validation runs. Without this, `page.goto('/checkout/#/cart')`
- * settles on `load`/`networkidle` long before the orderForm XHR resolves
- * and validation sees an empty DOM.
- *
- * Either signal (the orderForm XHR completing OR the first cart-item
- * selector becoming visible) is sufficient evidence the cart hydrated.
- * Race them with `Promise.race` so a missed XHR (non-VTEX cart, regex
- * miss) doesn't force the test to wait 8s for the slowest probe — the
- * faster signal returns immediately. Both probes have `.catch(() => undefined)`
- * fallbacks, so even if neither fires they still resolve at the 8s
- * Playwright timeout — Promise.race can't hang. No outer fallback
- * needed (a separate timeout shorter than 8s would fire too early
- * and cause premature validation against a still-empty DOM).
- */
 async function waitForCartHydration(page: Page): Promise<void> {
   await Promise.race([
     page
@@ -1441,26 +1842,17 @@ async function openMinicart(
   expectedProductTitle: string | null,
 ): Promise<{ method: NonNullable<StepCapture["cartOpenMethod"]>; url: string; visibleMarker: string | null }> {
   const beforeUrl = page.url();
-  // Toast/popover from the add-to-cart in step 5 can cover the cart
-  // icon. Active dismissal first (Escape + click close), then a short
-  // settle for animations.
   await dismissOverlays(page, ctx);
   await page.waitForTimeout(800);
-  // Maybe a drawer is already open from earlier interaction.
   const alreadyOpen = await isCartRevealed(page, expectedProductTitle);
   if (alreadyOpen) {
     dlog(ctx, `  openMinicart: already-open (matched ${alreadyOpen})`);
     return { method: "already-open", url: beforeUrl, visibleMarker: alreadyOpen };
   }
-  // Capture the href up-front for the page.goto fallback path below.
-  // We only use it when click and hover both fail to reveal the cart.
   const triggerHref = await trigger.locator.getAttribute("href").catch(() => null);
   const hrefHasCartTarget = !!triggerHref && /\/(checkout|cart|carrinho)/i.test(triggerHref);
 
-  // Strategy 1: hover FIRST when the trigger looks hover-capable
-  // (desktop with mouse), since on miess prod and many VTEX stores the
-  // same anchor opens a minicart popup on hover but navigates away on
-  // click. We don't want to leave the PDP unless we have to.
+  // Strategy 1: hover FIRST on desktop (Miess prod opens drawer on hover).
   if (ctx.viewport === "desktop") {
     dlog(ctx, `  openMinicart: trying hover first on ${trigger.selector}${triggerHref ? ` (href=${triggerHref})` : ""}`);
     await trigger.locator.hover({ timeout: 3_000 }).catch(() => undefined);
@@ -1472,11 +1864,7 @@ async function openMinicart(
     }
   }
 
-  // Strategy 2a (mobile only): real touch event via tap(). Headless
-  // mobile click() on an anchor often gets swallowed by JS overlay
-  // handlers because synthetic mouse events differ from touch events;
-  // a real tap dispatches `touchstart`/`touchend` which most VTEX
-  // stores treat as legitimate navigation triggers.
+  // Strategy 2a (mobile): real tap.
   if (ctx.viewport === "mobile") {
     dlog(ctx, `  openMinicart: trying tap (mobile) on ${trigger.selector}`);
     await Promise.all([
@@ -1497,10 +1885,7 @@ async function openMinicart(
     }
   }
 
-  // Strategy 2b: force click. `force: true` bypasses Playwright's
-  // actionability check, so a transparent overlay or zero-pointer-event
-  // sibling on top of the cart icon doesn't make the click silently
-  // miss its target. Race against waitForURL to catch navigation.
+  // Strategy 2b: force click + URL race.
   dlog(ctx, `  openMinicart: trying force-click on ${trigger.selector}${triggerHref ? ` (href=${triggerHref})` : ""}`);
   await Promise.all([
     page.waitForURL((url) => url.toString() !== beforeUrl, { timeout: 4_000 }).catch(() => undefined),
@@ -1513,15 +1898,13 @@ async function openMinicart(
     dlog(ctx, `  openMinicart: click navigated → ${page.url()} (settled)`);
     return { method: "click-navigate", url: page.url(), visibleMarker: null };
   }
-  // No nav, give the drawer animation a beat to play.
   await page.waitForTimeout(1_500);
   const clickOpened = await isCartRevealed(page, expectedProductTitle);
   if (clickOpened) {
     dlog(ctx, `  openMinicart: click opened drawer (${clickOpened})`);
     return { method: "click", url: afterClickUrl, visibleMarker: clickOpened };
   }
-  // Strategy 3 (mobile only — desktop already hovered above): hover as
-  // fallback. On mobile this is mostly a no-op but cheap.
+  // Strategy 3 (mobile only): hover as fallback.
   if (ctx.viewport !== "desktop") {
     dlog(ctx, `  openMinicart: click didn't reveal cart, trying hover (mobile)`);
     await trigger.locator.hover({ timeout: 3_000 }).catch(() => undefined);
@@ -1532,11 +1915,7 @@ async function openMinicart(
       return { method: "hover", url: page.url(), visibleMarker: hoverOpened };
     }
   }
-  // Strategy 4: direct goto fallback. The trigger is an `<a>` with a
-  // checkout-related href and the click was intercepted (toast overlay,
-  // JS handler that preventDefault'd, etc). Since a real user clicking
-  // that link would land on the same URL, we honor that intent with an
-  // explicit goto. NOT used when the trigger has no useful href.
+  // Strategy 4: direct goto fallback when trigger has cart href.
   if (hrefHasCartTarget && triggerHref) {
     const targetUrl = (() => {
       try {
@@ -1546,7 +1925,7 @@ async function openMinicart(
       }
     })();
     if (targetUrl) {
-      dlog(ctx, `  openMinicart: all interactive strategies failed but trigger has cart href, navigating directly to ${targetUrl}`);
+      dlog(ctx, `  openMinicart: all interactive strategies failed; navigating directly to ${targetUrl}`);
       await page.goto(targetUrl, { waitUntil: "load", timeout: 15_000 }).catch(() => undefined);
       await waitForCartHydration(page);
       if (page.url() !== beforeUrl) {
@@ -1559,13 +1938,6 @@ async function openMinicart(
   return { method: "failed", url: page.url(), visibleMarker: null };
 }
 
-/**
- * Normalize a title for fuzzy comparison: lowercase, strip punctuation,
- * collapse whitespace. The cart label is typically a slightly trimmed
- * version of the PDP title ("Lubrificante 60g" vs "Love Lub Lubrificante
- * 60g — La Pimienta"), so we accept substring matches in either
- * direction.
- */
 function normalizeTitle(s: string): string {
   return s
     .toLowerCase()
@@ -1580,37 +1952,17 @@ function titlesMatch(observed: string, expected: string): boolean {
   const e = normalizeTitle(expected);
   if (!o || !e) return false;
   if (o === e) return true;
-  // Substring either direction — handles "brand prefix" or "size suffix"
-  // appearing in only one of the two. Minimum overlap of 12 chars guards
-  // against tiny common words ("kit", "novo") false-matching.
   if (e.length >= 12 && o.includes(e)) return true;
   if (o.length >= 12 && e.includes(o)) return true;
   return false;
 }
 
-/**
- * Validate that a given product title appears among the cart line items
- * currently visible on the page (drawer or full cart/checkout page).
- *
- * Strategy:
- *   1. Try common selectors for cart line item titles. Collect text from
- *      visible matches.
- *   2. Match each observed title against the expected one (normalized
- *      substring, see titlesMatch).
- *   3. If no match, return found=false plus the observed titles so the
- *      caller can decide whether to invoke an LLM fallback.
- */
 async function validateCartContainsTitle(
   page: Page,
   expectedTitle: string,
   ctx: FlowContext,
 ): Promise<{ found: boolean; observedTitles: string[]; method: "selector" | "none" }> {
   const titleSelectors = [
-    // Generic data attributes (scoped to cart/checkout context — the
-    // unscoped `[data-product-name]` would also match the PDP <h1> on
-    // sites that didn't navigate away, producing a false-positive
-    // "cart contains product" when validation runs while still on the
-    // product page).
     "[data-cart-item-name]",
     "[data-cart-item] [class*='title' i]",
     "[data-cart-item] [class*='name' i]",
@@ -1620,44 +1972,35 @@ async function validateCartContainsTitle(
     "[class*='minicart' i] [data-product-name]",
     "[data-testid='cart-item-name']",
     "[data-testid='product-name']",
-    // Drawer / dialog context
     "[role='dialog'] li [class*='product' i]",
     "[role='dialog'] li [class*='name' i]",
     "[role='dialog'] li [class*='title' i]",
     "[role='dialog'] a[href*='/p']",
-    // class-name heuristics
     "[class*='minicart' i] [class*='item' i] [class*='name' i]",
     "[class*='minicart' i] [class*='item' i] [class*='title' i]",
     "[class*='cart-item' i] [class*='name' i]",
     "[class*='cart-item' i] [class*='title' i]",
     "[class*='checkout' i] [class*='product' i] [class*='name' i]",
-    // VTEX legacy & modern checkout class names
     ".vtex-minicart-2-x-itemNameContainer",
     ".vtex-checkout-summary-0-x-itemName",
     ".product-name",
     ".item-name",
     "a.product-name",
-    // VTEX legacy checkout (`/checkout/#/cart` rendered by checkout6.js)
     ".cart-items .item-name",
     "tr.product-item .item-name",
     "tr.cart-item .item-name",
     "table.cart-items td a",
-    // VTEX legacy hover-popup minicart (.cart-fixed / #cart-fixed)
     "#cart-fixed .item .product-name",
     "#cart-fixed .item-name",
     ".cart-fixed .item-name",
     ".cart-fixed .product-name",
     "#cart-fixed li a",
     "#minicart-content .item-name",
-    // FastStore / Wake
     "[data-fs-cart-item-summary-title]",
     "[data-fs-cart-item-image] + * a",
-    // Last resort: any link to a /p product page inside the cart/checkout area
     "[class*='cart' i] a[href*='/p']",
     "[class*='checkout' i] a[href*='/p']",
   ];
-  // Single sweep across the selector list — returns at first selector
-  // with visible matches, or empty when nothing renders yet.
   const sweepTitles = async (): Promise<string[]> => {
     const observed: string[] = [];
     for (const sel of titleSelectors) {
@@ -1673,7 +2016,7 @@ async function validateCartContainsTitle(
           const clean = text.trim().slice(0, 200);
           if (clean.length > 2) observed.push(clean);
         }
-        if (observed.length > 0) return observed; // first selector with hits wins
+        if (observed.length > 0) return observed;
       } catch {
         /* try next */
       }
@@ -1682,16 +2025,12 @@ async function validateCartContainsTitle(
   };
 
   let observed = await sweepTitles();
-  // The cart-items XHR can still be in flight when we get here (especially
-  // right after `page.goto('/checkout/#/cart')`). One second-chance pass
-  // with a 2s wait catches the common "rendered slightly late" case
-  // without bloating happy-path latency.
   if (observed.length === 0) {
     dlog(ctx, "  validateCartContainsTitle: 0 titles on first pass, retrying after 2s");
     await page.waitForTimeout(2_000);
     observed = await sweepTitles();
   }
-  dlog(ctx, `  validateCartContainsTitle: observed ${observed.length} titles ${observed.length ? `[${observed.slice(0, 3).map((t) => t.slice(0, 30)).join(" | ")}${observed.length > 3 ? " | …" : ""}]` : ""}`);
+  dlog(ctx, `  validateCartContainsTitle: observed ${observed.length} titles`);
   if (observed.length === 0) {
     return { found: false, observedTitles: [], method: "none" };
   }
@@ -1699,13 +2038,6 @@ async function validateCartContainsTitle(
   return { found, observedTitles: observed, method: "selector" };
 }
 
-/**
- * Detect whether the current page is showing an empty-cart banner. Used
- * in step 6/8 validation to distinguish "selectors didn't match the
- * markup" from "cart is genuinely empty because upstream add-to-cart
- * didn't persist to the session". Returns the matched text (truncated)
- * or null.
- */
 async function detectEmptyCartBanner(page: Page): Promise<string | null> {
   const bannerSelectors = [
     ":text-matches('carrinho.*vazio', 'i')",
@@ -1726,36 +2058,6 @@ async function detectEmptyCartBanner(page: Page): Promise<string | null> {
     } catch {
       /* try next */
     }
-  }
-  return null;
-}
-
-/**
- * Ask the LLM to recover from a failed selector lookup. Returns a usable
- * locator + the suggested selector string, or null if the recovery failed.
- */
-async function attemptRecovery(
-  page: Page,
-  _ctx: FlowContext,
-  stepName: string,
-  intendedAction: string,
-  alreadyTried: string[],
-): Promise<{ locator: Locator; selector: string } | null> {
-  let html = "";
-  try {
-    html = await page.content();
-  } catch {
-    return null;
-  }
-  const suggestion = await suggestRecovery({ stepName, intendedAction, html, alreadyTried });
-  if (!suggestion) return null;
-  try {
-    const el = page.locator(suggestion.selector).first();
-    if (await el.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      return { locator: el, selector: suggestion.selector };
-    }
-  } catch {
-    /* selector invalid or not found */
   }
   return null;
 }

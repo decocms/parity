@@ -8,7 +8,8 @@ import { installVitalsCollector } from "../engine/collect.ts";
 import { runFlow, type StepProgressEvent } from "../engine/flows.ts";
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
 import { detectPlatform, type Platform } from "../learned/platform.ts";
-import { loadLearned } from "../learned/repo.ts";
+import { promoteStepsFromFlow } from "../learned/promote.ts";
+import { loadLearned, saveLearned } from "../learned/repo.ts";
 import { isLlmAvailable, providerLabel } from "../llm/client.ts";
 import { discoverSelectorsFromUrl } from "../llm/discover-selectors.ts";
 import {
@@ -48,11 +49,12 @@ const STEP_LABELS: Record<string, string> = {
   "visit-home": "1. visit-home",
   "navigate-plp": "2. navigate-plp",
   "enter-pdp": "3. enter-pdp",
-  "shipping-calc-pdp": "4. shipping-calc-pdp",
-  "add-to-cart": "5. add-to-cart",
-  "open-minicart": "6. open-minicart",
-  "shipping-calc-cart": "7. shipping-calc-cart",
-  "go-checkout": "8. go-checkout",
+  "select-variant": "4. select-variant",
+  "shipping-calc-pdp": "5. shipping-calc-pdp",
+  "add-to-cart": "6. add-to-cart",
+  "open-minicart": "7. open-minicart",
+  "shipping-calc-cart": "8. shipping-calc-cart",
+  "go-checkout": "9. go-checkout",
 };
 
 const CRITICAL_STEPS = new Set([
@@ -219,6 +221,35 @@ export async function journeyCommand(opts: JourneyOptions): Promise<number> {
       flowCaptures.push(prodCap, candCap);
     }
     if (!opts.json) console.log("");
+
+    // Persist learned-selectors from this journey's outcomes. Without this
+    // every run discards its discoveries — including selectors the LLM just
+    // paid to recover. Promote only PROD-side captures (source of truth);
+    // cand may legitimately differ.
+    const learnedBefore = JSON.stringify(learned);
+    if (opts.autoSelectors !== false) {
+      const prodHost = safeHost(opts.prod);
+      let totalPromoted = 0;
+      let totalDeprecated = 0;
+      let totalRecorded = 0;
+      for (const cap of flowCaptures) {
+        if (cap.side !== "prod") continue;
+        const result = promoteStepsFromFlow(learned, platform, prodHost, cap);
+        totalPromoted += result.promoted;
+        totalDeprecated += result.deprecated;
+        totalRecorded += result.recorded;
+      }
+      if (JSON.stringify(learned) !== learnedBefore) {
+        saveLearned(learned);
+        if (!opts.json) {
+          const bits = [];
+          if (totalPromoted > 0) bits.push(`${totalPromoted} promovido(s) via LLM`);
+          if (totalRecorded > 0) bits.push(`${totalRecorded} reforçado(s)`);
+          if (totalDeprecated > 0) bits.push(`${totalDeprecated} depreciado(s)`);
+          if (bits.length > 0) console.log(chalk.dim(`  learned-selectors atualizado: ${bits.join(", ")}`));
+        }
+      }
+    }
 
     // Build per-viewport step rows comparing prod vs cand
     const rows: StepRow[] = buildRows(flowCaptures, viewports);
@@ -650,4 +681,12 @@ function escapeHtml(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function safeHost(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
 }

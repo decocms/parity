@@ -11,14 +11,11 @@ import { discoverPagesFromSitemap } from "../engine/sitemap-discover.ts";
 import { resolveSitemapUrls } from "../diff/sitemap.ts";
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
 import { detectPlatform, type Platform } from "../learned/platform.ts";
+import { promoteStepsFromFlow } from "../learned/promote.ts";
 import {
   type LearnedSelectors,
   loadLearned,
-  promoteFromLlm,
-  recordFailure,
-  recordSuccess,
   saveLearned,
-  type SelectorKey,
 } from "../learned/repo.ts";
 import { aggregateIssues } from "../llm/aggregate-issues.ts";
 import { isLlmAvailable } from "../llm/client.ts";
@@ -271,19 +268,9 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
 
           // Promotion loop: update learned-selectors from this flow's outcomes
           if (opts.learn !== false) {
-            for (const step of cap.steps ?? []) {
-              if (!step.selectorKey || !step.usedSelector) continue;
-              const key = step.selectorKey as SelectorKey;
-              if (step.recoveredByLlm) {
-                promoteFromLlm(learned, platform, key, step.usedSelector, prodHost);
-                promotedCount++;
-              } else if (step.status === "ok") {
-                recordSuccess(learned, platform, key, step.usedSelector, prodHost);
-              } else if (step.status === "failed") {
-                const before = recordFailure(learned, platform, key, step.usedSelector, prodHost);
-                if (before?.deprecated) deprecatedCount++;
-              }
-            }
+            const result = promoteStepsFromFlow(learned, platform, prodHost, cap);
+            promotedCount += result.promoted;
+            deprecatedCount += result.deprecated;
           }
         }
 
