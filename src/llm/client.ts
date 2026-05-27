@@ -123,6 +123,46 @@ interface OpenAiContentBlock {
 }
 
 async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> {
+  // Retry transient failures (5xx, 429, network aborts, or truncated tool
+  // arguments that `tryRepairJson` can't salvage). The second attempt
+  // doubles `maxTokens` so the model has enough room to complete its
+  // tool call; the most common parse failure mode is mid-object
+  // truncation when the response hits the cap.
+  //
+  // `timeoutMs` is the HARD overall budget for the whole call (including
+  // retries) — without the elapsed tracking below each attempt would get
+  // its own full timeout and a network-stalled second try could push
+  // total latency to 2× the documented cap. We pass the REMAINING budget
+  // to each attempt and bail out of the retry if there's <2s left.
+  const baseTokens = params.maxTokens ?? 2000;
+  const totalBudget = params.timeoutMs ?? defaultTimeout(params);
+  const start = Date.now();
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const isRetry = attempt > 1;
+    const remaining = totalBudget - (Date.now() - start);
+    if (remaining <= 2_000 && isRetry) {
+      // Not enough budget left to make a retry meaningful.
+      return null;
+    }
+    const tokens = isRetry ? Math.max(baseTokens * 2, 4000) : baseTokens;
+    const result = await openRouterToolOnce<T>(params, tokens, isRetry, Math.max(remaining, 2_000));
+    if (result !== undefined) return result;
+  }
+  return null;
+}
+
+/**
+ * Single attempt against OpenRouter. Returns:
+ *   - T          → parsed successfully
+ *   - null       → permanent failure (auth, schema, non-retryable 4xx)
+ *   - undefined  → transient failure, caller may retry
+ */
+async function openRouterToolOnce<T>(
+  params: ToolCallParams,
+  maxTokens: number,
+  isRetry: boolean,
+  attemptTimeoutMs: number,
+): Promise<T | null | undefined> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return null;
 
@@ -136,8 +176,7 @@ async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> 
     });
   }
 
-  const timeoutMs = params.timeoutMs ?? defaultTimeout(params);
-  const { signal, clear } = makeTimeoutSignal(timeoutMs);
+  const { signal, clear } = makeTimeoutSignal(attemptTimeoutMs);
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -150,7 +189,7 @@ async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> 
       },
       body: JSON.stringify({
         model: LLM_MODEL_OPENROUTER,
-        max_tokens: params.maxTokens ?? 2000,
+        max_tokens: maxTokens,
         messages: [
           { role: "system", content: params.systemPrompt },
           { role: "user", content: userContent },
@@ -171,6 +210,8 @@ async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> 
     if (!response.ok) {
       const txt = await response.text().catch(() => "");
       console.error(`[llm-openrouter] HTTP ${response.status}: ${txt.slice(0, 200)}`);
+      // 5xx and 429 are transient; everything else (auth, schema) is permanent.
+      if (response.status >= 500 || response.status === 429) return undefined;
       return null;
     }
     const json = (await response.json()) as {
@@ -202,10 +243,16 @@ async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> 
             /* fall through */
           }
         }
+        if (isRetry) {
+          console.error(
+            `[llm-openrouter] failed to parse tool arguments after retry (raw len=${raw.length}, head=${JSON.stringify(raw.slice(0, 80))})`,
+          );
+          return null;
+        }
         console.error(
-          `[llm-openrouter] failed to parse tool arguments (raw len=${raw.length}, head=${JSON.stringify(raw.slice(0, 80))})`,
+          `[llm-openrouter] parse error, retrying with more tokens (raw len=${raw.length}, head=${JSON.stringify(raw.slice(0, 80))})`,
         );
-        return null;
+        return undefined; // signal retry
       }
     }
     // Some models return tool intent inside content as JSON when tool_choice is enforced loosely
@@ -217,12 +264,18 @@ async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> 
         /* not parseable, fall through */
       }
     }
+    return null;
   } catch (err) {
-    console.error(`[llm-openrouter] failed: ${(err as Error).message}`);
+    const msg = (err as Error).message;
+    console.error(`[llm-openrouter] failed: ${msg}`);
+    // Network errors / aborts are worth a retry.
+    if (!isRetry && (msg.includes("ECONN") || msg.includes("aborted") || msg.includes("fetch"))) {
+      return undefined;
+    }
+    return null;
   } finally {
     clear();
   }
-  return null;
 }
 
 /**

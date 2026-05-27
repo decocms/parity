@@ -40,29 +40,29 @@ const DISCOVER_SELECTORS_TOOL = {
       minicart_trigger: {
         type: "string",
         description:
-          "CSS selector for the element that opens the mini-cart drawer/popup (e.g. '[data-minicart-trigger]', or a header cart icon).",
+          "CSS selector for the CART ICON / SACOLA icon in the HEADER that opens the mini-cart drawer or navigates to the cart page when clicked (e.g. '[data-minicart-trigger]', or 'header a[aria-label*=\"sacola\" i]', or 'header a[href*=\"cart\"]'). This is the icon ALWAYS visible in the page header.",
       },
       cep_input_pdp: {
         type: "string",
         description:
-          "CSS selector for the CEP / zipcode <input> on a PDP. Empty string if the PDP has no shipping calculator.",
+          "CSS selector for the CEP / zipcode <input> on a PDP — the input where the customer types their ADDRESS POSTAL CODE to calculate shipping. Placeholder is typically 'CEP', 'Digite seu CEP', 'Cód. postal'. Do NOT return a coupon input ('Digite o cupom') or email/newsletter field. Empty string if the PDP has no shipping calculator.",
       },
       cep_input_cart: {
         type: "string",
         description:
-          "CSS selector for the CEP / zipcode <input> inside the mini-cart/cart drawer. Empty string if cart has no shipping calculator.",
+          "CSS selector for the CEP / zipcode <input> inside the mini-cart drawer or cart page — for shipping calculation. Same rules: ADDRESS postal code, NOT coupon, NOT email. Empty string if cart has no shipping calculator.",
       },
       checkout_button: {
         type: "string",
         description:
-          "CSS selector for the 'Go to checkout' / 'Finalizar compra' button inside the mini-cart/cart (e.g. \"a:has-text('Finalizar compra')\").",
+          "CSS selector for the FINAL 'Go to checkout' / 'Finalizar compra' / 'Finalizar' button INSIDE the mini-cart drawer or cart page — the one user clicks AFTER reviewing cart items to proceed to checkout/payment. **IMPORTANT**: this is DIFFERENT from `minicart_trigger` (which is the cart ICON in the header). The checkout button is typically a big colored button at the bottom of the cart drawer or cart page. If you cannot see it on the home page (which is common — it's only rendered after add-to-cart), return EMPTY STRING. NEVER return the same selector as `minicart_trigger`.",
       },
       reasoning: {
         type: "string",
         description: "1-2 sentence rationale describing what was inferred from the markup.",
       },
     },
-    required: ["category_link", "product_card", "buy_button", "minicart_trigger", "checkout_button"],
+    required: ["category_link", "product_card", "buy_button", "minicart_trigger"],
   },
 };
 
@@ -100,7 +100,17 @@ REGRAS:
 4. Para "cep_input_pdp" e "cep_input_cart": retorne string vazia se não existir esse recurso na plataforma.
    Não invente.
 
-5. Sempre teste mentalmente: "este seletor pegaria o elemento certo na home E também em PDPs/cart?"
+5. **NUNCA confunda \`minicart_trigger\` (ícone do carrinho no HEADER) com \`checkout_button\`
+   (botão "Finalizar" DENTRO do drawer ou na página de cart).** Se você só vê o ícone do
+   carrinho na home e não consegue ver o botão de checkout (caso comum — ele só renderiza
+   depois de add-to-cart), retorne STRING VAZIA pra \`checkout_button\`. NUNCA retorne o
+   mesmo seletor para os dois — isso quebra o fluxo de teste.
+
+6. Para CEP: \`cep_input_pdp\` e \`cep_input_cart\` são pra ENDEREÇO (CEP / Postal Code).
+   NÃO confunda com input de CUPOM ('Digite o cupom', 'Insira código', 'Promo code') —
+   cupom é desconto, não frete.
+
+7. Sempre teste mentalmente: "este seletor pegaria o elemento certo na home E também em PDPs/cart?"
 
 Responda SEMPRE via tool_use report_selectors. Não escreva texto livre fora da tool call.
 `.trim();
@@ -200,9 +210,37 @@ export async function discoverSelectorsFromUrl(
     cepInputCart: emptyToUndef(input.cep_input_cart),
     checkoutButton: emptyToUndef(input.checkout_button),
   };
+  // Sanity: the LLM commonly confuses the header cart icon with the
+  // checkout button. If it returned the SAME selector (or a prefix match)
+  // for both, drop checkoutButton — the cascade will fall back to defaults
+  // / learned / LLM recovery at step 9 instead of clicking the cart icon
+  // and going nowhere.
+  if (
+    selectors.checkoutButton &&
+    selectors.minicartTrigger &&
+    selectorsLikelyConflict(selectors.checkoutButton, selectors.minicartTrigger)
+  ) {
+    console.warn(
+      `[discover-selectors] checkout_button == minicart_trigger (\`${selectors.checkoutButton}\`); dropping to avoid step-9 misclick`,
+    );
+    selectors.checkoutButton = undefined;
+  }
   if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
   writeFileSync(cachePath, `${JSON.stringify(selectors, null, 2)}\n`, "utf8");
   return selectors;
+}
+
+/**
+ * Two selectors "likely conflict" when they're identical, or when one is
+ * a literal substring of the other (typical LLM mistake: returns the same
+ * anchor with an extra attribute for one key and without for the other).
+ */
+function selectorsLikelyConflict(a: string, b: string): boolean {
+  if (a === b) return true;
+  const norm = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+  const na = norm(a);
+  const nb = norm(b);
+  return na.includes(nb) || nb.includes(na);
 }
 
 function emptyToUndef(v: string | undefined): string | undefined {
