@@ -185,10 +185,26 @@ async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> 
     };
     const toolCall = json.choices?.[0]?.message?.tool_calls?.[0];
     if (toolCall?.function?.name === params.tool.name) {
+      const raw = toolCall.function.arguments ?? "";
       try {
-        return JSON.parse(toolCall.function.arguments) as T;
-      } catch (err) {
-        console.error(`[llm-openrouter] failed to parse tool arguments: ${(err as Error).message}`);
+        return JSON.parse(raw) as T;
+      } catch {
+        // Some models truncate or emit slightly malformed JSON when the
+        // schema is large or `maxTokens` clips the response mid-object.
+        // Try a couple of cheap recovery passes before giving up:
+        //   1. close any obvious dangling brace/bracket
+        //   2. unwrap a ```json``` fence the model snuck in
+        const repaired = tryRepairJson(raw);
+        if (repaired) {
+          try {
+            return JSON.parse(repaired) as T;
+          } catch {
+            /* fall through */
+          }
+        }
+        console.error(
+          `[llm-openrouter] failed to parse tool arguments (raw len=${raw.length}, head=${JSON.stringify(raw.slice(0, 80))})`,
+        );
         return null;
       }
     }
@@ -207,6 +223,56 @@ async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> 
     clear();
   }
   return null;
+}
+
+/**
+ * Best-effort JSON repair for slightly malformed tool-call arguments
+ * returned by some OpenRouter-backed models (truncated responses,
+ * ```json``` fences, missing closing braces). Returns null if it can't
+ * produce something parseable in a couple of cheap passes.
+ */
+function tryRepairJson(raw: string): string | null {
+  let s = raw.trim();
+  if (!s) return null;
+  // Unwrap ```json ... ``` fences.
+  const fence = s.match(/^```(?:json)?\s*([\s\S]*?)\s*```\s*$/);
+  if (fence?.[1]) s = fence[1].trim();
+  if (!s.startsWith("{") && !s.startsWith("[")) return null;
+  // Balance braces/brackets: count opens, append matching closers.
+  let depthObj = 0;
+  let depthArr = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") depthObj++;
+    else if (ch === "}") depthObj--;
+    else if (ch === "[") depthArr++;
+    else if (ch === "]") depthArr--;
+  }
+  if (inString) s += '"';
+  while (depthArr > 0) {
+    s += "]";
+    depthArr--;
+  }
+  while (depthObj > 0) {
+    s += "}";
+    depthObj--;
+  }
+  return s;
 }
 
 export interface MessageCallParams {
