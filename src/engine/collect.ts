@@ -8,6 +8,14 @@ import type {
   WebVitals,
 } from "../types/schema.ts";
 
+const DEBUG_PARITY = process.env.DEBUG_PARITY === "1" || process.env.DEBUG_PARITY === "true";
+const DEBUG_START = Date.now();
+function dlog(side: Side, viewport: Viewport, msg: string): void {
+  if (!DEBUG_PARITY) return;
+  const elapsed = ((Date.now() - DEBUG_START) / 1000).toFixed(1);
+  process.stderr.write(`[+${elapsed}s ${viewport}/${side}] ${msg}\n`);
+}
+
 /**
  * Inline collector that runs inside the page to capture Core Web Vitals
  * via PerformanceObserver. Uses a window-attached object that we read
@@ -299,10 +307,12 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
 
   const inner = async (): Promise<PageCapture> => {
     try {
+      dlog(opts.side, opts.viewport, `    capturePage: goto(${opts.url}) start`);
       response = await page.goto(opts.url, {
         waitUntil: "domcontentloaded",
         timeout: Math.min(opts.timeoutMs ?? 30_000, remaining()),
       });
+      dlog(opts.side, opts.viewport, `    capturePage: goto done status=${response?.status() ?? "?"} (remaining=${remaining()}ms)`);
       finalUrl = page.url();
       if (response) {
         const headers = response.headers();
@@ -315,19 +325,21 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
           .catch(() => undefined);
         await page.waitForTimeout(Math.min(opts.settleMs ?? 1_200, remaining()));
       } else {
-        // Wait for full load (images, fonts, etc.) — capped
+        dlog(opts.side, opts.viewport, `    capturePage: waitForLoadState('load') (cap=${Math.min(12_000, remaining())}ms)`);
         await page.waitForLoadState("load", { timeout: Math.min(12_000, remaining()) }).catch(() => undefined);
-        // Then networkidle (background fetches settle)
+        dlog(opts.side, opts.viewport, `    capturePage: waitForLoadState('networkidle') (cap=${Math.min(6_000, remaining())}ms)`);
         await page.waitForLoadState("networkidle", { timeout: Math.min(6_000, remaining()) }).catch(() => undefined);
+        dlog(opts.side, opts.viewport, `    capturePage: settle (cap=${Math.min(opts.settleMs ?? 2_000, remaining())}ms)`);
         await page.waitForTimeout(Math.min(opts.settleMs ?? 2_000, remaining()));
 
         // Auto-scroll to trigger lazy-loaded content (images, sections, analytics)
         if (opts.scrollToLoad !== false && remaining() > 3_000) {
+          dlog(opts.side, opts.viewport, `    capturePage: scrollFullPage start (remaining=${remaining()}ms)`);
           await Promise.race([
             scrollFullPage(page).catch(() => undefined),
             new Promise<void>((resolve) => setTimeout(resolve, Math.min(10_000, remaining()))),
           ]);
-          // Brief settle after scrolling back to top
+          dlog(opts.side, opts.viewport, `    capturePage: scrollFullPage done (remaining=${remaining()}ms)`);
           await page.waitForTimeout(Math.min(600, remaining()));
         }
       }
@@ -343,6 +355,7 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
     // setTimeout chain that didn't resolve before its outer race fired),
     // this call blocks until that previous evaluate settles. Wrap it in
     // an explicit race so the budget is actually enforced.
+    dlog(opts.side, opts.viewport, `    capturePage: vitals evaluate (cap=${Math.min(5_000, remaining())}ms)`);
     vitals = (await Promise.race([
       page
         .evaluate(() => (window as unknown as { __parity_vitals?: WebVitals }).__parity_vitals)
@@ -351,19 +364,24 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
     ])) ?? null;
 
     if (!opts.skipScreenshot) {
+      dlog(opts.side, opts.viewport, `    capturePage: screenshot start (cap=${Math.min(15_000, remaining())}ms)`);
       await Promise.race([
         page.screenshot({ path: opts.screenshotPath, fullPage: true, animations: "disabled" }).catch(() => undefined),
         new Promise<void>((resolve) => setTimeout(resolve, Math.min(15_000, remaining()))),
       ]);
+      dlog(opts.side, opts.viewport, "    capturePage: screenshot done");
     }
 
+    dlog(opts.side, opts.viewport, `    capturePage: page.content() (cap=${Math.min(5_000, remaining())}ms)`);
     html = await Promise.race([
       page.content().catch(() => ""),
       new Promise<string>((resolve) => setTimeout(() => resolve(""), Math.min(5_000, remaining()))),
     ]);
 
+    dlog(opts.side, opts.viewport, `    capturePage: flushCollectors (cap=${Math.min(3_000, remaining())}ms)`);
     await flushCollectors(state, Math.min(3_000, remaining()));
 
+    dlog(opts.side, opts.viewport, `    capturePage: inner done total=${Date.now() - start}ms`);
     return buildPartial();
   };
 

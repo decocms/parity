@@ -95,6 +95,18 @@ export const StepCapture = z.object({
   screenshotBeforePath: z.string().optional(),
   /** Path to the Playwright trace .zip for this flow */
   tracePath: z.string().optional(),
+  /** For cart/checkout validation steps: did we find the expected product? */
+  cartValidation: z
+    .object({
+      expectedTitle: z.string(),
+      found: z.boolean(),
+      method: z.enum(["selector", "llm", "none"]).optional(),
+      observedTitles: z.array(z.string()).optional(),
+      reason: z.string().optional(),
+    })
+    .optional(),
+  /** For step 6 (open-minicart): how was the cart UI revealed? */
+  cartOpenMethod: z.enum(["click", "click-navigate", "hover", "already-open", "failed"]).optional(),
 });
 export type StepCapture = z.infer<typeof StepCapture>;
 
