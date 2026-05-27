@@ -863,18 +863,21 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
 
     const t8 = Date.now();
     const beforeUrl8 = page.url();
-    // Success criterion changes by mode:
-    //   - drawer-finalize: URL must now contain /checkout specifically.
-    //     A bare /cart URL means the user landed on a cart PAGE — they
-    //     still have to click another CTA to enter the checkout flow.
-    //     So /cart alone is NOT step 8 success.
-    //   - advance-checkout: URL must have changed AND still be a
-    //     /checkout URL (advanced to a new substep, e.g. cart→email).
-    //     Bare /cart change wouldn't qualify here either.
+    // Success criterion: URL changed AND the new URL contains a
+    // recognizable checkout-flow marker. The "URL changed" half rejects
+    // misclicks that bounced back to the start; the "checkout marker"
+    // half rejects bare cart pages (`/cart`, `/carrinho`, `/sacola`)
+    // since clicking the cart icon brings you there without actually
+    // entering the checkout flow.
+    //
+    // Markers accepted (covers VTEX legacy /checkout, FastStore
+    // /checkout, Shopify /checkouts, Wake /pedido, Magento /onepage,
+    // Nuvemshop /finalizar, plus various Latin-American checkout
+    // platforms that use /pagamento or /payment URLs):
+    const CHECKOUT_URL_MARKERS = /\/(checkout|checkouts|finalize|finalizar|pagamento|payment|pedido|order|orderform|onepage|secure|seguro)(\/|#|$|\?|-)/i;
     const isReachedCheckout = (finalUrl: string): boolean => {
-      if (!/\/checkout(\/|#|$|\?)/i.test(finalUrl)) return false;
-      if (!alreadyInCheckoutPage) return true;
-      return finalUrl !== beforeUrl8;
+      if (finalUrl === beforeUrl8) return false;
+      return CHECKOUT_URL_MARKERS.test(finalUrl);
     };
     let attempt = 1;
     dlog(ctx, `step 8 go-checkout: tryCheckoutClick attempt 1 — selector=${checkoutHit.selector}, beforeUrl=${beforeUrl8}`);
@@ -1410,10 +1413,11 @@ async function dismissOverlays(page: Page, ctx: FlowContext): Promise<void> {
  * selector becoming visible) is sufficient evidence the cart hydrated.
  * Race them with `Promise.race` so a missed XHR (non-VTEX cart, regex
  * miss) doesn't force the test to wait 8s for the slowest probe — the
- * faster signal returns immediately. A hard 5s outer cap protects
- * against pathological cases where neither probe fires at all (still
- * lets `waitForTimeout(800)` settle render). All inner timeouts catch
- * so they never throw past this helper.
+ * faster signal returns immediately. Both probes have `.catch(() => undefined)`
+ * fallbacks, so even if neither fires they still resolve at the 8s
+ * Playwright timeout — Promise.race can't hang. No outer fallback
+ * needed (a separate timeout shorter than 8s would fire too early
+ * and cause premature validation against a still-empty DOM).
  */
 async function waitForCartHydration(page: Page): Promise<void> {
   await Promise.race([
@@ -1426,7 +1430,6 @@ async function waitForCartHydration(page: Page): Promise<void> {
     page
       .waitForSelector(".cart-items, [class*='cart-item' i], #cart-fixed .item, [data-cart-item]", { timeout: 8_000 })
       .catch(() => undefined),
-    new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
   ]);
   await page.waitForTimeout(800);
 }
