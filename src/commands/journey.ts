@@ -226,20 +226,27 @@ export async function journeyCommand(opts: JourneyOptions): Promise<number> {
     // every run discards its discoveries — including selectors the LLM just
     // paid to recover. Promote only PROD-side captures (source of truth);
     // cand may legitimately differ.
+    //
+    // Persistence runs independently of `--no-auto-selectors` (which gates
+    // LLM startup discovery in `discoverSelectorsFromUrl`). The two are
+    // separate features: the user may legitimately want a deterministic
+    // selector cascade for THIS run but still want the journey's outcomes
+    // recorded for future runs. Persistence failure (disk full, permission
+    // denied) must NOT abort the journey — wrap in try/catch.
     const learnedBefore = JSON.stringify(learned);
-    if (opts.autoSelectors !== false) {
-      const prodHost = safeHost(opts.prod);
-      let totalPromoted = 0;
-      let totalDeprecated = 0;
-      let totalRecorded = 0;
-      for (const cap of flowCaptures) {
-        if (cap.side !== "prod") continue;
-        const result = promoteStepsFromFlow(learned, platform, prodHost, cap);
-        totalPromoted += result.promoted;
-        totalDeprecated += result.deprecated;
-        totalRecorded += result.recorded;
-      }
-      if (JSON.stringify(learned) !== learnedBefore) {
+    const prodHost = safeHost(opts.prod);
+    let totalPromoted = 0;
+    let totalDeprecated = 0;
+    let totalRecorded = 0;
+    for (const cap of flowCaptures) {
+      if (cap.side !== "prod") continue;
+      const result = promoteStepsFromFlow(learned, platform, prodHost, cap);
+      totalPromoted += result.promoted;
+      totalDeprecated += result.deprecated;
+      totalRecorded += result.recorded;
+    }
+    if (JSON.stringify(learned) !== learnedBefore) {
+      try {
         saveLearned(learned);
         if (!opts.json) {
           const bits = [];
@@ -247,6 +254,11 @@ export async function journeyCommand(opts: JourneyOptions): Promise<number> {
           if (totalRecorded > 0) bits.push(`${totalRecorded} reforçado(s)`);
           if (totalDeprecated > 0) bits.push(`${totalDeprecated} depreciado(s)`);
           if (bits.length > 0) console.log(chalk.dim(`  learned-selectors atualizado: ${bits.join(", ")}`));
+        }
+      } catch (err) {
+        // Don't fail the journey for a learned-selectors write hiccup.
+        if (!opts.json) {
+          console.warn(chalk.yellow(`  warn: failed to persist learned-selectors: ${(err as Error).message}`));
         }
       }
     }

@@ -128,11 +128,24 @@ async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> 
   // doubles `maxTokens` so the model has enough room to complete its
   // tool call; the most common parse failure mode is mid-object
   // truncation when the response hits the cap.
+  //
+  // `timeoutMs` is the HARD overall budget for the whole call (including
+  // retries) — without the elapsed tracking below each attempt would get
+  // its own full timeout and a network-stalled second try could push
+  // total latency to 2× the documented cap. We pass the REMAINING budget
+  // to each attempt and bail out of the retry if there's <2s left.
   const baseTokens = params.maxTokens ?? 2000;
+  const totalBudget = params.timeoutMs ?? defaultTimeout(params);
+  const start = Date.now();
   for (let attempt = 1; attempt <= 2; attempt++) {
     const isRetry = attempt > 1;
+    const remaining = totalBudget - (Date.now() - start);
+    if (remaining <= 2_000 && isRetry) {
+      // Not enough budget left to make a retry meaningful.
+      return null;
+    }
     const tokens = isRetry ? Math.max(baseTokens * 2, 4000) : baseTokens;
-    const result = await openRouterToolOnce<T>(params, tokens, isRetry);
+    const result = await openRouterToolOnce<T>(params, tokens, isRetry, Math.max(remaining, 2_000));
     if (result !== undefined) return result;
   }
   return null;
@@ -148,6 +161,7 @@ async function openRouterToolOnce<T>(
   params: ToolCallParams,
   maxTokens: number,
   isRetry: boolean,
+  attemptTimeoutMs: number,
 ): Promise<T | null | undefined> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return null;
@@ -162,8 +176,7 @@ async function openRouterToolOnce<T>(
     });
   }
 
-  const timeoutMs = params.timeoutMs ?? defaultTimeout(params);
-  const { signal, clear } = makeTimeoutSignal(timeoutMs);
+  const { signal, clear } = makeTimeoutSignal(attemptTimeoutMs);
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",

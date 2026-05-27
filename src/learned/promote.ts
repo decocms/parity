@@ -6,6 +6,7 @@ import {
   recordFailure,
   recordSuccess,
   SelectorKey,
+  type SelectorEntry,
 } from "./repo.ts";
 
 export interface PromoteResult {
@@ -48,8 +49,13 @@ export function promoteStepsFromFlow(
       recordSuccess(learned, platform, key, step.usedSelector, host);
       recorded++;
     } else if (step.status === "failed") {
-      const before = recordFailure(learned, platform, key, step.usedSelector, host);
-      if (before?.deprecated) deprecated++;
+      // Snapshot deprecated state BEFORE recording the failure. recordFailure
+      // returns the post-mutation entry, so `entry.deprecated` after the call
+      // is true both for entries that just transitioned and for entries that
+      // were already deprecated. Counting both inflates the metric.
+      const wasDeprecated = isAlreadyDeprecated(learned, platform, key, step.usedSelector);
+      const after = recordFailure(learned, platform, key, step.usedSelector, host);
+      if (!wasDeprecated && after?.deprecated) deprecated++;
     }
   }
   return { promoted, deprecated, recorded };
@@ -66,3 +72,22 @@ function isReusableSelector(s: string): boolean {
   if (s.includes(" ~ ")) return false;
   return s.trim().length > 0;
 }
+
+/**
+ * Was this exact selector already marked deprecated before we record another
+ * failure? `getLearnedSelectors` filters deprecated entries out, so we sweep
+ * the raw platform slot. Returns false when no entry exists yet.
+ */
+function isAlreadyDeprecated(
+  lib: LearnedSelectors,
+  platform: Platform,
+  key: SelectorKey,
+  selector: string,
+): boolean {
+  const platformEntries = lib.platforms[platform];
+  if (!platformEntries) return false;
+  const entries = (platformEntries[key] ?? []) as SelectorEntry[];
+  const entry = entries.find((e) => e.selector === selector);
+  return !!entry?.deprecated;
+}
+
