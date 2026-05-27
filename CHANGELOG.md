@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.0](https://github.com/decocms/parity/compare/v0.4.0...v0.5.0) (2026-05-27)
+
+### Added
+
+* **journey:** predictive variant selection (new step 4 `select-variant`) — picks a tamanho / cor / sabor before clicking COMPRAR on stores that gate add-to-cart on a SKU choice (Miess, lingerie sites, lubricant brands with SABOR/COR tables). Heuristic-first with LLM fallback when `Selecione um produto` is detected. ([PR #13](https://github.com/decocms/parity/pull/13))
+* **journey:** real `add-to-cart` validation — polls for success-toast (`produto adicionado`), minicart count increase, drawer open, or URL navigation. Eliminates the false ✓ class of bugs that masked broken checkouts.
+* **journey:** generic `attemptStepAction(click | fill | press)` driver — tries selectors-then-LLM, returns what worked + `recoveredByLlm` marker for promotion. Used in the new steps.
+* **journey:** new selector keys: `sizeSwatch`, `colorSwatch`, `variantRow`, `quantityIncrement`, `quantityInput`, `minicartCount`.
+* **journey:** `parity journey` now persists learned-selectors across runs (was only `parity run` before). CLI logs `learned-selectors atualizado: X promovido(s), Y reforçado(s)`.
+* **llm:** OpenRouter `callTool` retries once on transient failure (5xx / 429 / network abort / unrepairable JSON parse), doubling `max_tokens` on the retry so mid-object truncation completes. Respects the overall `timeoutMs` budget.
+* **llm:** `discoverSelectorsFromUrl` prompt sharpened — `checkout_button` is optional + explicit "NEVER same as `minicart_trigger`"; CEP descriptions clarify "ADDRESS postal code, NOT coupon / newsletter / email". Sanity check drops `checkoutButton` when it collides with `minicartTrigger` (the cart-icon-as-checkout-button confusion).
+* **ci:** swap `release-please` for a `publish-on-version-change` workflow modeled after `decocms/studio`. No PAT, no org-level pull-request permission, no PR creation step — bump `package.json` version and the workflow publishes + tags + releases. ([PR #14](https://github.com/decocms/parity/pull/14))
+
+### Fixed
+
+* **learned/promote:** deprecated-counter no longer overcounts. Snapshots state before `recordFailure` so already-deprecated entries failing again don't inflate the metric.
+* **commands/journey:** `--no-auto-selectors` only disables LLM startup discovery, not learned-selectors persistence (the two are independent features).
+* **commands/journey:** `saveLearned` wrapped in try/catch so a disk-full / permission-denied write surfaces as a warning instead of aborting the whole journey.
+
 ## [0.4.0](https://github.com/decocms/parity/compare/v0.3.0...v0.4.0) (2026-05-27)
 
 
