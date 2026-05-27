@@ -1,0 +1,136 @@
+name: Publish
+
+# Triggers when a commit on `main` changes `package.json` version.
+#
+# Maintainer flow:
+#   1. Make changes, bump version manually:
+#        npm version patch    # or minor / major
+#      (this updates package.json AND creates a local commit)
+#   2. Push to main (or open a PR; bump can also be reviewed before merge).
+#   3. On push, this workflow compares `package.json` version vs the
+#      currently published npm version. If they differ, it publishes to
+#      npm with provenance and creates a `vX.Y.Z` GitHub release with
+#      auto-generated notes (commit log since the previous tag).
+#
+# Why this shape (vs release-please):
+#   - GitHub's default `GITHUB_TOKEN` cannot create or approve pull
+#     requests on most orgs (org-level setting). release-please needs
+#     that permission for its "release PR" pattern and silently fails
+#     when the setting is off.
+#   - The version-in-package.json model avoids PR creation entirely:
+#     the bump IS the human-reviewed change, and the workflow only
+#     publishes + tags. Default `GITHUB_TOKEN` already has `contents:
+#     write` (for tags/releases) and we use OIDC + `--provenance` for
+#     npm — no extra secrets, no PAT, no token rotation.
+#
+# Manual break-glass:
+#   - `npm publish --access public --provenance` from a maintainer
+#     machine if the workflow is wedged. Remember to bump
+#     `package.json` first and create a matching `vX.Y.Z` tag.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "package.json"
+  workflow_dispatch:
+
+permissions:
+  contents: write   # for creating tags + releases
+  id-token: write   # for npm OIDC / provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # `workflow_dispatch` exposes a branch picker in the GitHub UI, so
+    # without this guard a maintainer could accidentally run the
+    # workflow against a feature branch and publish whatever `package.json`
+    # version lives there. The `paths` filter only constrains `push`
+    # triggers — explicit ref check is needed for dispatch.
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need history so `gh release create --generate-notes` can
+          # include the commits since the previous tag.
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Check if package.json version is already published
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          echo "package: $PKG_NAME"
+          echo "local version: $PKG_VERSION"
+          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$PKG_VERSION" >> "$GITHUB_OUTPUT"
+
+          # Probe the EXACT version, not the `latest` dist-tag — comparing
+          # against `latest` breaks intentional reverts to an older version
+          # that's already published (would trigger a 403 from npm on
+          # republish). `npm view PKG@VER version` succeeds (prints VER)
+          # when the version exists, fails with E404 when not, and fails
+          # with other codes for network / auth / registry-5xx errors.
+          # Conflate "doesn't exist" with success; loud-fail everything
+          # else so a transient registry hiccup doesn't suppress a real
+          # error and trigger an accidental publish.
+          set +e
+          PROBE_OUT=$(npm view "$PKG_NAME@$PKG_VERSION" version 2>&1)
+          PROBE_RC=$?
+          set -e
+
+          if [ "$PROBE_RC" -eq 0 ] && [ "$PROBE_OUT" = "$PKG_VERSION" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "⏭️  $PKG_NAME@$PKG_VERSION already published, nothing to do"
+            exit 0
+          fi
+
+          # Treat "package never published" or "version not found" (both
+          # surface as E404 from npm view) as "publishable". Any other
+          # failure is real and must abort the run.
+          if echo "$PROBE_OUT" | grep -qE "E404|code 404|404 Not Found"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "✅ $PKG_NAME@$PKG_VERSION not on registry, will publish"
+            exit 0
+          fi
+
+          echo "::error::Unexpected response from \`npm view\` (rc=$PROBE_RC):"
+          echo "$PROBE_OUT"
+          exit 1
+
+      - name: Install dependencies
+        if: steps.check.outputs.changed == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        if: steps.check.outputs.changed == 'true'
+        run: bun run build
+
+      - name: Publish to npm
+        if: steps.check.outputs.changed == 'true'
+        # OIDC + provenance — no NPM_TOKEN secret needed.
+        # See: https://docs.npmjs.com/generating-provenance-statements
+        run: npm publish --access public --provenance
+
+      - name: Create GitHub release
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # --generate-notes asks GitHub to auto-build release notes
+          # from PR titles since the previous tag, which is what we
+          # want for our Conventional-Commits squash-merge workflow.
+          gh release create "${{ steps.check.outputs.tag }}" \
+            --title "${{ steps.check.outputs.tag }}" \
+            --generate-notes
