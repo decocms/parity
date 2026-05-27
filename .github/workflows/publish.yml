@@ -42,6 +42,12 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # `workflow_dispatch` exposes a branch picker in the GitHub UI, so
+    # without this guard a maintainer could accidentally run the
+    # workflow against a feature branch and publish whatever `package.json`
+    # version lives there. The `paths` filter only constrains `push`
+    # triggers — explicit ref check is needed for dispatch.
+    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,7 +64,7 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Compare package.json version vs published npm version
+      - name: Check if package.json version is already published
         id: check
         shell: bash
         run: |
@@ -67,19 +73,41 @@ jobs:
           PKG_VERSION=$(node -p "require('./package.json').version")
           echo "package: $PKG_NAME"
           echo "local version: $PKG_VERSION"
-          # `npm view` exits non-zero when the package has never been
-          # published; treat that as "needs first publish".
-          PUBLISHED=$(npm view "$PKG_NAME" version 2>/dev/null || echo "")
-          echo "published version: ${PUBLISHED:-<none>}"
           echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$PKG_VERSION" >> "$GITHUB_OUTPUT"
-          if [ -z "$PUBLISHED" ] || [ "$PKG_VERSION" != "$PUBLISHED" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "✅ will publish ($PUBLISHED → $PKG_VERSION)"
-          else
+
+          # Probe the EXACT version, not the `latest` dist-tag — comparing
+          # against `latest` breaks intentional reverts to an older version
+          # that's already published (would trigger a 403 from npm on
+          # republish). `npm view PKG@VER version` succeeds (prints VER)
+          # when the version exists, fails with E404 when not, and fails
+          # with other codes for network / auth / registry-5xx errors.
+          # Conflate "doesn't exist" with success; loud-fail everything
+          # else so a transient registry hiccup doesn't suppress a real
+          # error and trigger an accidental publish.
+          set +e
+          PROBE_OUT=$(npm view "$PKG_NAME@$PKG_VERSION" version 2>&1)
+          PROBE_RC=$?
+          set -e
+
+          if [ "$PROBE_RC" -eq 0 ] && [ "$PROBE_OUT" = "$PKG_VERSION" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "⏭️  version unchanged, nothing to do"
+            echo "⏭️  $PKG_NAME@$PKG_VERSION already published, nothing to do"
+            exit 0
           fi
+
+          # Treat "package never published" or "version not found" (both
+          # surface as E404 from npm view) as "publishable". Any other
+          # failure is real and must abort the run.
+          if echo "$PROBE_OUT" | grep -qE "E404|code 404|404 Not Found"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "✅ $PKG_NAME@$PKG_VERSION not on registry, will publish"
+            exit 0
+          fi
+
+          echo "::error::Unexpected response from \`npm view\` (rc=$PROBE_RC):"
+          echo "$PROBE_OUT"
+          exit 1
 
       - name: Install dependencies
         if: steps.check.outputs.changed == 'true'
