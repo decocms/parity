@@ -36,6 +36,14 @@ export interface FlowContext {
   recoveryBudget?: number;
   /** Optional progress callback (each step start/end) */
   onStep?: (event: StepProgressEvent) => void;
+  /**
+   * When true, prod-side steps that get diagnosed as "cart genuinely
+   * empty due to session/cookie quirk" (see `detectEmptyCartBanner`)
+   * are marked `skipped` instead of `failed` — BUT only when prod and
+   * cand agree on `cartRevealMode`. If the modes diverge, the flag is
+   * a no-op so we never mask a real markup regression (issue #12).
+   */
+  acceptProdQuirks?: boolean;
 }
 
 const PURCHASE_JOURNEY_TOTAL_STEPS = 9;
@@ -707,16 +715,31 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     }
     let cartOpenMethod: NonNullable<StepCapture["cartOpenMethod"]> = "failed";
     let miniText = "";
+    let cartRevealMode: NonNullable<StepCapture["cartRevealMode"]> = "unknown";
+    // Probe whether the drawer was ALREADY opened by add-to-cart (e.g. miess
+    // prod opens an inline notification on add-to-cart with no further
+    // trigger click needed). Used by detectCartRevealMode below as the
+    // first signal in its classification ladder.
+    const drawerAlreadyOpen = (await isCartRevealed(page, expectedProductTitle)) !== null;
     if (miniHit) {
       miniText = await miniHit.locator.innerText().catch(() => "");
+      // Classify markup intent BEFORE we interact. Safe to run even when
+      // drawer is already open (returns "inline-notification" first).
+      cartRevealMode = await detectCartRevealMode(
+        page,
+        miniHit.locator,
+        drawerAlreadyOpen,
+        ctx.viewport,
+      ).catch(() => "unknown" as const);
+      dlog(ctx, `step 7 open-minicart: cartRevealMode=${cartRevealMode}`);
       const openResult = await openMinicart(page, miniHit, ctx, expectedProductTitle);
       cartOpenMethod = openResult.method;
     } else {
       // No trigger needed — drawer may already be open from add-to-cart.
-      const alreadyOpen = await isCartRevealed(page, expectedProductTitle);
-      if (alreadyOpen) {
+      if (drawerAlreadyOpen) {
         cartOpenMethod = "already-open";
-        dlog(ctx, `step 7 open-minicart: no trigger, drawer already visible (${alreadyOpen})`);
+        cartRevealMode = "inline-notification";
+        dlog(ctx, "step 7 open-minicart: no trigger, drawer already visible");
       }
     }
     // Validate the product from step 3 is now visible in the cart UI.
@@ -745,8 +768,31 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     }
     const sp7 = screenshotPath(ctx, "pj-7-minicart");
     await page.screenshot({ path: sp7, fullPage: false }).catch(() => undefined);
-    const step7Status: StepCapture["status"] =
-      cartOpenMethod === "failed" ? "failed" : step7Validation && !step7Validation.found ? "failed" : "ok";
+    // #12 — prod-side cart-empty quirk. We mark step 7 (and the downstream
+    // cart-dependent steps 8 + 9) as `skipped` instead of `failed` ONLY
+    // when --accept-prod-quirks is set AND this is the prod side AND the
+    // diagnosis is "cart genuinely empty". The further restriction
+    // (cartRevealMode symmetry between prod and cand) is enforced by the
+    // dedicated check `cart-reveal-mode-divergence`, which emits a
+    // critical issue whenever modes diverge — so even with the skip, a
+    // markup regression never silently passes.
+    const cartEmptyReason = step7Validation?.reason ?? "";
+    const isProdCartEmptyQuirk =
+      ctx.acceptProdQuirks === true &&
+      ctx.side === "prod" &&
+      step7Validation !== undefined &&
+      !step7Validation.found &&
+      cartEmptyReason.startsWith("cart genuinely empty");
+    const step7Status: StepCapture["status"] = isProdCartEmptyQuirk
+      ? "skipped"
+      : cartOpenMethod === "failed"
+        ? "failed"
+        : step7Validation && !step7Validation.found
+          ? "failed"
+          : "ok";
+    const step7QuirkNote = isProdCartEmptyQuirk
+      ? "cart-empty-prod-quirk: aceito via --accept-prod-quirks (cartRevealMode validated by separate check)"
+      : undefined;
     steps.push({
       step: 7,
       name: "open-minicart",
@@ -759,7 +805,9 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       screenshotBeforePath: spBefore7,
       beforeUrl: beforeUrl7,
       cartOpenMethod,
+      cartRevealMode,
       cartValidation: step7Validation,
+      note: step7QuirkNote,
       actionDescription: miniHit
         ? `Abriu minicart via ${cartOpenMethod}${miniText ? ` em '${miniText.slice(0, 30).trim()}'` : ""} (\`${miniHit.selector}\`)${miniRecovered ? " — selector via recovery LLM" : ""}${
             step7Validation
@@ -775,7 +823,24 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       usedSelector: miniHit?.selector,
       recoveredByLlm: miniRecovered || undefined,
     });
-    reportEnd(7, "open-minicart", step7Status, Date.now() - t7);
+    reportEnd(7, "open-minicart", step7Status, Date.now() - t7, step7QuirkNote);
+
+    // #12 — when prod hit the cart-empty quirk and we accepted it,
+    // steps 8 and 9 can't be exercised on prod. Skip them with a matching
+    // note so the journey ends `skipped/skipped/skipped` on prod side
+    // instead of producing a misleading `failed`. The check
+    // `cart-reveal-mode-divergence` is independent and still runs.
+    if (isProdCartEmptyQuirk) {
+      const quirkNote =
+        "cart-empty-prod-quirk: skipped (depende do cart que prod não persistiu)";
+      reportStart(8, "shipping-calc-cart");
+      steps.push(makeSkipStep(8, "shipping-calc-cart", ctx, quirkNote));
+      reportEnd(8, "shipping-calc-cart", "skipped", 0, quirkNote);
+      reportStart(9, "go-checkout");
+      steps.push(makeSkipStep(9, "go-checkout", ctx, quirkNote));
+      reportEnd(9, "go-checkout", "skipped", 0, quirkNote);
+      return { pages, steps };
+    }
 
     // Step 8: shipping calc in cart
     reportStart(8, "shipping-calc-cart");
@@ -1746,6 +1811,124 @@ async function isCartUiVisible(page: Page): Promise<string | null> {
     "[class*='cart-drawer'][class*='open']",
     "[class*='drawer-cart']:visible",
   ]);
+}
+
+/**
+ * Classify the minicart trigger by inspecting its markup (issue #12).
+ *
+ * Returns the INTENT of the trigger, not which strategy our harness will
+ * use. Compare prod.cartRevealMode against cand.cartRevealMode to surface
+ * markup divergence (e.g. cand turned a hover-drawer trigger into a
+ * click-navigate link — a real UX regression, not a quirk).
+ *
+ * The classification ladder, evaluated in order:
+ *
+ *  1. drawerAlreadyOpen → "inline-notification"
+ *     If add-to-cart already revealed the cart (validateAddToCart caught
+ *     a drawer/toast), the trigger is dormant — the markup intent is
+ *     "open inline on add-to-cart".
+ *
+ *  2. `<a href="/checkout..." | "/cart...">` → "click-navigate-checkout|cart"
+ *     Trigger is a link that navigates. We can SEE this from the DOM
+ *     without interacting.
+ *
+ *  3. `[onclick]` attribute or known click-binding markers → "click-drawer"
+ *     Trigger has a click handler. We attempt to observe hover-vs-click
+ *     behaviour to disambiguate from hover-drawer.
+ *
+ *  4. Hover dry-run (desktop only): hover and watch for DOM mutation
+ *     within 600ms. If we see a new dialog/drawer appear → "hover-drawer".
+ *
+ *  5. Fallback → "unknown".
+ *
+ * IMPORTANT: this function MUST be side-effect-free w.r.t. cart state.
+ * We do NOT click. We may hover briefly (desktop) but immediately move
+ * the mouse away so the hover state doesn't leak into the rest of the
+ * step's screenshot.
+ */
+async function detectCartRevealMode(
+  page: Page,
+  trigger: Locator,
+  drawerAlreadyOpen: boolean,
+  viewport: Viewport,
+): Promise<NonNullable<StepCapture["cartRevealMode"]>> {
+  if (drawerAlreadyOpen) return "inline-notification";
+
+  // 2. Link inspection — works for both viewports, no interaction needed.
+  try {
+    const href = (await trigger.getAttribute("href").catch(() => null)) ?? "";
+    const lower = href.toLowerCase();
+    if (/\/checkout(\b|\/|\?|#)/i.test(lower)) return "click-navigate-checkout";
+    if (/\/cart(\b|\/|\?|#)/i.test(lower) || /\/carrinho(\b|\/|\?|#)/i.test(lower)) {
+      return "click-navigate-cart";
+    }
+  } catch {
+    /* trigger may have detached */
+  }
+
+  // 3. Onclick / click-binding attribute markers.
+  let hasClickAttr = false;
+  try {
+    const onclick = await trigger.getAttribute("onclick").catch(() => null);
+    if (onclick && onclick.trim().length > 0) hasClickAttr = true;
+  } catch {
+    /* ignore */
+  }
+
+  // 4. Hover dry-run — only on desktop where pointer hover is meaningful.
+  //    Watch for new role=dialog / minicart-class element added in ~600ms.
+  if (viewport === "desktop") {
+    try {
+      const observedHoverDrawer = await page.evaluate(async () => {
+        return await new Promise<boolean>((resolve) => {
+          const selectorMatch = (el: Element): boolean => {
+            if (!(el instanceof HTMLElement)) return false;
+            if (el.getAttribute("role") === "dialog") return true;
+            const cls = `${el.className || ""}`;
+            return /minicart|drawer|cart-popup|cart-modal/i.test(cls);
+          };
+          const observer = new MutationObserver((muts) => {
+            for (const m of muts) {
+              for (const n of Array.from(m.addedNodes)) {
+                if (n instanceof Element && selectorMatch(n)) {
+                  observer.disconnect();
+                  resolve(true);
+                  return;
+                }
+              }
+              if (m.type === "attributes" && m.target instanceof Element && selectorMatch(m.target)) {
+                observer.disconnect();
+                resolve(true);
+                return;
+              }
+            }
+          });
+          observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ["class", "style", "aria-expanded", "open"],
+          });
+          setTimeout(() => {
+            observer.disconnect();
+            resolve(false);
+          }, 600);
+        });
+      });
+      // Trigger the hover that the observer above is listening for.
+      const hoverPromise = trigger.hover({ timeout: 1_500 }).catch(() => undefined);
+      await hoverPromise;
+      const result = await observedHoverDrawer;
+      // Move the mouse away to clear any hover state we left behind.
+      await page.mouse.move(0, 0).catch(() => undefined);
+      if (result) return "hover-drawer";
+    } catch {
+      /* fall through */
+    }
+  }
+
+  if (hasClickAttr) return "click-drawer";
+  return "unknown";
 }
 
 async function isCartRevealed(

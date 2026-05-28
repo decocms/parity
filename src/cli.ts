@@ -48,6 +48,11 @@ program
   .option("--vitals-pages <n>", "Extra pages from sitemap to crawl for Vitals coverage (default 10)", (v) => Number(v), 10)
   .option("--visual-pages <n>", "Pages to compare visually via LLM (home + sampled PLPs/PDPs from sitemap, default 5)", (v) => Number(v), 5)
   .option("--no-visual-diff", "Skip the visual diff capture pass entirely")
+  .option(
+    "--accept-prod-quirks",
+    "Demote prod-side cart-empty journey failures (VTEX session quirk) from failed to skipped. The cart-reveal-mode-divergence check still emits critical if prod/cand markup intents differ, so this flag never masks a real regression. See issue #12.",
+    false,
+  )
   .action(async (opts) => {
     const code = await runCommand(opts);
     process.exit(code);
@@ -166,6 +171,11 @@ program
   .option("--json", "Emit a one-line JSON status object to stdout (machine-readable)")
   .option("--no-report", "Skip writing report.html / report.json")
   .option("--no-auto-selectors", "Skip LLM-based selector discovery")
+  .option(
+    "--accept-prod-quirks",
+    "Demote prod-side cart-empty journey failures (VTEX session quirk) from failed to skipped. The cart-reveal-mode-divergence check still emits critical if prod/cand markup intents differ, so this flag never masks a real regression. See issue #12.",
+    false,
+  )
   .action(async (opts) => {
     process.exit(await journeyCommand(opts));
   });

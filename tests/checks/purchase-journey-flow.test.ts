@@ -80,6 +80,26 @@ describe("purchaseJourneyFlow check", () => {
     expect(r.status).toBe("pass");
   });
 
+  it("#12: prod skipped (--accept-prod-quirks) + cand ok → par neutro, sem regressão", () => {
+    // Após o root fix de #12, o flag --accept-prod-quirks demove prod-side
+    // failures pra `skipped`. O check purchase-journey-flow não deve marcar
+    // isso como regressão — a divergência REAL (se houver) será emitida
+    // pelo check separado cart-reveal-mode-divergence.
+    const prod = [
+      step("add-to-cart", "ok"),
+      step("open-minicart", "skipped", "cart-empty-prod-quirk: aceito via --accept-prod-quirks"),
+      step("go-checkout", "skipped", "cart-empty-prod-quirk: skipped"),
+    ];
+    const cand = [
+      step("add-to-cart", "ok"),
+      step("open-minicart", "ok"),
+      step("go-checkout", "ok"),
+    ];
+    const r = purchaseJourneyFlow(ctx([flow("prod", prod)], [flow("cand", cand)]));
+    expect(r.issues).toHaveLength(0);
+    expect(r.status).toBe("pass");
+  });
+
   // ---------- Regressões anti silent-pass (issue: home quebrada com check pass) ----------
 
   it("skipa (não pass) quando purchase-journey nem foi requisitada no run", () => {
