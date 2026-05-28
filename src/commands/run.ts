@@ -81,6 +81,14 @@ export interface RunOptions {
    * Worker serves a fresh response. Pairs with --bypass-cache after deploys.
    */
   warmup?: boolean;
+  /**
+   * Demote prod-side cart-empty failures to `skipped` when the VTEX
+   * session quirk hits (cart genuinely empty after navigation). The
+   * separate `cart-reveal-mode-divergence` check still emits `critical`
+   * if prod and cand markup intents differ — so this flag never masks
+   * a real regression. Issue #12.
+   */
+  acceptProdQuirks?: boolean;
 }
 
 type PresetDefaults = Partial<Pick<RunOptions,
@@ -304,6 +312,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
             learned,
             platform,
             recoveryBudget: 3,
+            acceptProdQuirks: opts.acceptProdQuirks,
           });
           allFlowCaptures.push(cap);
           for (const p of cap.pages) allPageCaptures.push(p);

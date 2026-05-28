@@ -43,6 +43,12 @@ export interface JourneyOptions {
   json?: boolean;
   /** Disable LLM auto-discover (uses learned + defaults only) */
   autoSelectors?: boolean;
+  /**
+   * Demote prod-side cart-empty failures to `skipped` when the VTEX
+   * session quirk hits. Independent of cart-reveal-mode-divergence
+   * which still emits critical if markup intent differs. Issue #12.
+   */
+  acceptProdQuirks?: boolean;
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -199,6 +205,7 @@ export async function journeyCommand(opts: JourneyOptions): Promise<number> {
         platform,
         recoveryBudget: 3,
         onStep: onStepFor(viewport, side),
+        acceptProdQuirks: opts.acceptProdQuirks,
       });
       return cap;
     } finally {

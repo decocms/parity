@@ -58,6 +58,11 @@ program
     "Before measurement, hit each target URL once (per viewport) with a cache-buster so the Worker serves a fresh response. Recommended after deploys.",
     false,
   )
+  .option(
+    "--accept-prod-quirks",
+    "Demote prod-side cart-empty journey failures (VTEX session quirk) from failed to skipped. The cart-reveal-mode-divergence check still emits critical if prod/cand markup intents differ, so this flag never masks a real regression. See issue #12.",
+    false,
+  )
   .action(async (opts) => {
     const code = await runCommand(opts);
     process.exit(code);
@@ -176,6 +181,11 @@ program
   .option("--json", "Emit a one-line JSON status object to stdout (machine-readable)")
   .option("--no-report", "Skip writing report.html / report.json")
   .option("--no-auto-selectors", "Skip LLM-based selector discovery")
+  .option(
+    "--accept-prod-quirks",
+    "Demote prod-side cart-empty journey failures (VTEX session quirk) from failed to skipped. The cart-reveal-mode-divergence check still emits critical if prod/cand markup intents differ, so this flag never masks a real regression. See issue #12.",
+    false,
+  )
   .action(async (opts) => {
     process.exit(await journeyCommand(opts));
   });

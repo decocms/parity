@@ -107,6 +107,30 @@ export const StepCapture = z.object({
     .optional(),
   /** For step 6 (open-minicart): how was the cart UI revealed? */
   cartOpenMethod: z.enum(["click", "click-navigate", "hover", "already-open", "failed"]).optional(),
+  /**
+   * Intent of the minicart-trigger markup, captured BEFORE we attempt to
+   * interact (issue #12). Lets a downstream check compare prod vs cand
+   * and surface markup divergence (e.g. cand turned a hover-drawer
+   * trigger into a click-navigate link) — a real UX regression that's
+   * separate from "which interaction strategy our harness happened to
+   * use".
+   *  - hover-drawer:          trigger reveals an inline drawer on hover (no click handler / no nav href)
+   *  - click-drawer:          trigger has a click handler that opens an inline drawer
+   *  - click-navigate-checkout: trigger is an <a href="/checkout..."> (or has onclick that navs there)
+   *  - click-navigate-cart:    trigger is an <a href="/cart..."> (or similar)
+   *  - inline-notification:    add-to-cart already opened a drawer/notification; the trigger is dormant
+   *  - unknown:                we couldn't classify (no trigger found, or page closed before probe)
+   */
+  cartRevealMode: z
+    .enum([
+      "hover-drawer",
+      "click-drawer",
+      "click-navigate-checkout",
+      "click-navigate-cart",
+      "inline-notification",
+      "unknown",
+    ])
+    .optional(),
 });
 export type StepCapture = z.infer<typeof StepCapture>;
 
