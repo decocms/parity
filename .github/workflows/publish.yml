@@ -124,6 +124,19 @@ jobs:
           echo "$PROBE_OUT"
           exit 1
 
+      # Node 22 ships npm 10.9.8 which does NOT have the trusted-publishing
+      # OIDC token-exchange code path (added in a newer npm minor — the
+      # silly-level log of the failed run shows zero requests to
+      # `/-/npm/v1/oidc/token-exchange`, npm goes straight to the publish
+      # PUT with empty auth, which the registry rejects as a disguised 401
+      # → 404). Force the latest stable npm so we get the OIDC client.
+      - name: Upgrade npm to a version that supports OIDC trusted publishing
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          echo "npm version before upgrade: $(npm --version)"
+          npm install -g npm@latest
+          echo "npm version after upgrade:  $(npm --version)"
+
       - name: Install dependencies
         if: steps.check.outputs.changed == 'true'
         run: bun install --frozen-lockfile
