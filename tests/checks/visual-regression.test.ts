@@ -150,6 +150,101 @@ describe("visualRegressionKeyframes", () => {
     });
   });
 
+  it("#22: downgrades hero-region diffs to 'low' when both sides expose a carousel/slider section", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: "tool_use",
+          name: "report_visual_differences",
+          input: {
+            differences: [
+              {
+                type: "different-component",
+                region: "hero",
+                severity: "critical",
+                description: "Hero banner completamente diferente: prod 'myGlow', cand 'LIVE ON'",
+              },
+              {
+                type: "missing-component",
+                region: "footer",
+                severity: "high",
+                description: "Footer real regression",
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const prodPath = join(dir.path, "p.png");
+    const candPath = join(dir.path, "c.png");
+    makePng(prodPath, 50, 50, [0, 0, 0]);
+    makePng(candPath, 50, 50, [255, 255, 255]);
+    const prodHtml = `<html><body><div data-section="Images/Carousel"></div></body></html>`;
+    const candHtml = `<html><body><div data-section="Images/Carousel"></div></body></html>`;
+    const r = await visualRegressionKeyframes(
+      makeContext({
+        outDir: dir.path,
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath, html: prodHtml }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath, html: candHtml }),
+        ],
+      }),
+    );
+    const semanticIssues = r.issues.filter((i) => i.id.includes("visual:semantic"));
+    const heroIssue = semanticIssues.find((i) => i.summary.includes("[hero]"));
+    const footerIssue = semanticIssues.find((i) => i.summary.includes("[footer]"));
+    expect(heroIssue?.severity).toBe("low");
+    expect(heroIssue?.summary).toMatch(/downgraded/);
+    expect(footerIssue?.severity).toBe("high");
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  it("#22: does NOT downgrade hero diffs when only one side has a carousel (real regression)", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: "tool_use",
+          name: "report_visual_differences",
+          input: {
+            differences: [
+              {
+                type: "missing-component",
+                region: "hero",
+                severity: "critical",
+                description: "Hero carousel completely missing in cand",
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const prodPath = join(dir.path, "p.png");
+    const candPath = join(dir.path, "c.png");
+    makePng(prodPath, 50, 50, [0, 0, 0]);
+    makePng(candPath, 50, 50, [255, 255, 255]);
+    const prodHtml = `<html><body><div data-section="Images/Carousel"></div></body></html>`;
+    const candHtml = `<html><body></body></html>`;
+    const r = await visualRegressionKeyframes(
+      makeContext({
+        outDir: dir.path,
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath, html: prodHtml }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath, html: candHtml }),
+        ],
+      }),
+    );
+    const heroIssue = r.issues.find((i) => i.id.includes("visual:semantic") && i.summary.includes("[hero]"));
+    expect(heroIssue?.severity).toBe("critical");
+    expect(heroIssue?.summary).not.toMatch(/downgraded/);
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
   it("emits 'failed' verdict for the page when LLM throws", async () => {
     process.env.ANTHROPIC_API_KEY = "sk-test";
     mockCreate.mockRejectedValue(new Error("LLM down"));

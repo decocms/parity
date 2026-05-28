@@ -1,6 +1,7 @@
 import type { Browser, BrowserContext, BrowserContextOptions } from "playwright";
 import { chromium, devices } from "playwright";
 import type { Viewport } from "../types/schema.ts";
+import { CAROUSEL_STABILIZER_INIT_SCRIPT } from "./carousel-stabilizer.ts";
 
 /**
  * Disable CSS animations + transitions to eliminate flake from in-flight motion
@@ -71,6 +72,11 @@ export async function newContext(browser: Browser, opts: ContextOptions): Promis
       } catch (e) {}
     `,
   });
+
+  // Install the carousel-stabilizer hook (issue #22). Runs before any user
+  // JS so `window.__parityStabilizeCarousels()` is callable from
+  // `stabilizeCarousels(page)` right before any screenshot.
+  await ctx.addInitScript({ content: CAROUSEL_STABILIZER_INIT_SCRIPT });
 
   // Stable cohort cookie if requested
   if (opts.cohortCookieValue) {

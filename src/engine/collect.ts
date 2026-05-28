@@ -7,6 +7,7 @@ import type {
   Viewport,
   WebVitals,
 } from "../types/schema.ts";
+import { stabilizeCarousels } from "./carousel-stabilizer.ts";
 
 const DEBUG_PARITY = process.env.DEBUG_PARITY === "1" || process.env.DEBUG_PARITY === "true";
 const DEBUG_START = Date.now();
@@ -364,6 +365,9 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
     ])) ?? null;
 
     if (!opts.skipScreenshot) {
+      // Pin every detected carousel to slide 0 BEFORE the screenshot so
+      // prod and cand capture the same frame (issue #22).
+      await stabilizeCarousels(page).catch(() => undefined);
       dlog(opts.side, opts.viewport, `    capturePage: screenshot start (cap=${Math.min(15_000, remaining())}ms)`);
       await Promise.race([
         page.screenshot({ path: opts.screenshotPath, fullPage: true, animations: "disabled" }).catch(() => undefined),
