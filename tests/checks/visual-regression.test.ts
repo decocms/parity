@@ -227,7 +227,7 @@ describe("visualRegressionKeyframes", () => {
     makePng(prodPath, 50, 50, [0, 0, 0]);
     makePng(candPath, 50, 50, [255, 255, 255]);
     const prodHtml = `<html><body><div data-section="Images/Carousel"></div></body></html>`;
-    const candHtml = `<html><body></body></html>`;
+    const candHtml = "<html><body></body></html>";
     const r = await visualRegressionKeyframes(
       makeContext({
         outDir: dir.path,
