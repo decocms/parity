@@ -94,6 +94,20 @@ export const FLOW_DEPENDENT_CHECKS: ReadonlySet<string> = new Set([
   "cart-reveal-mode-divergence",
 ]);
 
+/**
+ * Safe accessor for `ALL_CHECKS_BY_NAME`. Cubic flagged that a direct
+ * `ALL_CHECKS_BY_NAME[userInput]` resolves prototype keys (e.g.
+ * `__proto__`, `toString`) to truthy Object methods, which would bypass
+ * the "check not found" branch and crash when called with a CheckContext.
+ *
+ * `Object.hasOwn` only matches keys WE registered, so unknown / prototype
+ * keys correctly fall through to `undefined`.
+ */
+export function getCheckByName(name: string): Check | undefined {
+  if (!Object.hasOwn(ALL_CHECKS_BY_NAME, name)) return undefined;
+  return ALL_CHECKS_BY_NAME[name];
+}
+
 export async function runAllChecks(ctx: CheckContext): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   for (const check of ALL_CHECKS) {

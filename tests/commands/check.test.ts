@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALL_CHECKS,
   ALL_CHECKS_BY_NAME,
   FLOW_DEPENDENT_CHECKS,
-  ALL_CHECKS,
+  getCheckByName,
 } from "../../src/checks/index.ts";
 
 describe("checks registry (used by parity check)", () => {
@@ -13,6 +14,43 @@ describe("checks registry (used by parity check)", () => {
       expect(mapped.has(fn)).toBe(true);
     }
     expect(mapped.size).toBe(ALL_CHECKS.length);
+  });
+
+  it("cubic #1: name → function pairing está correto (não só values overlap)", async () => {
+    // O teste anterior aceitava swap/dup: se 'name-a' e 'name-b'
+    // apontassem pra mesma função, o teste de "values match" passava
+    // mas o dispatch do `parity check` quebrava. Aqui chamamos cada
+    // entrada com um ctx mínimo e conferimos que `result.name` volta
+    // igual à chave do registry.
+    const minimalCtx = {
+      prodPages: [],
+      candPages: [],
+      prodFlows: [],
+      candFlows: [],
+      rc: { cep: "01310-100", selectors: {}, skipSteps: [] },
+      ignore: {
+        ignoreSelectorsVisual: [],
+        ignoreRequestPatterns: [],
+        ignoreConsolePatterns: [],
+        ignoreMetaKeys: [],
+        toleratedDomDrift: {},
+      },
+      outDir: "/tmp",
+      viewports: ["mobile" as const],
+    };
+    for (const [registeredName, fn] of Object.entries(ALL_CHECKS_BY_NAME)) {
+      const result = await fn(minimalCtx);
+      expect(result.name).toBe(registeredName);
+    }
+  });
+
+  it("cubic #2: getCheckByName ignora prototype keys (__proto__, toString, constructor)", () => {
+    expect(getCheckByName("__proto__")).toBeUndefined();
+    expect(getCheckByName("toString")).toBeUndefined();
+    expect(getCheckByName("constructor")).toBeUndefined();
+    expect(getCheckByName("hasOwnProperty")).toBeUndefined();
+    // E ainda resolve nomes reais.
+    expect(getCheckByName("console-errors-baseline")).toBeDefined();
   });
 
   it("todos os nomes são kebab-case (sem espaços, lowercase)", () => {

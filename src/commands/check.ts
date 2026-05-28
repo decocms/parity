@@ -1,8 +1,12 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import chalk from "chalk";
 import {
   ALL_CHECKS_BY_NAME,
   type CheckContext,
   FLOW_DEPENDENT_CHECKS,
+  getCheckByName,
 } from "../checks/index.ts";
 import { launchBrowser, newContext } from "../engine/browser.ts";
 import { capturePage, installVitalsCollector } from "../engine/collect.ts";
@@ -31,23 +35,21 @@ const SEVERITY_RANK: Record<Issue["severity"], number> = {
   low: 3,
 };
 
+const VALID_VIEWPORTS: ReadonlySet<string> = new Set(["mobile", "desktop", "tablet"]);
+
 /**
  * `parity check <name>` — run ONE check (issue #31, PR 4).
  *
  * Skips the full `parity run` pipeline (sitemap discovery, 13 sibling
  * checks, LLM aggregation). Captures only the page(s) the user asked for,
  * then dispatches to a single check function from `ALL_CHECKS_BY_NAME`.
- *
- * Use case from the issue: "I fixed one thing on /bota-tudao-2025 and
- * want to verify only the visual-regression check passes now". Today
- * that takes 5 minutes via `parity run`; here it takes ~10 seconds.
- *
- * Flow-dependent checks (`purchase-journey-flow`,
- * `cart-reveal-mode-divergence`) are blocked with a clear message — they
- * need step captures that this command's lean pipeline does not produce.
  */
 export async function checkCommand(opts: CheckCommandOptions): Promise<number> {
-  const check = ALL_CHECKS_BY_NAME[opts.name];
+  // Use the safe lookup helper instead of plain object indexing — cubic
+  // flagged that `record[userInput]` exposes prototype keys like
+  // `__proto__` / `toString` (would resolve to truthy Object methods,
+  // bypassing the "not found" branch).
+  const check = getCheckByName(opts.name);
   if (!check) {
     console.error(chalk.red(`check '${opts.name}' não existe.\n`));
     console.error(chalk.dim("Checks disponíveis:"));
@@ -70,14 +72,27 @@ export async function checkCommand(opts: CheckCommandOptions): Promise<number> {
     return 2;
   }
 
-  const viewports = opts.viewports
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s): s is Viewport => s === "mobile" || s === "desktop" || s === "tablet");
-  if (viewports.length === 0) {
+  // Reject unknown viewport tokens loud-and-clear instead of silently
+  // dropping them (cubic flagged the previous `filter` as
+  // "false-confidence-producing"): `parity check x --viewports phone`
+  // would have proceeded with no viewports → exit 2 with a generic
+  // message, instead of the precise "phone is not a valid viewport".
+  const rawViewports = opts.viewports.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  const invalid = rawViewports.filter((v) => !VALID_VIEWPORTS.has(v));
+  if (invalid.length > 0) {
+    console.error(
+      chalk.red(
+        `viewport(s) inválido(s): ${invalid.join(", ")} (use mobile, desktop ou tablet)`,
+      ),
+    );
+    return 2;
+  }
+  if (rawViewports.length === 0) {
     console.error(chalk.red(`viewports inválido: '${opts.viewports}'`));
     return 2;
   }
+  const viewports = rawViewports as Viewport[];
+
   let prodUrl: URL;
   let candUrl: URL;
   try {
@@ -87,19 +102,35 @@ export async function checkCommand(opts: CheckCommandOptions): Promise<number> {
     console.error(chalk.red("--prod ou --cand inválido"));
     return 2;
   }
-  const page = opts.page || "/";
+
+  // `--page` must be a path, NOT an absolute URL. Cubic flagged that
+  // `new URL("https://other.com/", base)` returns the absolute URL,
+  // silently overriding --prod / --cand. Reject anything that parses
+  // as an absolute URL (scheme present).
+  const pagePath = (opts.page || "/").trim();
+  if (/^[a-z][a-z0-9+.-]*:/i.test(pagePath)) {
+    console.error(
+      chalk.red(`--page deve ser um caminho relativo (e.g. "/bota-tudao-2025"), recebido: ${pagePath}`),
+    );
+    return 2;
+  }
 
   const rc = loadParityRc();
   const ignore = loadParityIgnore();
 
+  // Portable, per-run temp dir. Cubic flagged hardcoded `/tmp` paths
+  // (not portable to Windows, collide between concurrent runs).
+  const runDir = mkdtempSync(join(tmpdir(), "parity-check-"));
+
   const browser = await launchBrowser({ headless: true });
   const prodPages: PageCapture[] = [];
   const candPages: PageCapture[] = [];
+  const captureErrors: Array<{ side: Side; viewport: Viewport; message: string }> = [];
   try {
     for (const viewport of viewports) {
       for (const side of ["prod", "cand"] as Side[]) {
         const baseUrl = side === "prod" ? prodUrl.toString() : candUrl.toString();
-        const fullUrl = new URL(page, baseUrl).toString();
+        const fullUrl = new URL(pagePath, baseUrl).toString();
         const ctx = await newContext(browser, { viewport });
         await installVitalsCollector(ctx);
         const p = await ctx.newPage();
@@ -108,7 +139,7 @@ export async function checkCommand(opts: CheckCommandOptions): Promise<number> {
             url: fullUrl,
             side,
             viewport,
-            screenshotPath: `/tmp/parity-check-${opts.name}-${viewport}-${side}.png`,
+            screenshotPath: join(runDir, `${opts.name}-${viewport}-${side}.png`),
             settleMs: 1200,
             timeoutMs: 25_000,
             fast: true,
@@ -116,6 +147,15 @@ export async function checkCommand(opts: CheckCommandOptions): Promise<number> {
             skipScreenshot: false,
           });
           (side === "prod" ? prodPages : candPages).push(cap);
+        } catch (err) {
+          // Funnel capture failures into the same shape as check failures
+          // so the user sees a structured error message at the end
+          // instead of a raw stack trace from a deep playwright error.
+          captureErrors.push({
+            side,
+            viewport,
+            message: (err as Error).message ?? "capture threw",
+          });
         } finally {
           await p.close().catch(() => undefined);
           await ctx.close().catch(() => undefined);
@@ -126,6 +166,18 @@ export async function checkCommand(opts: CheckCommandOptions): Promise<number> {
     await browser.close().catch(() => undefined);
   }
 
+  // If every single page capture failed, there is nothing for the check
+  // to operate on. Exit early with a structured message rather than
+  // calling the check with empty inputs and getting a misleading
+  // "passed (no issues)" result.
+  if (prodPages.length === 0 && candPages.length === 0) {
+    console.error(chalk.red("\n  ✖ todas as capturas falharam — não há nada pra rodar o check"));
+    for (const e of captureErrors) {
+      console.error(chalk.red(`    - ${e.viewport}/${e.side}: ${e.message}`));
+    }
+    return 2;
+  }
+
   const checkCtx: CheckContext = {
     prodPages,
     candPages,
@@ -133,7 +185,7 @@ export async function checkCommand(opts: CheckCommandOptions): Promise<number> {
     candFlows: [],
     rc,
     ignore,
-    outDir: "/tmp",
+    outDir: runDir,
     viewports,
   };
 
@@ -151,13 +203,27 @@ export async function checkCommand(opts: CheckCommandOptions): Promise<number> {
       issues: [],
     };
   }
-  printResult(result, { prod: opts.prod, cand: opts.cand, page, viewports, json: opts.json === true });
+  printResult(result, {
+    prod: opts.prod,
+    cand: opts.cand,
+    page: pagePath,
+    viewports,
+    json: opts.json === true,
+    captureErrors,
+  });
   return result.status === "fail" ? 1 : 0;
 }
 
 function printResult(
   result: CheckResult,
-  meta: { prod: string; cand: string; page: string; viewports: Viewport[]; json: boolean },
+  meta: {
+    prod: string;
+    cand: string;
+    page: string;
+    viewports: Viewport[];
+    json: boolean;
+    captureErrors: Array<{ side: Side; viewport: Viewport; message: string }>;
+  },
 ): void {
   if (meta.json) {
     console.log(JSON.stringify({ ...meta, result }));
@@ -174,6 +240,12 @@ function printResult(
   console.log(chalk.bold(`\n  ${result.name}`));
   console.log(chalk.dim(`  ${meta.viewports.join(", ")} · ${meta.page}`));
   console.log(chalk.dim(`  ${meta.prod} ↔ ${meta.cand}\n`));
+  if (meta.captureErrors.length > 0) {
+    for (const e of meta.captureErrors) {
+      console.log(chalk.yellow(`  ⚠ captura falhou em ${e.viewport}/${e.side}: ${e.message}`));
+    }
+    console.log("");
+  }
   console.log(`  status: ${statusColor(result.status)} · ${result.summary}`);
   if (result.issues.length === 0) {
     console.log(chalk.dim("  (sem issues)"));
