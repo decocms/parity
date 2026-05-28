@@ -73,6 +73,26 @@ describe("purchaseJourneyFlow check", () => {
     expect(r.issues[0]!.summary).toMatch(/pulou em cand/);
   });
 
+  it("#12: prod skipped (--accept-prod-quirks) + cand ok → não vira regressão", () => {
+    // Cenário do issue: prod hit o quirk de cart vazio após page.goto e foi
+    // demovido para "skipped" via --accept-prod-quirks. Cand exercitou o
+    // step normalmente. O check não deve marcar como regressão — não há
+    // sinal de problema em cand, e prod foi um quirk aceito.
+    const prod = [
+      step("add-to-cart", "ok"),
+      step("open-minicart", "skipped", "cart-empty-prod-quirk: aceito via --accept-prod-quirks"),
+      step("go-checkout", "skipped", "cart-empty-prod-quirk: skipped via --accept-prod-quirks"),
+    ];
+    const cand = [
+      step("add-to-cart", "ok"),
+      step("open-minicart", "ok"),
+      step("go-checkout", "ok"),
+    ];
+    const r = purchaseJourneyFlow(ctx([flow("prod", prod)], [flow("cand", cand)]));
+    expect(r.issues).toHaveLength(0);
+    expect(r.status).toBe("pass");
+  });
+
   it("aceita skip simétrico sem reportar", () => {
     const both = [step("shipping-calc-pdp", "skipped", "no CEP input on PDP")];
     const r = purchaseJourneyFlow(ctx([flow("prod", both)], [flow("cand", both)]));

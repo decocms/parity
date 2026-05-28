@@ -36,6 +36,16 @@ export interface FlowContext {
   recoveryBudget?: number;
   /** Optional progress callback (each step start/end) */
   onStep?: (event: StepProgressEvent) => void;
+  /**
+   * When true, prod-side steps that get diagnosed as "cart genuinely
+   * empty due to session/cookie quirk" (see `detectEmptyCartBanner`)
+   * are marked `skipped` instead of `failed`. Cart-dependent follow-up
+   * steps (shipping-calc-cart, go-checkout) are also skipped with a
+   * matching note. Lets CI green-build sites that hit the VTEX prod
+   * cart-after-goto quirk while still flagging real cart regressions
+   * on cand. Issue #12.
+   */
+  acceptProdQuirks?: boolean;
 }
 
 const PURCHASE_JOURNEY_TOTAL_STEPS = 9;
@@ -745,8 +755,28 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     }
     const sp7 = screenshotPath(ctx, "pj-7-minicart");
     await page.screenshot({ path: sp7, fullPage: false }).catch(() => undefined);
-    const step7Status: StepCapture["status"] =
-      cartOpenMethod === "failed" ? "failed" : step7Validation && !step7Validation.found ? "failed" : "ok";
+    // #12: When --accept-prod-quirks is on AND the diagnostic identifies a
+    // genuinely empty cart on the *prod* side (typical VTEX
+    // page.goto-after-add-to-cart session loss), demote the failure to a
+    // skip so prod-only quirks don't block CI. Real regressions on cand
+    // still surface as `failed`.
+    const cartEmptyReason = step7Validation?.reason ?? "";
+    const isProdCartEmptyQuirk =
+      ctx.acceptProdQuirks === true &&
+      ctx.side === "prod" &&
+      step7Validation !== undefined &&
+      !step7Validation.found &&
+      cartEmptyReason.startsWith("cart genuinely empty");
+    const step7Status: StepCapture["status"] = isProdCartEmptyQuirk
+      ? "skipped"
+      : cartOpenMethod === "failed"
+        ? "failed"
+        : step7Validation && !step7Validation.found
+          ? "failed"
+          : "ok";
+    const step7QuirkNote = isProdCartEmptyQuirk
+      ? "cart-empty-prod-quirk: aceito via --accept-prod-quirks (VTEX session não persistiu no goto /checkout/#/cart)"
+      : undefined;
     steps.push({
       step: 7,
       name: "open-minicart",
@@ -760,6 +790,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       beforeUrl: beforeUrl7,
       cartOpenMethod,
       cartValidation: step7Validation,
+      note: step7QuirkNote,
       actionDescription: miniHit
         ? `Abriu minicart via ${cartOpenMethod}${miniText ? ` em '${miniText.slice(0, 30).trim()}'` : ""} (\`${miniHit.selector}\`)${miniRecovered ? " — selector via recovery LLM" : ""}${
             step7Validation
@@ -775,7 +806,23 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       usedSelector: miniHit?.selector,
       recoveredByLlm: miniRecovered || undefined,
     });
-    reportEnd(7, "open-minicart", step7Status, Date.now() - t7);
+    reportEnd(7, "open-minicart", step7Status, Date.now() - t7, step7QuirkNote);
+
+    // #12: when prod cart was empty due to the accepted session quirk,
+    // shipping-calc-cart and go-checkout can't be exercised. Skip them
+    // explicitly with a matching note so the journey result is
+    // "skipped" instead of a misleading "failed".
+    if (isProdCartEmptyQuirk) {
+      const quirkNote =
+        "cart-empty-prod-quirk: skipped via --accept-prod-quirks (depende do cart que prod não persistiu)";
+      reportStart(8, "shipping-calc-cart");
+      steps.push(makeSkipStep(8, "shipping-calc-cart", ctx, quirkNote));
+      reportEnd(8, "shipping-calc-cart", "skipped", 0, quirkNote);
+      reportStart(9, "go-checkout");
+      steps.push(makeSkipStep(9, "go-checkout", ctx, quirkNote));
+      reportEnd(9, "go-checkout", "skipped", 0, quirkNote);
+      return { pages, steps };
+    }
 
     // Step 8: shipping calc in cart
     reportStart(8, "shipping-calc-cart");

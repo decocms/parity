@@ -43,6 +43,13 @@ export interface JourneyOptions {
   json?: boolean;
   /** Disable LLM auto-discover (uses learned + defaults only) */
   autoSelectors?: boolean;
+  /**
+   * Demote prod-side journey failures caused by known VTEX session quirks
+   * (cart empty after navigation to /checkout/#/cart) from `failed` to
+   * `skipped`. Lets CI green-build sites that reproducibly hit the quirk
+   * on prod while keeping cand failures visible. Issue #12.
+   */
+  acceptProdQuirks?: boolean;
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -199,6 +206,7 @@ export async function journeyCommand(opts: JourneyOptions): Promise<number> {
         platform,
         recoveryBudget: 3,
         onStep: onStepFor(viewport, side),
+        acceptProdQuirks: opts.acceptProdQuirks,
       });
       return cap;
     } finally {

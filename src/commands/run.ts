@@ -70,6 +70,13 @@ export interface RunOptions {
   noVisualDiff?: boolean;
   /** Named bundle of defaults. Individual flags still override the preset. */
   preset?: "smoke" | "full" | "ci";
+  /**
+   * Demote prod-side journey failures caused by known VTEX session quirks
+   * (cart empty after navigation to /checkout/#/cart) from `failed` to
+   * `skipped`, so CI green-builds aren't blocked by prod-only quirks.
+   * Real regressions on cand still fail. Issue #12.
+   */
+  acceptProdQuirks?: boolean;
 }
 
 type PresetDefaults = Partial<Pick<RunOptions,
@@ -262,6 +269,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
             learned,
             platform,
             recoveryBudget: 3,
+            acceptProdQuirks: opts.acceptProdQuirks,
           });
           allFlowCaptures.push(cap);
           for (const p of cap.pages) allPageCaptures.push(p);
