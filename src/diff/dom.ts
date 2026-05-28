@@ -23,6 +23,29 @@ export interface MetaSeo {
   jsonLdTypes: string[];
 }
 
+/** Image whose width attribute is >= this px is considered a "banner" — i.e.
+ *  the kind of image where aspect-ratio regressions matter (heroes,
+ *  category banners, full-width carousel slides). PDP product images and
+ *  shelf thumbnails fall well below this threshold and aren't compared. */
+export const BANNER_WIDTH_THRESHOLD = 600;
+
+/** Sections whose nested images are always compared regardless of width.
+ *  Captures legacy markup that doesn't declare width/height on banners. */
+const BANNER_SECTION_RE = /(carousel|slider|banner|hero)/i;
+
+export interface BannerImage {
+  /** image src (deduplicated by stripping query strings for matching) */
+  src: string;
+  /** value of the `width` HTML attribute, if present and numeric */
+  width: number | null;
+  /** value of the `height` HTML attribute, if present and numeric */
+  height: number | null;
+  /** width/height ratio, when both are known and non-zero */
+  aspectRatio: number | null;
+  /** data-section ancestor name when the image was inside a known carousel/banner section */
+  sectionName: string | null;
+}
+
 export interface DomSnapshot {
   counts: DomCounts;
   meta: MetaSeo;
@@ -32,8 +55,18 @@ export interface DomSnapshot {
     withAlt: number;
     withoutAlt: number;
     src: string[];
+    /** Subset that look like hero/banner/carousel images (issue #23). */
+    banners: BannerImage[];
   };
   decoSectionsRendered: string[];
+}
+
+function parseDim(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const trimmed = raw.replace(/px$/i, "").trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 export function snapshotDom(html: string): DomSnapshot {
@@ -88,6 +121,27 @@ export function snapshotDom(html: string): DomSnapshot {
   };
 
   const imgs = $("img");
+  const banners: BannerImage[] = [];
+  imgs.each((_, el) => {
+    const $el = $(el);
+    const widthAttr = parseDim($el.attr("width"));
+    const heightAttr = parseDim($el.attr("height"));
+    const sectionAncestor = $el
+      .parents("[data-section]")
+      .filter((_, p) => BANNER_SECTION_RE.test($(p).attr("data-section") ?? ""))
+      .first();
+    const sectionName = sectionAncestor.length > 0
+      ? sectionAncestor.attr("data-section") ?? null
+      : null;
+    const looksLikeBanner =
+      sectionName !== null || (widthAttr !== null && widthAttr >= BANNER_WIDTH_THRESHOLD);
+    if (!looksLikeBanner) return;
+    const src = $el.attr("src") ?? "";
+    if (!src) return;
+    const aspectRatio =
+      widthAttr && heightAttr && heightAttr > 0 ? widthAttr / heightAttr : null;
+    banners.push({ src, width: widthAttr, height: heightAttr, aspectRatio, sectionName });
+  });
   const imageStats = {
     total: imgs.length,
     withSrcset: imgs.filter((_, el) => Boolean($(el).attr("srcset"))).length,
@@ -97,6 +151,7 @@ export function snapshotDom(html: string): DomSnapshot {
       .map((_, el) => $(el).attr("src") ?? "")
       .get()
       .filter(Boolean),
+    banners,
   };
 
   // Deco-specific: sections may be marked with data-section or x-deco-* annotations
