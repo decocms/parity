@@ -70,6 +70,17 @@ export interface RunOptions {
   noVisualDiff?: boolean;
   /** Named bundle of defaults. Individual flags still override the preset. */
   preset?: "smoke" | "full" | "ci";
+  /**
+   * Bypass intermediary caches: append cache-busting query param + send
+   * Cache-Control/Pragma: no-cache on every navigation. Use right after a
+   * deploy to avoid false failures from stale CF edge content.
+   */
+  bypassCache?: boolean;
+  /**
+   * Before measurement, hit each target URL once with a cache-buster so the
+   * Worker serves a fresh response. Pairs with --bypass-cache after deploys.
+   */
+  warmup?: boolean;
 }
 
 type PresetDefaults = Partial<Pick<RunOptions,
@@ -236,6 +247,20 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   try {
     browser = await launchBrowser({ headless: true });
 
+    if (opts.warmup) {
+      const warmupSpinner = ora("Warmup: bustando cache em prod + cand…").start();
+      try {
+        await warmupTargets({
+          urls: [opts.prod, opts.cand],
+          viewports,
+          bypassCache: opts.bypassCache !== false,
+        });
+        warmupSpinner.succeed("Warmup ok — workers serviram resposta fresca");
+      } catch (err) {
+        warmupSpinner.warn(`Warmup parcial: ${(err as Error).message}`);
+      }
+    }
+
     for (const viewport of viewports) {
       for (const side of ["prod", "cand"] as Side[]) {
         const baseUrl = side === "prod" ? opts.prod : opts.cand;
@@ -247,6 +272,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
           harPath,
           tracesDir: paths.tracesDir,
           cohortCookieValue: "control",
+          noCache: opts.bypassCache,
         });
         await installVitalsCollector(ctx);
 
@@ -354,7 +380,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
             const baseUrl = task.side === "prod" ? opts.prod : opts.cand;
             const fullUrl = new URL(task.path, baseUrl).toString();
             try {
-              const ctx = await newContext(browser!, { viewport: task.viewport, cohortCookieValue: "control" });
+              const ctx = await newContext(browser!, { viewport: task.viewport, cohortCookieValue: "control", noCache: opts.bypassCache });
               await installVitalsCollector(ctx);
               const page = await ctx.newPage();
               try {
@@ -436,7 +462,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
             const safePath = task.path.replace(/[/?&=]+/g, "_") || "_root";
             const screenshotPath = `${paths.screenshotsDir}/visual-${safePath}-${task.viewport}-${task.side}.png`;
             try {
-              const ctx = await newContext(browser!, { viewport: task.viewport, cohortCookieValue: "control" });
+              const ctx = await newContext(browser!, { viewport: task.viewport, cohortCookieValue: "control", noCache: opts.bypassCache });
               await installVitalsCollector(ctx);
               const page = await ctx.newPage();
               try {
@@ -688,6 +714,56 @@ async function preflightCheck(prodUrl: string, candUrl: string): Promise<Preflig
   }
   spinner.succeed("Pre-flight OK");
   return { ok: true, errors: [] };
+}
+
+/**
+ * Append a unique `?_pcb=<ts>` query so CF/CDN treat the request as a unique
+ * key, forcing the origin worker to serve a fresh response. Preserves any
+ * existing query string and fragment.
+ */
+function addCacheBuster(url: string): string {
+  try {
+    const u = new URL(url);
+    u.searchParams.set("_pcb", String(Date.now()));
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Pre-flight warmup: hit each target once per viewport with a cache-buster
+ * and `Cache-Control: no-cache`. The worker is forced to render a fresh
+ * response and any device-segmented cache buckets get populated with the
+ * current deploy. Avoids the "deploy → parity sees stale" loop.
+ */
+async function warmupTargets(opts: {
+  urls: string[];
+  viewports: Viewport[];
+  bypassCache: boolean;
+}): Promise<void> {
+  const MOBILE_UA =
+    "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36";
+  const DESKTOP_UA =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+  const headers: Record<string, string> = opts.bypassCache
+    ? { "Cache-Control": "no-cache", "Pragma": "no-cache" }
+    : {};
+  const jobs: Array<Promise<unknown>> = [];
+  for (const url of opts.urls) {
+    for (const viewport of opts.viewports) {
+      const ua = viewport === "mobile" ? MOBILE_UA : DESKTOP_UA;
+      const target = addCacheBuster(url);
+      jobs.push(
+        fetch(target, {
+          method: "GET",
+          redirect: "follow",
+          headers: { ...headers, "User-Agent": ua },
+        }).catch(() => undefined),
+      );
+    }
+  }
+  await Promise.all(jobs);
 }
 
 async function fetchHomeHtml(url: string): Promise<string | null> {

@@ -48,6 +48,16 @@ program
   .option("--vitals-pages <n>", "Extra pages from sitemap to crawl for Vitals coverage (default 10)", (v) => Number(v), 10)
   .option("--visual-pages <n>", "Pages to compare visually via LLM (home + sampled PLPs/PDPs from sitemap, default 5)", (v) => Number(v), 5)
   .option("--no-visual-diff", "Skip the visual diff capture pass entirely")
+  .option(
+    "--bypass-cache",
+    "Bypass CDN/edge caches: append a cache-busting query param and send Cache-Control: no-cache on every request. Use right after a deploy to avoid false failures from stale CF edge content.",
+    false,
+  )
+  .option(
+    "--warmup",
+    "Before measurement, hit each target URL once (per viewport) with a cache-buster so the Worker serves a fresh response. Recommended after deploys.",
+    false,
+  )
   .action(async (opts) => {
     const code = await runCommand(opts);
     process.exit(code);

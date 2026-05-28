@@ -50,6 +50,12 @@ export interface ContextOptions {
   tracesDir?: string;
   /** Force cohort/A-B cookies to a stable bucket */
   cohortCookieValue?: string;
+  /**
+   * Send `Cache-Control: no-cache` + `Pragma: no-cache` on every navigation
+   * to bypass intermediary caches (CF edge, CDN). Used by `--no-cache` to
+   * avoid false failures from stale edge content right after a deploy.
+   */
+  noCache?: boolean;
 }
 
 export async function newContext(browser: Browser, opts: ContextOptions): Promise<BrowserContext> {
@@ -59,6 +65,9 @@ export async function newContext(browser: Browser, opts: ContextOptions): Promis
     recordHar: opts.harPath ? { path: opts.harPath, mode: "minimal" } : undefined,
     bypassCSP: true,
     ignoreHTTPSErrors: true,
+    extraHTTPHeaders: opts.noCache
+      ? { "Cache-Control": "no-cache", "Pragma": "no-cache" }
+      : undefined,
   });
 
   // Disable animations on every page in this context
