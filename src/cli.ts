@@ -12,6 +12,7 @@ import { listCommand } from "./commands/list.ts";
 import { promptCommand } from "./commands/prompt.ts";
 import { reportCommand } from "./commands/report.ts";
 import { runCommand } from "./commands/run.ts";
+import { sectionCommand } from "./commands/section.ts";
 import { serveCommand } from "./commands/serve.ts";
 
 const program = new Command();
@@ -276,6 +277,38 @@ program
   .option("--json", "Emit one-line JSON instead of pretty text", false)
   .action(async (opts) => {
     process.exit(await htmlCommand(opts));
+  });
+
+program
+  .command("section")
+  .description(
+    "Focused prod×cand comparison of one section: HTML diff + screenshot + computed-styles diff. No flags = all 3 facets. Designed for the 'in DOM but invisible' debug loop (issue #31).",
+  )
+  .requiredOption("--prod <url>", "Production URL (base, e.g. https://www.example.com)")
+  .requiredOption("--cand <url>", "Candidate URL (base, e.g. https://example.deco-cx.workers.dev)")
+  .requiredOption("--selector <sel>", "CSS selector for the section to compare")
+  .option("--output-html", "Include the HTML diff facet (default: on if no facet flag passed)", false)
+  .option("--screenshot", "Include the screenshot facet (locator screenshot per side)", false)
+  .option("--computed-styles", "Include the computed-styles diff facet", false)
+  .option("--viewport <viewport>", "mobile | desktop | tablet", "mobile")
+  .option("--wait <ms>", "Extra ms after networkidle so hydration settles", "2000")
+  .option("--out-dir <dir>", "Where to write the screenshots", "./parity-output/sections")
+  .option("--json", "Emit one-line JSON instead of pretty text", false)
+  .action(async (opts) => {
+    process.exit(
+      await sectionCommand({
+        prod: opts.prod,
+        cand: opts.cand,
+        selector: opts.selector,
+        outputHtml: opts.outputHtml,
+        screenshot: opts.screenshot,
+        computedStyles: opts.computedStyles,
+        viewport: opts.viewport,
+        wait: opts.wait,
+        outDir: opts.outDir,
+        json: opts.json,
+      }),
+    );
   });
 
 program
