@@ -70,6 +70,7 @@ Individual flags always override the preset.
 | `parity baseline`  | Manage baselines (`set`, `list`, `unset`)                                     |
 | `parity list`      | List saved runs                                                               |
 | `parity check`     | Run a single check (`<name>`) — skips sitemap + LLM aggregation; sub-10s loop |
+| `parity console`   | Sub-10s capture of console errors/warnings + network failures for one URL     |
 | `parity section`   | Focused prod×cand diff of a section: HTML + screenshot + computed styles      |
 | `parity prompt`    | Export issues as a Markdown prompt for any LLM                                |
 | `parity explain`   | LLM deep-dive on a specific issue (needs `ANTHROPIC_API_KEY`)                 |
