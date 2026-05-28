@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { baselineList, baselineSet, baselineUnset } from "./commands/baseline.ts";
+import { auditCommand } from "./commands/audit.ts";
 import { cacheCommand } from "./commands/cache.ts";
 import { checkCommand } from "./commands/check.ts";
 import { compareCommand } from "./commands/compare.ts";
@@ -70,6 +71,26 @@ program
   .action(async (opts) => {
     const code = await runCommand(opts);
     process.exit(code);
+  });
+
+program
+  .command("audit")
+  .description(
+    "Single-site absolute audit. Runs console + vitals + network + images + SEO checks on ONE URL (no prod×cand comparison) and outputs a focused HTML report. Use for pre-launch or post-deploy 'what's broken right now' verification.",
+  )
+  .requiredOption("--url <url>", "Base URL (e.g. https://miess-tanstack.deco-cx.workers.dev)")
+  .option("--viewport <viewport>", "mobile | desktop | tablet", "mobile")
+  .option("--pages <list>", "Comma-separated paths to audit (default: /)", "/")
+  .option("--output <dir>", "Output directory", "./parity-output")
+  .option("--open", "Open the HTML report after the run completes", false)
+  .option("--json", "Emit one-line JSON instead of pretty text", false)
+  .option(
+    "--fail-on <severities>",
+    "Comma-separated severities that cause exit 1 (default: critical,high)",
+    "critical,high",
+  )
+  .action(async (opts) => {
+    process.exit(await auditCommand(opts));
   });
 
 program
