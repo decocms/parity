@@ -40,14 +40,14 @@ export interface CssTraceOptions {
   json?: boolean;
 }
 
-interface CssProperty {
+export interface CssProperty {
   name: string;
   value: string;
   important: boolean;
   disabled?: boolean;
 }
 
-interface MatchedRule {
+export interface MatchedRule {
   /** "user-agent" | "inline" | "<stylesheet URL>" */
   source: string;
   /** Selector that matched (the specific one inside selectorList). */
@@ -68,7 +68,7 @@ interface MatchedRule {
   inheritedFromDistance?: number;
 }
 
-interface TraceResult {
+export interface TraceResult {
   url: string;
   selector: string;
   found: boolean;
@@ -78,7 +78,7 @@ interface TraceResult {
   rules: MatchedRule[];
 }
 
-async function tracePage(
+export async function tracePage(
   page: Page,
   url: string,
   selector: string,
