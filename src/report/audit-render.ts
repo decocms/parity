@@ -1,6 +1,7 @@
 import type { AuditResult, PageAuditResult } from "../audit/index.ts";
 import type { Issue } from "../types/schema.ts";
 import { REPORT_CSS, REPORT_JS } from "./html-template.ts";
+import { escapeHtml as htmlEscape, renderIssueHtml } from "./issue-html.ts";
 
 /**
  * Render a focused single-site audit report. Reuses `REPORT_CSS` /
@@ -155,28 +156,15 @@ function renderIssuesBySeverity(issues: Issue[]): string {
   return sections.join("");
 }
 
+/**
+ * Render a single issue card. Delegates to the shared `renderIssueHtml`
+ * helper in `src/report/issue-html.ts` — same function the comparative
+ * report uses. We pass no `runDir` because audit doesn't produce
+ * screenshot evidence files (the shared helper silently skips the
+ * evidence block when runDir is absent).
+ */
 function renderIssue(issue: Issue): string {
-  const pageLabel = issue.page ? humanKey(issue.page) : "";
-  const details = issue.details ?? "";
-  const detailsAutoOpen = details.length < 400;
-  return `
-  <div class="issue sev-${issue.severity}">
-    <div class="issue-tags">
-      <span class="tag sev-${issue.severity}">${htmlEscape(issue.severity)}</span>
-      <span class="tag">${htmlEscape(issue.category)}</span>
-      <span class="tag tag-mono">${htmlEscape(issue.check)}</span>
-      ${pageLabel ? `<span class="tag tag-page">${htmlEscape(pageLabel)}</span>` : ""}
-    </div>
-    <h3>${htmlEscape(issue.summary)}</h3>
-    ${
-      details
-        ? `<details class="issue-section" ${detailsAutoOpen ? "open" : ""}>
-        <summary><span class="section-label">Detalhes</span></summary>
-        <pre class="details">${htmlEscape(details)}</pre>
-      </details>`
-        : ""
-    }
-  </div>`;
+  return renderIssueHtml(issue);
 }
 
 function renderPagesTable(pages: PageAuditResult[]): string {
@@ -214,26 +202,6 @@ function renderPagesTable(pages: PageAuditResult[]): string {
         .join("")}
     </tbody>
   </table>`;
-}
-
-// Renamed from `escape` because that's a deprecated global in browser JS
-// runtimes and biome flags shadowing it.
-function htmlEscape(s: string | number | null | undefined): string {
-  if (s == null) return "";
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function humanKey(key: string): string {
-  const parts = key.split("::");
-  const path = parts[0] ?? key;
-  const viewport = parts[1] ?? "";
-  const niceName = path === "/" || path === "" ? "Home" : path;
-  return viewport ? `${niceName} · ${viewport}` : niceName;
 }
 
 function hostnameOf(url: string): string {

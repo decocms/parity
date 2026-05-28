@@ -1,4 +1,5 @@
 import type { Issue, WebVitals } from "../types/schema.ts";
+import type { VitalMetric } from "../types/vitals.ts";
 import { VITAL_LABELS, VITAL_THRESHOLDS, classifyVital, formatVital } from "./thresholds.ts";
 
 /**
@@ -17,7 +18,7 @@ import { VITAL_LABELS, VITAL_THRESHOLDS, classifyVital, formatVital } from "./th
  */
 export function auditVitals(pageKey: string, vitals: WebVitals): Issue[] {
   const out: Issue[] = [];
-  const metrics: Array<keyof typeof VITAL_THRESHOLDS> = ["lcp", "fcp", "cls", "inp", "ttfb"];
+  const metrics: Array<VitalMetric> = ["lcp", "fcp", "cls", "inp", "ttfb"];
   for (const metric of metrics) {
     const v = vitals[metric];
     if (v === null || v === undefined) continue;
@@ -40,7 +41,7 @@ export function auditVitals(pageKey: string, vitals: WebVitals): Issue[] {
 }
 
 function detailsFor(
-  metric: keyof typeof VITAL_THRESHOLDS,
+  metric: VitalMetric,
   value: number,
   label: "good" | "needs-improvement" | "poor" | "critical",
 ): string {
@@ -58,7 +59,7 @@ function detailsFor(
   return lines.join("\n");
 }
 
-const HINTS: Record<keyof typeof VITAL_THRESHOLDS, string> = {
+const HINTS: Record<VitalMetric, string> = {
   lcp:
     "Causas comuns: hero image grande sem priority/preload, fontes web carregando lentas, " +
     "JS bloqueando o main thread. Ações: priority+preload no hero image, font-display: swap, " +
