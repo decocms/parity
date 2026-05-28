@@ -13,8 +13,33 @@ import type {
   Viewport,
 } from "../types/schema.ts";
 import { capturePage } from "./collect.ts";
+import { stabilizeCarousels } from "./carousel-stabilizer.ts";
 import { selectorsFor } from "./selectors.ts";
 import type { SelectorKey } from "./selectors.ts";
+
+/**
+ * Stabilize any carousel/slider on the page and then take a screenshot.
+ * All step screenshots in the journey go through this so that prod and
+ * cand frames match at compare-time (issue #22).
+ *
+ * The stabilizer is raced against a 3s cap — if the page's JS queue is
+ * wedged we'd rather snap a possibly-mis-framed shot than burn the
+ * step's budget here. Cubic flagged the unbounded await on PR #32.
+ * Errors are swallowed for the same reason: a screenshot missing is
+ * worse than a screenshot mis-timed.
+ */
+async function screenshotStable(
+  page: Page,
+  opts: { path: string; fullPage?: boolean },
+): Promise<void> {
+  await Promise.race([
+    stabilizeCarousels(page).catch(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
+  ]);
+  await page
+    .screenshot({ path: opts.path, fullPage: opts.fullPage ?? false })
+    .catch(() => undefined);
+}
 
 export type StepProgressEvent =
   | { phase: "start"; name: string; index: number; total: number }
@@ -489,7 +514,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     const t4 = Date.now();
     const beforeUrl4 = page.url();
     const spBefore4 = screenshotPath(ctx, "pj-4-select-variant-before");
-    await page.screenshot({ path: spBefore4, fullPage: false }).catch(() => undefined);
+    await screenshotStable(page, { path: spBefore4, fullPage: false });
     const variantResult = await selectVariant(page, ctx);
     let variantLlmAction: StepActionResult | null = null;
     // LLM fallback ONLY when the page explicitly demands a variant choice
@@ -508,7 +533,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       });
     }
     const sp4 = screenshotPath(ctx, "pj-4-select-variant");
-    await page.screenshot({ path: sp4, fullPage: false }).catch(() => undefined);
+    await screenshotStable(page, { path: sp4, fullPage: false });
     if (variantResult.actions.length > 0 || variantLlmAction?.performed) {
       const llmDesc = variantLlmAction?.performed
         ? `Recovery LLM: ${variantLlmAction.action} em \`${variantLlmAction.selector}\``
@@ -575,10 +600,10 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       const t5 = Date.now();
       const beforeUrl5 = page.url();
       const spBefore5 = screenshotPath(ctx, "pj-5-shipping-pdp-before");
-      await page.screenshot({ path: spBefore5, fullPage: false }).catch(() => undefined);
+      await screenshotStable(page, { path: spBefore5, fullPage: false });
       const ok = await fillCep(page, cepInputPdp, ctx.rc.cep);
       const sp = screenshotPath(ctx, "pj-5-shipping-pdp");
-      await page.screenshot({ path: sp, fullPage: false }).catch(() => undefined);
+      await screenshotStable(page, { path: sp, fullPage: false });
       const step5Status: StepCapture["status"] = ok ? "ok" : "failed";
       steps.push({
         step: 5,
@@ -623,7 +648,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     const t6 = Date.now();
     const beforeUrl6 = page.url();
     const spBefore6 = screenshotPath(ctx, "pj-6-add-cart-before");
-    await page.screenshot({ path: spBefore6, fullPage: false }).catch(() => undefined);
+    await screenshotStable(page, { path: spBefore6, fullPage: false });
     const cartCountBefore = await readCartCount(page, ctx);
     const buyText = await buyHit.locator.innerText().catch(() => "");
     await buyHit.locator.click({ timeout: 5_000 }).catch(() => undefined);
@@ -665,7 +690,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     }
 
     const sp6 = screenshotPath(ctx, "pj-6-add-cart");
-    await page.screenshot({ path: sp6, fullPage: false }).catch(() => undefined);
+    await screenshotStable(page, { path: sp6, fullPage: false });
     const buyActionDesc = `Clicou no botão${buyText ? ` '${buyText.slice(0, 40).trim()}'` : ""} (\`${buyHit.selector}\`)${buyRecovered ? " — selector veio de recovery LLM" : ""}`;
     const fullActionDesc = variantRetryNote
       ? `${buyActionDesc} — ${variantRetryNote} — ${validation.note}`
@@ -702,7 +727,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     const t7 = Date.now();
     const beforeUrl7 = page.url();
     const spBefore7 = screenshotPath(ctx, "pj-7-minicart-before");
-    await page.screenshot({ path: spBefore7, fullPage: false }).catch(() => undefined);
+    await screenshotStable(page, { path: spBefore7, fullPage: false });
     let miniHit = await firstVisibleLocator(page, selFor(ctx, "minicartTrigger"));
     let miniRecovered = false;
     if (!miniHit && budget.remaining > 0) {
@@ -767,7 +792,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       dlog(ctx, `step 7 open-minicart: validation → found=${v.found} (${v.method})${reasonText ? ` — ${reasonText.slice(0, 80)}` : ""}`);
     }
     const sp7 = screenshotPath(ctx, "pj-7-minicart");
-    await page.screenshot({ path: sp7, fullPage: false }).catch(() => undefined);
+    await screenshotStable(page, { path: sp7, fullPage: false });
     // #12 — prod-side cart-empty quirk. We mark step 7 (and the downstream
     // cart-dependent steps 8 + 9) as `skipped` instead of `failed` ONLY
     // when --accept-prod-quirks is set AND this is the prod side AND the
@@ -870,10 +895,10 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       const t8 = Date.now();
       const beforeUrl8 = page.url();
       const spBefore8 = screenshotPath(ctx, "pj-8-shipping-cart-before");
-      await page.screenshot({ path: spBefore8, fullPage: false }).catch(() => undefined);
+      await screenshotStable(page, { path: spBefore8, fullPage: false });
       const ok = await fillCep(page, cepInputCart, ctx.rc.cep);
       const sp8 = screenshotPath(ctx, "pj-8-shipping-cart");
-      await page.screenshot({ path: sp8, fullPage: false }).catch(() => undefined);
+      await screenshotStable(page, { path: sp8, fullPage: false });
       const step8Status: StepCapture["status"] = ok ? "ok" : "failed";
       steps.push({
         step: 8,
@@ -920,7 +945,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         };
       }
       const sp9early = screenshotPath(ctx, "pj-9-checkout-reached");
-      await page.screenshot({ path: sp9early, fullPage: false }).catch(() => undefined);
+      await screenshotStable(page, { path: sp9early, fullPage: false });
       const earlyStatus: StepCapture["status"] =
         step9EarlyValidation && !step9EarlyValidation.found ? "failed" : "ok";
       steps.push({
@@ -961,7 +986,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       return { pages, steps };
     }
     const spBefore9 = screenshotPath(ctx, "pj-9-checkout-before");
-    await page.screenshot({ path: spBefore9, fullPage: false }).catch(() => undefined);
+    await screenshotStable(page, { path: spBefore9, fullPage: false });
     // Click + URL race, with up to 2 LLM-recovery retries when the click
     // misses (selector matched a wrong button — common when discovery
     // confused the cart icon for the checkout button).
@@ -1014,7 +1039,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       };
     }
     const sp9 = screenshotPath(ctx, "pj-9-checkout-reached");
-    await page.screenshot({ path: sp9, fullPage: false }).catch(() => undefined);
+    await screenshotStable(page, { path: sp9, fullPage: false });
     const step9Status: StepCapture["status"] =
       !reachedCheckout ? "failed" : step9Validation && !step9Validation.found ? "failed" : "ok";
     steps.push({

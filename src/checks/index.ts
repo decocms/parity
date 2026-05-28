@@ -16,6 +16,7 @@ import { purchaseJourneyFlow } from "./purchase-journey-flow.ts";
 import { networkSummaryDelta } from "./network-summary.ts";
 import { webVitalsMobile } from "./web-vitals.ts";
 import { imageLoadingHealth } from "./image-health.ts";
+import { bannerAspectRatio } from "./banner-aspect-ratio.ts";
 import { cartRevealModeDivergence } from "./cart-reveal-mode.ts";
 import { lazySectionPresence } from "./lazy-sections.ts";
 import { cacheCoverage } from "./cache-coverage.ts";
@@ -50,6 +51,7 @@ export const ALL_CHECKS: Check[] = [
   networkSummaryDelta,
   webVitalsMobile,
   imageLoadingHealth,
+  bannerAspectRatio,
   cartRevealModeDivergence,
   lazySectionPresence,
   seoDeepAudit,
