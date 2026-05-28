@@ -35,9 +35,17 @@ on:
       - "package.json"
   workflow_dispatch:
 
+# Workflow-level permissions intentionally MINIMAL. The publish job
+# below declares the exact permissions it needs (`contents: write` for
+# the GitHub release / tag, `id-token: write` for the npm OIDC token).
+# Keeping `id-token` declared at the job level (not workflow level) is
+# what every other decocms package that successfully publishes via
+# OIDC does (e.g. `decocms/deco-start/.github/workflows/release.yml`),
+# and it scopes the OIDC token's lifetime + visibility exactly to the
+# step that consumes it — npm's trusted-publisher matcher has been
+# observed to be sensitive to that scoping in transition cases.
 permissions:
-  contents: write   # for creating tags + releases
-  id-token: write   # for npm OIDC / provenance
+  contents: read
 
 jobs:
   publish:
@@ -48,6 +56,9 @@ jobs:
     # version lives there. The `paths` filter only constrains `push`
     # triggers — explicit ref check is needed for dispatch.
     if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write   # for creating tags + releases
+      id-token: write   # for npm OIDC / provenance
     steps:
       - uses: actions/checkout@v4
         with:
@@ -61,7 +72,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Match `decocms/deco-start/.github/workflows/release.yml` (Node
+          # 22), the sibling decocms package that publishes successfully
+          # via OIDC. Node 20 ships an older npm; aligning Node version
+          # eliminates one variable when diagnosing OIDC handshake failures.
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
       - name: Check if package.json version is already published
