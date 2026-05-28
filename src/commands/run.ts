@@ -4,7 +4,7 @@ import ora from "ora";
 import type { Browser } from "playwright";
 import { runAllChecks } from "../checks/index.ts";
 import type { CheckContext } from "../checks/index.ts";
-import { launchBrowser, newContext, stopTracing } from "../engine/browser.ts";
+import { launchBrowser, newContext, stopTracing, userAgentFor } from "../engine/browser.ts";
 import { capturePage, installVitalsCollector } from "../engine/collect.ts";
 import { runFlow } from "../engine/flows.ts";
 import { discoverPagesFromSitemap } from "../engine/sitemap-discover.ts";
@@ -171,8 +171,11 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   rc.cep = opts.cep || rc.cep;
   const ignore = loadParityIgnore();
 
-  // Pre-flight: confirm both URLs respond before spending 10 minutes on a doomed run
-  const preflight = await preflightCheck(opts.prod, opts.cand);
+  // Pre-flight: confirm both URLs respond before spending 10 minutes on a
+  // doomed run. We send the UA of the first viewport so the warm-up hits the
+  // same device-segmented cache bucket the measurement loop will read from.
+  const primaryViewport = viewports[0] ?? "mobile";
+  const preflight = await preflightCheck(opts.prod, opts.cand, primaryViewport);
   if (!preflight.ok) {
     console.error(chalk.red("\n  ✖ pre-flight falhou:"));
     for (const err of preflight.errors) console.error(chalk.red(`    - ${err}`));
@@ -184,7 +187,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   const learned = loadLearned();
   const learnedBefore = JSON.stringify(learned);
   let platform: Platform = "custom";
-  const prodHomeHtml = await fetchHomeHtml(opts.prod);
+  const prodHomeHtml = await fetchHomeHtml(opts.prod, primaryViewport);
   if (prodHomeHtml) {
     platform = detectPlatform({ url: opts.prod, html: prodHomeHtml });
     if (platform !== "custom") {
@@ -200,7 +203,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   if (wantsAutoSelectors) {
     const discoverSpinner = ora("Descobrindo seletores via LLM (analisando home prod)…").start();
     try {
-      const html = prodHomeHtml ?? (await fetchHomeHtml(opts.prod));
+      const html = prodHomeHtml ?? (await fetchHomeHtml(opts.prod, primaryViewport));
       if (html) {
         const discovered = await discoverSelectorsFromUrl(opts.prod, html, {
           noCache: opts.refreshSelectors === true,
@@ -685,9 +688,14 @@ interface PreflightResult {
  * Ping prod and cand before the heavy capture phase. Catches typos, dead URLs,
  * and obvious 5xx so we fail fast (3 seconds) instead of 10 minutes in.
  */
-async function preflightCheck(prodUrl: string, candUrl: string): Promise<PreflightResult> {
+async function preflightCheck(
+  prodUrl: string,
+  candUrl: string,
+  viewport: Viewport,
+): Promise<PreflightResult> {
   const spinner = ora("Pre-flight: verificando URLs…").start();
   const errors: string[] = [];
+  const ua = userAgentFor(viewport);
 
   async function probe(label: string, url: string): Promise<void> {
     try {
@@ -704,8 +712,7 @@ async function preflightCheck(prodUrl: string, candUrl: string): Promise<Preflig
         redirect: "follow",
         signal: controller.signal,
         headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+          "User-Agent": ua,
         },
       });
       if (res.status >= 500) errors.push(`${label}: HTTP ${res.status} ${res.statusText} (${url})`);
@@ -761,10 +768,6 @@ async function warmupTargets(opts: {
   viewports: Viewport[];
   bypassCache: boolean;
 }): Promise<WarmupResult> {
-  const MOBILE_UA =
-    "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36";
-  const DESKTOP_UA =
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
   const headers: Record<string, string> = opts.bypassCache
     ? { "Cache-Control": "no-cache", "Pragma": "no-cache" }
     : {};
@@ -772,7 +775,10 @@ async function warmupTargets(opts: {
   const jobs: Array<Promise<Outcome>> = [];
   for (const url of opts.urls) {
     for (const viewport of opts.viewports) {
-      const ua = viewport === "mobile" ? MOBILE_UA : DESKTOP_UA;
+      // Use the same per-viewport UA the browser will send (issue #25),
+      // so the warmup populates the device-segmented cache bucket the
+      // measurement loop will actually read from.
+      const ua = userAgentFor(viewport);
       const target = addCacheBuster(url);
       jobs.push(
         fetch(target, {
@@ -802,12 +808,11 @@ async function warmupTargets(opts: {
   return { attempted: results.length, succeeded, failed };
 }
 
-async function fetchHomeHtml(url: string): Promise<string | null> {
+async function fetchHomeHtml(url: string, viewport: Viewport = "desktop"): Promise<string | null> {
   try {
     const res = await fetch(url, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "User-Agent": userAgentFor(viewport),
         "Accept": "text/html,application/xhtml+xml",
         "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
       },

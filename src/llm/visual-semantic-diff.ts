@@ -127,6 +127,12 @@ export interface VisualDiffInput {
   candSections?: string[];
   /** Sections present only in prod (missing in cand) — flagged as priority context. */
   sectionsOnlyInProd?: string[];
+  /**
+   * Both sides expose a carousel/slider in their section list. When true, the
+   * LLM should ignore hero-region content differences that look like
+   * "different active slide" — they're timing noise (issue #22).
+   */
+  bothHaveCarousel?: boolean;
 }
 
 function buildContextBlock(input: VisualDiffInput): string {
@@ -138,6 +144,12 @@ function buildContextBlock(input: VisualDiffInput): string {
       ...input.sectionsOnlyInProd.map((s) => `- ${s}`),
       "",
       "Verifique visualmente se essas sections aparecem na 2ª imagem. Se ausentes, reporte como missing-component com severity high ou critical.",
+    );
+  }
+  if (input.bothHaveCarousel) {
+    lines.push(
+      "",
+      "**Ambos os lados expõem um carousel/slider no DOM.** Diferenças no conteúdo do hero (banner diferente, texto diferente, imagem diferente) provavelmente são apenas slides diferentes do mesmo carousel capturados em momentos distintos. NÃO reporte essas diferenças como critical/high. Se o carousel inteiro sumir, ou o layout do hero quebrar, isso sim reporte normalmente.",
     );
   }
   if (input.prodSections && input.prodSections.length > 0) {

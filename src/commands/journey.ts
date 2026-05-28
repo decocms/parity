@@ -3,7 +3,7 @@ import { join } from "node:path";
 import chalk from "chalk";
 import ora from "ora";
 import type { Browser } from "playwright";
-import { launchBrowser, newContext, stopTracing } from "../engine/browser.ts";
+import { launchBrowser, newContext, stopTracing, userAgentFor } from "../engine/browser.ts";
 import { installVitalsCollector } from "../engine/collect.ts";
 import { runFlow, type StepProgressEvent } from "../engine/flows.ts";
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
@@ -112,7 +112,7 @@ export async function journeyCommand(opts: JourneyOptions): Promise<number> {
   let platform: Platform = "custom";
   try {
     const homeRes = await fetch(opts.prod, {
-      headers: { "User-Agent": "Mozilla/5.0 parity-cli" },
+      headers: { "User-Agent": userAgentFor(viewports[0] ?? "mobile") },
     });
     if (homeRes.ok) {
       const html = await homeRes.text();
