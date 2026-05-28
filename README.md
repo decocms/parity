@@ -69,6 +69,7 @@ Individual flags always override the preset.
 | `parity compare`   | Compare a run against a baseline                                              |
 | `parity baseline`  | Manage baselines (`set`, `list`, `unset`)                                     |
 | `parity list`      | List saved runs                                                               |
+| `parity section`   | Focused prod×cand diff of a section: HTML + screenshot + computed styles      |
 | `parity prompt`    | Export issues as a Markdown prompt for any LLM                                |
 | `parity explain`   | LLM deep-dive on a specific issue (needs `ANTHROPIC_API_KEY`)                 |
 | `parity learned`   | Inspect the learned-selectors library                                         |

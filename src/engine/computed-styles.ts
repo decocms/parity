@@ -102,27 +102,53 @@ export async function readComputedStyles(
     .isVisible({ timeout: 1_000 })
     .catch(() => false));
 
-  const got = await page.evaluate(
-    ({ sel, keys }) => {
-      const el = document.querySelector(sel);
-      if (!el || !(el instanceof HTMLElement)) {
-        return { ok: false as const };
-      }
-      const cs = window.getComputedStyle(el);
-      const out: Record<string, string> = {};
-      for (const k of keys) out[k] = cs.getPropertyValue(k) || "";
-      const r = el.getBoundingClientRect();
-      return {
-        ok: true as const,
-        styles: out,
-        rect: { x: r.x, y: r.y, width: r.width, height: r.height },
-      };
-    },
-    { sel: selector, keys },
-  );
+  // Cubic flagged that Playwright's `locator()` accepts engines that
+  // `document.querySelector` doesn't (e.g. `text=...`, `:visible`,
+  // `xpath=...`). For those, `locator().count()` would succeed AND THEN
+  // the eval below would throw a raw SYNTAX_ERR — violating the documented
+  // "never throw, always return {found:false}" contract.
+  //
+  // The fix: wrap the page.evaluate in try/catch and degrade to a
+  // structured error. The diagnostic message names the selector so the
+  // user knows why the read failed even though the locator matched.
+  let got: { ok: true; styles: Record<string, string>; rect: { x: number; y: number; width: number; height: number } } | { ok: false; reason: string };
+  try {
+    got = await page.evaluate(
+      ({ sel, keys }) => {
+        try {
+          const el = document.querySelector(sel);
+          if (!el || !(el instanceof HTMLElement)) {
+            return { ok: false as const, reason: "querySelector retornou null ou non-HTMLElement" };
+          }
+          const cs = window.getComputedStyle(el);
+          const out: Record<string, string> = {};
+          for (const k of keys) out[k] = cs.getPropertyValue(k) || "";
+          const r = el.getBoundingClientRect();
+          return {
+            ok: true as const,
+            styles: out,
+            rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+          };
+        } catch (err) {
+          // querySelector throws on selectors valid in Playwright (e.g.
+          // `text=...`) but invalid in CSS. Convert to structured error.
+          return {
+            ok: false as const,
+            reason: `document.querySelector inválido em '${sel}': ${(err as Error).message ?? "syntax error"}`,
+          };
+        }
+      },
+      { sel: selector, keys },
+    );
+  } catch (err) {
+    return {
+      found: false,
+      error: `falha no page.evaluate de '${selector}': ${(err as Error).message ?? "unknown"}. Se o seletor usa sintaxe Playwright-only (text=..., :visible, xpath=...), use um seletor CSS puro.`,
+    };
+  }
 
   if (!got.ok) {
-    return { found: false, error: `seletor '${selector}' não casou após o eval (DOM mudou)` };
+    return { found: false, error: got.reason };
   }
   return { found: true, styles: got.styles, rect: got.rect, hiddenByPlaywright };
 }

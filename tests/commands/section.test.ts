@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hashSelector, parseViewport } from "../../src/commands/section.ts";
+import { hashSelector, parseViewport, type SideData, verdict } from "../../src/commands/section.ts";
 import { SECTION_STYLE_KEYS } from "../../src/engine/computed-styles.ts";
 
 describe("parseViewport (section)", () => {
@@ -28,6 +28,63 @@ describe("hashSelector", () => {
     const a = hashSelector("#a");
     const b = hashSelector("#b");
     expect(a).not.toBe(b);
+  });
+});
+
+describe("verdict() — cubic #2 fix", () => {
+  function makeSide(over: Partial<SideData>): SideData {
+    return { html: null, styles: null, screenshotTaken: false, ...over };
+  }
+  const stylesObj = Object.fromEntries(SECTION_STYLE_KEYS.map((k) => [k, "0px"]));
+
+  it("retorna 0 quando html, styles, hidden e rect coincidem", () => {
+    const styles = {
+      found: true as const,
+      styles: stylesObj,
+      rect: { x: 0, y: 0, width: 100, height: 50 },
+      hiddenByPlaywright: false,
+    };
+    const p = makeSide({ html: "<h>x</h>", styles });
+    const c = makeSide({ html: "<h>x</h>", styles: { ...styles } });
+    expect(verdict(p, c)).toBe(0);
+  });
+
+  it("retorna 1 quando boundingRect.width difere (cubic #2 — antes retornava 0)", () => {
+    const prodStyles = {
+      found: true as const,
+      styles: stylesObj,
+      rect: { x: 0, y: 0, width: 100, height: 50 },
+      hiddenByPlaywright: false,
+    };
+    const candStyles = {
+      ...prodStyles,
+      rect: { x: 0, y: 0, width: 300, height: 50 },
+    };
+    const p = makeSide({ html: "<h>x</h>", styles: prodStyles });
+    const c = makeSide({ html: "<h>x</h>", styles: candStyles });
+    expect(verdict(p, c)).toBe(1);
+  });
+
+  it("retorna 1 quando boundingRect.height difere", () => {
+    const prodStyles = {
+      found: true as const,
+      styles: stylesObj,
+      rect: { x: 0, y: 0, width: 100, height: 50 },
+      hiddenByPlaywright: false,
+    };
+    const candStyles = {
+      ...prodStyles,
+      rect: { x: 0, y: 0, width: 100, height: 300 },
+    };
+    const p = makeSide({ html: "<h>x</h>", styles: prodStyles });
+    const c = makeSide({ html: "<h>x</h>", styles: candStyles });
+    expect(verdict(p, c)).toBe(1);
+  });
+
+  it("retorna 1 quando um lado tem htmlError", () => {
+    const p = makeSide({ htmlError: "selector não casou" });
+    const c = makeSide({ html: "<h>x</h>" });
+    expect(verdict(p, c)).toBe(1);
   });
 });
 

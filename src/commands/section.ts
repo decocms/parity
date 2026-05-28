@@ -131,7 +131,7 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
   }
 }
 
-interface SideData {
+export interface SideData {
   html: string | null;
   htmlError?: string;
   styles: ComputedStylesResult | ComputedStylesNotFound | null;
@@ -252,9 +252,13 @@ export function hashSelector(selector: string): string {
   return (h >>> 0).toString(16).padStart(8, "0").slice(0, 8);
 }
 
-function verdict(prod: SideData, cand: SideData): number {
-  // Exit 1 when prod and cand disagree on HTML (after pretty) or on a
-  // computed style — otherwise 0. Useful for `parity section ... && deploy`.
+export function verdict(prod: SideData, cand: SideData): number {
+  // Exit 1 when prod and cand disagree on ANYTHING the pretty output
+  // surfaces — HTML, styles, hidden status, OR bounding rect. Cubic
+  // flagged that the previous verdict missed boundingRect even though
+  // `printStylesDiff` prints it as a row: a section that grew by 200px
+  // would show in the human output but a CI script reading the exit
+  // code would still see 0. Now consistent.
   if (prod.htmlError || cand.htmlError) return 1;
   if (prod.styles && "found" in prod.styles && cand.styles && "found" in cand.styles) {
     if (prod.styles.found && cand.styles.found) {
@@ -262,6 +266,11 @@ function verdict(prod: SideData, cand: SideData): number {
         if (prod.styles.styles[k] !== cand.styles.styles[k]) return 1;
       }
       if (prod.styles.hiddenByPlaywright !== cand.styles.hiddenByPlaywright) return 1;
+      // Bounding-rect dimensions: same predicate `printStylesDiff` uses
+      // to decide whether to surface the (boundingRect) row.
+      const pr = prod.styles.rect;
+      const cr = cand.styles.rect;
+      if (pr && cr && (pr.width !== cr.width || pr.height !== cr.height)) return 1;
     } else if (prod.styles.found !== cand.styles.found) {
       return 1;
     }
