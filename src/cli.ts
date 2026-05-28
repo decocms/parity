@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { baselineList, baselineSet, baselineUnset } from "./commands/baseline.ts";
 import { cacheCommand } from "./commands/cache.ts";
+import { checkCommand } from "./commands/check.ts";
 import { compareCommand } from "./commands/compare.ts";
 import { consoleCommand } from "./commands/console.ts";
 import { cssTraceCommand } from "./commands/css-trace.ts";
@@ -275,6 +276,30 @@ program
   .option("--json", "Emit one-line JSON instead of human-readable text", false)
   .action(async (opts) => {
     process.exit(await consoleCommand(opts));
+  });
+
+program
+  .command("check")
+  .argument("<name>", "check name (kebab-case, e.g. console-errors-baseline)")
+  .description(
+    "Run a single check against a prod×cand pair on one page. Skips sitemap discovery, the other 13 checks, and the LLM aggregation. Sub-10s loop for verifying a single fix (issue #31).",
+  )
+  .requiredOption("--prod <url>", "Production URL (base)")
+  .requiredOption("--cand <url>", "Candidate URL (base)")
+  .option("--viewports <list>", "Comma-separated mobile,desktop,tablet", "mobile")
+  .option("--page <path>", "Pathname to capture (e.g. /bota-tudao-2025)", "/")
+  .option("--json", "Emit one-line JSON instead of pretty text", false)
+  .action(async (name, opts) => {
+    process.exit(
+      await checkCommand({
+        name,
+        prod: opts.prod,
+        cand: opts.cand,
+        viewports: opts.viewports,
+        page: opts.page,
+        json: opts.json,
+      }),
+    );
   });
 
 program
