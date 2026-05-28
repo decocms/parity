@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
-import { extractSelector, parseViewport, resolveMode } from "../../src/commands/html.ts";
+import { describe, expect, it } from "vitest";
+import {
+  extractSelector,
+  parseViewport,
+  parseWaitMs,
+  resolveMode,
+} from "../../src/commands/html.ts";
 
 describe("parseViewport", () => {
   it("aceita os 3 viewports válidos", () => {
@@ -14,8 +19,39 @@ describe("parseViewport", () => {
   });
 });
 
+describe("parseWaitMs (cubic #2 — strict integer parsing)", () => {
+  it("aceita string de inteiro positivo", () => {
+    expect(parseWaitMs("0")).toBe(0);
+    expect(parseWaitMs("2000")).toBe(2000);
+  });
+
+  it("aceita number direto vindo do commander coercer", () => {
+    expect(parseWaitMs(2000)).toBe(2000);
+    expect(parseWaitMs(0)).toBe(0);
+  });
+
+  it("REJEITA '5abc' (Number.parseInt antigamente truncava silenciosamente)", () => {
+    expect(parseWaitMs("5abc")).toBeNull();
+    expect(parseWaitMs("abc")).toBeNull();
+    expect(parseWaitMs("5.5")).toBeNull();
+    expect(parseWaitMs("-1")).toBeNull();
+  });
+
+  it("rejeita NaN, Infinity, números fracionários e negativos", () => {
+    expect(parseWaitMs(Number.NaN)).toBeNull();
+    expect(parseWaitMs(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(parseWaitMs(-100)).toBeNull();
+    expect(parseWaitMs(1.5)).toBeNull();
+  });
+
+  it("rejeita undefined / tipos não suportados", () => {
+    expect(parseWaitMs(undefined)).toBeNull();
+    expect(parseWaitMs("")).toBeNull();
+  });
+});
+
 describe("resolveMode", () => {
-  const base = { viewport: "mobile", wait: "0" };
+  const base = { viewport: "mobile", wait: 0 };
 
   it("single mode: só --url presente", () => {
     const r = resolveMode({ ...base, url: "https://x.com/" });
@@ -87,12 +123,22 @@ describe("extractSelector", () => {
     expect(r.error).toMatch(/não casou/);
   });
 
-  it("warning quando seletor casa múltiplos (usa o primeiro)", () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const r = extractSelector(HTML, ".x");
-    expect(r.warning).toMatch(/casou 2/);
-    expect(r.html).toContain("hi");
-    expect(r.html).not.toContain("there");
-    spy.mockRestore();
+  it("cubic #3: warning é retornado mas extractSelector é PURA (sem side effect de console.error)", () => {
+    // O caller é responsável por imprimir; aqui só verificamos que a função
+    // não chama console.error.
+    let stderrCalls = 0;
+    const orig = console.error;
+    console.error = () => {
+      stderrCalls++;
+    };
+    try {
+      const r = extractSelector(HTML, ".x");
+      expect(r.warning).toMatch(/casou 2/);
+      expect(r.html).toContain("hi");
+      expect(r.html).not.toContain("there");
+      expect(stderrCalls).toBe(0);
+    } finally {
+      console.error = orig;
+    }
   });
 });

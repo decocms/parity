@@ -267,7 +267,12 @@ program
   .option("--pretty", "Format HTML with prettier", false)
   .option("--diff", "Diff mode (required with --prod/--cand). Prints unified diff", false)
   .option("--viewport <viewport>", "mobile | desktop | tablet", "mobile")
-  .option("--wait <ms>", "Extra ms after networkidle so SSR/hydration settles", "2000")
+  .option(
+    "--wait <ms>",
+    "Extra ms after networkidle so SSR/hydration settles",
+    (v) => Number(v),
+    2000,
+  )
   .option("--json", "Emit one-line JSON instead of pretty text", false)
   .action(async (opts) => {
     process.exit(await htmlCommand(opts));

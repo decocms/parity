@@ -20,8 +20,8 @@ export interface HtmlOptions {
   diff?: boolean;
   /** Viewport (controls UA + dimensions; matters for SSR sites). */
   viewport: string;
-  /** Extra ms to wait after networkidle before snapshotting. */
-  wait: string;
+  /** Extra ms to wait after networkidle before snapshotting (number after commander coercion, but `parseWaitMs` accepts string for tests). */
+  wait: number | string;
   /** Emit one-line JSON instead of pretty text. */
   json?: boolean;
 }
@@ -48,9 +48,11 @@ export async function htmlCommand(opts: HtmlOptions): Promise<number> {
     console.error(chalk.red(`viewport inválido: ${opts.viewport} (use mobile|desktop|tablet)`));
     return 2;
   }
-  const waitMs = Number.parseInt(opts.wait, 10);
-  if (!Number.isFinite(waitMs) || waitMs < 0) {
-    console.error(chalk.red(`--wait inválido: ${opts.wait}`));
+  // Strict parse: Number.parseInt would silently truncate "5abc" → 5.
+  // We refuse anything that isn't a clean non-negative integer string.
+  const waitMs = parseWaitMs(opts.wait);
+  if (waitMs === null) {
+    console.error(chalk.red(`--wait inválido: ${opts.wait} (precisa ser inteiro >= 0)`));
     return 2;
   }
 
@@ -69,6 +71,7 @@ export async function htmlCommand(opts: HtmlOptions): Promise<number> {
         console.error(chalk.red(piece.error));
         return 2;
       }
+      if (piece.warning) console.error(chalk.yellow(`  ⚠ ${piece.warning}`));
       const finalText = await maybePretty(piece.html, opts.pretty === true);
       if (opts.json) {
         console.log(JSON.stringify({ url: mode.url, viewport, selector: opts.selector ?? null, html: finalText }));
@@ -92,6 +95,8 @@ export async function htmlCommand(opts: HtmlOptions): Promise<number> {
       console.error(chalk.red(`cand: ${candPiece.error}`));
       return 2;
     }
+    if (prodPiece.warning) console.error(chalk.yellow(`  ⚠ prod: ${prodPiece.warning}`));
+    if (candPiece.warning) console.error(chalk.yellow(`  ⚠ cand: ${candPiece.warning}`));
     const [prodFmt, candFmt] = await Promise.all([
       maybePretty(prodPiece.html, opts.pretty !== false),
       maybePretty(candPiece.html, opts.pretty !== false),
@@ -113,8 +118,14 @@ export async function htmlCommand(opts: HtmlOptions): Promise<number> {
       const patch = diff.createPatch(opts.selector ?? "document", prodFmt, candFmt, "prod", "cand");
       console.log(formatPatch(patch));
     }
-    // Exit 1 if there's any diff content (lines starting with - or + beyond the header).
-    const hasDiff = /\n[-+](?!--|\+\+)/.test(`\n${diff.createPatch(opts.selector ?? "d", prodFmt, candFmt, "p", "c")}`);
+    // Exit 1 if there's any diff content. The previous regex test on the
+    // patch text broke for content lines that BEGAN with "--" or "++"
+    // (false negatives — `<!-- comment -->` chunks in the diff slipped
+    // through). Use the structured form from jsdiff instead: anything
+    // marked `added` or `removed` is a real diff.
+    const hasDiff = diff
+      .diffLines(prodFmt, candFmt)
+      .some((part) => part.added === true || part.removed === true);
     return hasDiff ? 1 : 0;
   } finally {
     await browser.close().catch(() => undefined);
@@ -224,12 +235,30 @@ export function extractSelector(html: string, selector: string | undefined): Ext
   // Cheerio's .toString() on a wrapped element gives the outerHTML.
   const first = matches.first();
   const out = $.html(first);
+  // The previous implementation also printed the warning to stderr inside
+  // this function, which made `extractSelector` impure and made callers
+  // double-print when they wanted to surface the warning themselves. Pure
+  // now: only return the data, let the caller decide how to render.
   const warning =
     matches.length > 1
       ? `seletor '${selector}' casou ${matches.length} elementos — usando o primeiro`
       : undefined;
-  if (warning) console.error(chalk.yellow(`  ⚠ ${warning}`));
   return { html: out, warning };
+}
+
+/**
+ * Strict integer parser for CLI `--wait` arg. Accepts only clean
+ * non-negative integers expressed as digits (no trailing junk like
+ * "5abc", no NaN, no negatives, no decimals). Returns null on rejection
+ * so callers can branch instead of accepting silently-truncated input.
+ */
+export function parseWaitMs(raw: string | number | undefined): number | null {
+  if (typeof raw === "number") return Number.isFinite(raw) && raw >= 0 && Number.isInteger(raw) ? raw : null;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 async function maybePretty(html: string, enabled: boolean): Promise<string> {
