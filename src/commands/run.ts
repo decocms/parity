@@ -259,17 +259,17 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
           `Warmup ok — ${result.succeeded}/${result.attempted} workers serviram resposta fresca`,
         );
       } else if (result.succeeded > 0) {
+        const failureSummary = result.failed
+          .slice(0, 3)
+          .map((f) => `${f.viewport}/${hostOf(f.url)} (${f.reason})`)
+          .join("; ");
         warmupSpinner.warn(
-          `Warmup parcial — ${result.succeeded}/${result.attempted} ok; ${result.failed.length} falha(s): ` +
-            result.failed
-              .slice(0, 3)
-              .map((f) => `${f.viewport}/${hostOf(f.url)} (${f.reason})`)
-              .join("; "),
+          `Warmup parcial — ${result.succeeded}/${result.attempted} ok; ${result.failed.length} falha(s): ${failureSummary}`,
         );
       } else {
+        const firstReason = result.failed[0]?.reason ?? "unknown";
         warmupSpinner.fail(
-          `Warmup falhou — 0/${result.attempted} requests ok. Cache pode estar stale. ` +
-            `Primeira falha: ${result.failed[0]?.reason ?? "unknown"}`,
+          `Warmup falhou — 0/${result.attempted} requests ok. Cache pode estar stale. Primeira falha: ${firstReason}`,
         );
       }
     }
