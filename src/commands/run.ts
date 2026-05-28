@@ -249,15 +249,28 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
 
     if (opts.warmup) {
       const warmupSpinner = ora("Warmup: bustando cache em prod + cand…").start();
-      try {
-        await warmupTargets({
-          urls: [opts.prod, opts.cand],
-          viewports,
-          bypassCache: opts.bypassCache !== false,
-        });
-        warmupSpinner.succeed("Warmup ok — workers serviram resposta fresca");
-      } catch (err) {
-        warmupSpinner.warn(`Warmup parcial: ${(err as Error).message}`);
+      const result = await warmupTargets({
+        urls: [opts.prod, opts.cand],
+        viewports,
+        bypassCache: opts.bypassCache !== false,
+      });
+      if (result.failed.length === 0) {
+        warmupSpinner.succeed(
+          `Warmup ok — ${result.succeeded}/${result.attempted} workers serviram resposta fresca`,
+        );
+      } else if (result.succeeded > 0) {
+        warmupSpinner.warn(
+          `Warmup parcial — ${result.succeeded}/${result.attempted} ok; ${result.failed.length} falha(s): ` +
+            result.failed
+              .slice(0, 3)
+              .map((f) => `${f.viewport}/${hostOf(f.url)} (${f.reason})`)
+              .join("; "),
+        );
+      } else {
+        warmupSpinner.fail(
+          `Warmup falhou — 0/${result.attempted} requests ok. Cache pode estar stale. ` +
+            `Primeira falha: ${result.failed[0]?.reason ?? "unknown"}`,
+        );
       }
     }
 
@@ -737,11 +750,17 @@ function addCacheBuster(url: string): string {
  * response and any device-segmented cache buckets get populated with the
  * current deploy. Avoids the "deploy → parity sees stale" loop.
  */
+interface WarmupResult {
+  attempted: number;
+  succeeded: number;
+  failed: Array<{ url: string; viewport: Viewport; reason: string }>;
+}
+
 async function warmupTargets(opts: {
   urls: string[];
   viewports: Viewport[];
   bypassCache: boolean;
-}): Promise<void> {
+}): Promise<WarmupResult> {
   const MOBILE_UA =
     "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36";
   const DESKTOP_UA =
@@ -749,7 +768,8 @@ async function warmupTargets(opts: {
   const headers: Record<string, string> = opts.bypassCache
     ? { "Cache-Control": "no-cache", "Pragma": "no-cache" }
     : {};
-  const jobs: Array<Promise<unknown>> = [];
+  type Outcome = { ok: true } | { ok: false; url: string; viewport: Viewport; reason: string };
+  const jobs: Array<Promise<Outcome>> = [];
   for (const url of opts.urls) {
     for (const viewport of opts.viewports) {
       const ua = viewport === "mobile" ? MOBILE_UA : DESKTOP_UA;
@@ -759,11 +779,27 @@ async function warmupTargets(opts: {
           method: "GET",
           redirect: "follow",
           headers: { ...headers, "User-Agent": ua },
-        }).catch(() => undefined),
+        })
+          .then((res): Outcome =>
+            res.ok || (res.status >= 200 && res.status < 400)
+              ? { ok: true }
+              : { ok: false, url, viewport, reason: `HTTP ${res.status} ${res.statusText}` },
+          )
+          .catch((err): Outcome => ({
+            ok: false,
+            url,
+            viewport,
+            reason: (err as Error).message ?? "fetch failed",
+          })),
       );
     }
   }
-  await Promise.all(jobs);
+  const results = await Promise.all(jobs);
+  const succeeded = results.filter((r) => r.ok).length;
+  const failed = results
+    .filter((r): r is Extract<Outcome, { ok: false }> => !r.ok)
+    .map(({ url, viewport, reason }) => ({ url, viewport, reason }));
+  return { attempted: results.length, succeeded, failed };
 }
 
 async function fetchHomeHtml(url: string): Promise<string | null> {
