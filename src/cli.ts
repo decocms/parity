@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { baselineList, baselineSet, baselineUnset } from "./commands/baseline.ts";
 import { cacheCommand } from "./commands/cache.ts";
 import { compareCommand } from "./commands/compare.ts";
+import { consoleCommand } from "./commands/console.ts";
 import { cssTraceCommand } from "./commands/css-trace.ts";
 import { explainCommand } from "./commands/explain.ts";
 import { journeyCommand } from "./commands/journey.ts";
@@ -252,6 +253,27 @@ program
         json: opts.json,
       }),
     );
+  });
+
+program
+  .command("console")
+  .description(
+    "Single-page console capture. Boots Playwright on --url, waits for the page to settle, then prints any console errors/warnings + network failures. No LLM, no checks — designed for sub-10s debug loops (issue #31).",
+  )
+  .requiredOption("--url <url>", "URL to load")
+  .option("--viewport <viewport>", "mobile | desktop | tablet", "mobile")
+  .option(
+    "--wait <ms>",
+    "Extra ms to wait after networkidle so client-side errors land",
+    "2000",
+  )
+  .option(
+    "--filter <types>",
+    "Comma-separated subset of error,warning,log,info,debug (default: error,warning)",
+  )
+  .option("--json", "Emit one-line JSON instead of human-readable text", false)
+  .action(async (opts) => {
+    process.exit(await consoleCommand(opts));
   });
 
 program
