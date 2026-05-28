@@ -1,6 +1,6 @@
 {
 	"name": "@decocms/parity",
-	"version": "0.5.4",
+	"version": "0.6.0",
 	"description": "E2E parity validator for site migrations. Compares prod vs cand and reports UI, functional, SEO, visual, and Web Vitals deltas with an LLM-ranked HTML report.",
 	"type": "module",
 	"license": "MIT",
