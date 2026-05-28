@@ -61,6 +61,7 @@ Individual flags always override the preset.
 | Command            | What it does                                                                  |
 | ------------------ | ----------------------------------------------------------------------------- |
 | `parity run`       | Full comparison run between two URLs                                          |
+| `parity audit`     | **Single-site** absolute audit (no prod×cand). Console + Vitals + SEO + Imgs  |
 | `parity journey`   | CI-friendly: only the purchase journey, with JUnit / GitHub annotations       |
 | `parity vitals`    | Crawl N pages, compare Web Vitals prod vs cand                                |
 | `parity cache`     | CDN cache analysis, opportunities, request categorization                     |

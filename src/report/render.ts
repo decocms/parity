@@ -1,90 +1,23 @@
-import { relative } from "node:path";
 import { buildCacheReport, type CacheReport, type ClassifiedRequest } from "../diff/cache.ts";
 import type { Issue, NetworkEntry, Run, SeoPageMeta, VisualDiffPage } from "../types/schema.ts";
 import { REPORT_CSS, REPORT_JS } from "./html-template.ts";
+import {
+  escapeHtml as esc,
+  humanKey,
+  relPath,
+  renderIssueHtml,
+} from "./issue-html.ts";
 import { buildLlmPrompt } from "./prompt-builder.ts";
 import { buildVisualPrompt } from "./visual-prompt-builder.ts";
 
-function esc(s: string | number | null | undefined): string {
-  if (s == null) return "";
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function relPath(runDir: string, absPath: string | undefined): string {
-  if (!absPath) return "";
-  try {
-    return relative(runDir, absPath);
-  } catch {
-    return absPath;
-  }
-}
-
 /**
- * Turn a pair-key like `/::mobile` or `/vale-presente::desktop` into something
- * a human reads: "Home · mobile" / "/vale-presente · desktop".
+ * Local alias preserved so the rest of this file keeps the original
+ * `renderIssue(issue, runDir)` call-site signature unchanged. The actual
+ * implementation now lives in `src/report/issue-html.ts:renderIssueHtml`
+ * — shared with the audit report.
  */
-function humanKey(key: string): string {
-  const parts = key.split("::");
-  const path = parts[0] ?? key;
-  const viewport = parts[1] ?? "";
-  const niceName = path === "/" || path === "" ? "Home" : path;
-  return viewport ? `${niceName} · ${viewport}` : niceName;
-}
-
 function renderIssue(issue: Issue, runDir: string): string {
-  const evidenceHtml = (issue.evidence ?? [])
-    .filter((e) => e.kind === "screenshot")
-    .map(
-      (e) =>
-        `<figure><img src="${esc(relPath(runDir, e.path))}" alt="${esc(e.label ?? "")}" loading="lazy"/><figcaption>${esc(e.label ?? "")}</figcaption></figure>`,
-    )
-    .join("");
-
-  const pageLabel = issue.page ? humanKey(issue.page) : "";
-
-  const details = issue.details ?? "";
-  const detailsIsList = /\n\s*-\s|^\s*-\s/.test(details) || details.split("\n").length > 4;
-
-  return `
-  <div class="issue sev-${issue.severity}">
-    <div class="issue-tags">
-      <span class="tag sev-${issue.severity}">${esc(issue.severity)}</span>
-      <span class="tag">${esc(issue.category)}</span>
-      <span class="tag tag-mono">${esc(issue.check)}</span>
-      ${pageLabel ? `<span class="tag tag-page">${esc(pageLabel)}</span>` : ""}
-    </div>
-    <h3>${esc(issue.summary)}</h3>
-    ${
-      issue.details
-        ? `<details class="issue-section" ${detailsIsList ? "" : "open"}>
-        <summary><span class="section-label">Detalhes</span><button class="copy-btn" data-copy-target="issue-d-${esc(issue.id)}">copiar</button></summary>
-        <pre class="details" id="issue-d-${esc(issue.id)}">${esc(issue.details)}</pre>
-      </details>`
-        : ""
-    }
-    ${
-      issue.reproduction
-        ? `<details class="issue-section">
-        <summary><span class="section-label">Reprodução</span><button class="copy-btn" data-copy-target="issue-r-${esc(issue.id)}">copiar</button></summary>
-        <pre class="repro" id="issue-r-${esc(issue.id)}">${esc(issue.reproduction)}</pre>
-      </details>`
-        : ""
-    }
-    ${
-      issue.suggestedFix
-        ? `<details class="issue-section" open>
-        <summary><span class="section-label">Fix sugerido</span><button class="copy-btn" data-copy-target="issue-f-${esc(issue.id)}">copiar</button></summary>
-        <pre class="fix" id="issue-f-${esc(issue.id)}">${esc(issue.suggestedFix)}</pre>
-      </details>`
-        : ""
-    }
-    ${evidenceHtml ? `<details class="issue-section"><summary><span class="section-label">Screenshots (${(issue.evidence ?? []).length})</span></summary><div class="ss-pair">${evidenceHtml}</div></details>` : ""}
-  </div>`;
+  return renderIssueHtml(issue, { runDir });
 }
 
 function renderDashboard(run: Run): string {
