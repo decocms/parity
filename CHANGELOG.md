@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.1](https://github.com/decocms/parity/compare/v0.5.0...v0.5.1) (2026-05-27)
+
+### Fixed
+
+* **ci:** publish workflow alignment with `decocms/deco-start` to unblock first-time OIDC publish (Node 22, job-level `id-token: write` permission). Includes the 0.5.0 changes that were stuck behind a non-OIDC publisher transition. ([PR #16](https://github.com/decocms/parity/pull/16))
+
 ## [0.5.0](https://github.com/decocms/parity/compare/v0.4.0...v0.5.0) (2026-05-27)
 
 ### Added
