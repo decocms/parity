@@ -38,6 +38,53 @@ function severityForDiff(d: VisualDifference): Issue["severity"] {
   return d.severity;
 }
 
+/**
+ * Section names rendered into `data-section` that strongly suggest a rotating
+ * carousel / slider in the hero region. When the SAME pattern appears on both
+ * prod and cand, slide-state mismatches at screenshot time are timing noise,
+ * not real regressions — both sides legitimately have the same component, the
+ * carousel just auto-advanced to a different frame on each side.
+ */
+const CAROUSEL_SECTION_RE = /(carousel|slider)/i;
+
+function hasCarouselSection(sections: string[]): boolean {
+  return sections.some((s) => CAROUSEL_SECTION_RE.test(s));
+}
+
+/**
+ * When BOTH sides expose a carousel/slider section, downgrade any
+ * critical/high hero-region "different/missing/extra/image" diffs to `low`
+ * and tag the description so the human report explains the rule. Real
+ * regressions in the hero (e.g. the whole component vanished, layout broken)
+ * are still emitted — they just aren't shouted as `critical` anymore.
+ *
+ * This implements issue #22: parity should not flag a critical visual
+ * regression when prod and cand show different frames of the same carousel.
+ */
+function downgradeCarouselFramingDiffs(
+  diffs: VisualDifference[],
+  bothHaveCarousel: boolean,
+): VisualDifference[] {
+  if (!bothHaveCarousel) return diffs;
+  const CAROUSEL_FRAME_TYPES = new Set<VisualDifference["type"]>([
+    "different-component",
+    "missing-component",
+    "extra-component",
+    "image-diff",
+    "text-changed",
+  ]);
+  return diffs.map((d) => {
+    if (d.region !== "hero") return d;
+    if (!CAROUSEL_FRAME_TYPES.has(d.type)) return d;
+    if (d.severity === "low") return d;
+    return {
+      ...d,
+      severity: "low" as const,
+      description: `${d.description} [downgraded: ambos os lados expõem um carousel/slider — provável diferença só de slide ativo no momento da captura]`,
+    };
+  });
+}
+
 export async function visualRegressionKeyframes(ctx: CheckContext): Promise<CheckResult> {
   const start = Date.now();
   const { pairs } = pairCaptures(ctx.prodPages, ctx.candPages);
@@ -86,6 +133,13 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
     const sectionsOnlyInProd = prodSections.filter((s) => !candSet.has(s));
     const sectionsOnlyInCand = candSections.filter((s) => !prodSet.has(s));
 
+    // #22: if both sides have a carousel/slider section, slide-frame
+    // mismatches in the hero are timing noise, not regressions. The signal
+    // is forwarded to the LLM (so it ideally doesn't flag them) and used to
+    // post-process diffs (so we enforce the rule even if the LLM disobeys).
+    const bothHaveCarousel =
+      hasCarouselSection(prodSections) && hasCarouselSection(candSections);
+
     // Always call LLM (if available) — pixelmatch is no longer the gate.
     // Skip only if pctDiff is extremely small AND no section mismatch (likely identical).
     const trivial = pctDiff < PASS_PCT_THRESHOLD && sectionsOnlyInProd.length === 0;
@@ -105,11 +159,16 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
           prodSections,
           candSections,
           sectionsOnlyInProd,
+          bothHaveCarousel,
         });
         differences = diffs ?? [];
       } catch (err) {
         llmError = (err as Error).message;
       }
+    }
+
+    if (differences.length > 0) {
+      differences = downgradeCarouselFramingDiffs(differences, bothHaveCarousel);
     }
 
     // Decide verdict
