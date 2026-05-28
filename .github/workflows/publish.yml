@@ -20,13 +20,28 @@ name: Publish
 #   - The version-in-package.json model avoids PR creation entirely:
 #     the bump IS the human-reviewed change, and the workflow only
 #     publishes + tags. Default `GITHUB_TOKEN` already has `contents:
-#     write` (for tags/releases) and we use OIDC + `--provenance` for
-#     npm — no extra secrets, no PAT, no token rotation.
+#     write` (for tags/releases) and we use OIDC trusted publishing
+#     for npm — no extra secrets, no PAT, no token rotation.
+#
+# OIDC trusted publishing prerequisites (one-time setup, already done):
+#   1. Trusted Publisher rule on npmjs.com → @decocms/parity → Access:
+#        Organization or user: decocms
+#        Repository:           parity
+#        Workflow filename:    publish.yml
+#        Environment name:     (blank)
+#        Allowed actions:      npm publish
+#   2. Workflow has `permissions: { id-token: write }` on the job (NOT
+#      workflow level — that wider scope can interact badly with the
+#      transition-from-token-auth case).
+#   3. npm CLI version on the runner must support the OIDC token-
+#      exchange code path (npm 11.x+). Node 22 ships npm 10.9.8 which
+#      DOES NOT — see the "Upgrade npm" step below.
 #
 # Manual break-glass:
-#   - `npm publish --access public --provenance` from a maintainer
-#     machine if the workflow is wedged. Remember to bump
-#     `package.json` first and create a matching `vX.Y.Z` tag.
+#   - `npm publish` from a maintainer machine with `npm login` if the
+#     workflow is wedged. The OIDC trusted publisher only fires from
+#     GitHub Actions; local publishes use the maintainer's npm account
+#     (this is how 0.1.0 through 0.4.0 were published).
 
 on:
   push:
@@ -145,94 +160,14 @@ jobs:
         if: steps.check.outputs.changed == 'true'
         run: bun run build
 
-      # Debug: print every claim of the OIDC token that npm will receive.
-      # The trusted-publisher matcher on npm's side requires repository,
-      # workflow_ref, ref, environment to ALL match the rule EXACTLY.
-      # npm doesn't tell you which field mismatched — it just returns
-      # 404. Decoding the JWT payload locally exposes the values so we
-      # can compare them against the rule on npmjs.com.
-      #
-      # Safe to log: the JWT payload is metadata only (repo, workflow,
-      # actor); the signature stays in the original token, which we
-      # don't print. The full token has a 5-minute lifetime regardless.
-      - name: Debug — print OIDC token claims for npm audience
-        if: steps.check.outputs.changed == 'true'
-        env:
-          ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
-          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
-            echo "::error::OIDC env vars missing — id-token: write permission probably not granted to this job"
-            exit 1
-          fi
-          TOKEN=$(curl -fsSL \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" | jq -r '.value')
-          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-            echo "::error::Failed to mint OIDC token with npm audience"
-            exit 1
-          fi
-          # JWT payload = middle segment, base64url-encoded. Convert
-          # base64url → base64 (tr _-/+) then decode. Append padding if
-          # the segment length isn't a multiple of 4.
-          PAYLOAD_B64=$(echo "$TOKEN" | cut -d. -f2)
-          MOD=$(( ${#PAYLOAD_B64} % 4 ))
-          if [ "$MOD" -ne 0 ]; then
-            PAD=$(printf '%*s' $((4 - MOD)) '' | tr ' ' '=')
-            PAYLOAD_B64="${PAYLOAD_B64}${PAD}"
-          fi
-          PAYLOAD=$(echo "$PAYLOAD_B64" | tr '_-' '/+' | base64 -d 2>/dev/null)
-          echo "::group::OIDC token claims (audience=npm:registry.npmjs.org)"
-          echo "$PAYLOAD" | jq '{
-            iss, aud, sub, repository, repository_owner, repository_owner_id,
-            repository_id, workflow, workflow_ref, workflow_sha, ref, ref_type,
-            event_name, job_workflow_ref, job_workflow_sha, actor, actor_id,
-            run_id, runner_environment, environment
-          }'
-          echo "::endgroup::"
-          echo "::group::Trusted publisher rule MUST have (EXACT case-sensitive values)"
-          OWNER=$(echo "$PAYLOAD" | jq -r '.repository_owner')
-          REPO=$(echo "$PAYLOAD" | jq -r '.repository' | cut -d/ -f2)
-          WF=$(echo "$PAYLOAD" | jq -r '.workflow_ref' | sed -E 's|.*/||' | cut -d@ -f1)
-          ENV=$(echo "$PAYLOAD" | jq -r '.environment // ""')
-          echo "  Organization or user : '$OWNER'"
-          echo "  Repository           : '$REPO'"
-          echo "  Workflow filename    : '$WF'"
-          if [ -z "$ENV" ]; then
-            echo "  Environment name     : (empty — leave the field BLANK in npm UI)"
-          else
-            echo "  Environment name     : '$ENV'"
-          fi
-          echo "  Allowed actions      : npm publish"
-          echo "::endgroup::"
-
       - name: Publish to npm
         if: steps.check.outputs.changed == 'true'
         # Per https://docs.npmjs.com/trusted-publishers: when trusted
         # publishing is correctly configured, `--access` and `--provenance`
-        # flags are NOT needed (publishConfig.access in package.json sets
-        # access, and provenance is auto-generated by npm). Removing them
-        # eliminates a class of flag-related edge cases.
-        env:
-          # Maximum verbosity so the npm CLI prints every HTTP request +
-          # response header it does, including the raw server response
-          # body. Useful when E404 hides the real reason.
-          NPM_CONFIG_LOGLEVEL: silly
+        # flags are NOT needed — `publishConfig.access` in package.json
+        # sets the access level, and provenance attestations are auto-
+        # generated by npm for OIDC publishes from public repos.
         run: npm publish
-
-      # If publish failed, npm leaves a detailed debug log in $HOME/.npm/_logs.
-      # That log contains the FULL request+response (with body) that the user-
-      # facing "E404 Not Found" line elides. Uploading it as an artifact lets
-      # us inspect the actual server response off-runner.
-      - name: Upload npm debug log on failure
-        if: always() && steps.check.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: npm-debug-logs
-          path: /home/runner/.npm/_logs/
-          if-no-files-found: ignore
-          retention-days: 7
 
       - name: Create GitHub release
         if: steps.check.outputs.changed == 'true'
