@@ -21,6 +21,13 @@
  */
 
 import type { Severity } from "../types/schema.ts";
+import type { VitalMetric } from "../types/vitals.ts";
+
+// Re-export shared primitives so existing imports of these names from
+// `src/audit/thresholds.ts` keep working (no breaking change for the
+// audit/* modules and tests). The single source lives in
+// `src/types/vitals.ts` now.
+export { VITAL_LABELS, formatVital } from "../types/vitals.ts";
 
 export interface VitalThreshold {
   /** Upper bound for "good". At or below this is no issue. */
@@ -31,7 +38,7 @@ export interface VitalThreshold {
   poorCriticalMultiplier?: number;
 }
 
-export const VITAL_THRESHOLDS: Record<"lcp" | "fcp" | "cls" | "inp" | "ttfb", VitalThreshold> = {
+export const VITAL_THRESHOLDS: Record<VitalMetric, VitalThreshold> = {
   lcp: { goodMax: 2500, niMax: 4000, poorCriticalMultiplier: 2 },
   fcp: { goodMax: 1800, niMax: 3000 },
   cls: { goodMax: 0.10, niMax: 0.25, poorCriticalMultiplier: 2 },
@@ -40,7 +47,7 @@ export const VITAL_THRESHOLDS: Record<"lcp" | "fcp" | "cls" | "inp" | "ttfb", Vi
 };
 
 export function classifyVital(
-  metric: keyof typeof VITAL_THRESHOLDS,
+  metric: VitalMetric,
   value: number,
 ): { severity: Severity | "ok"; label: "good" | "needs-improvement" | "poor" | "critical" } {
   const t = VITAL_THRESHOLDS[metric];
@@ -50,18 +57,4 @@ export function classifyVital(
     return { severity: "critical", label: "critical" };
   }
   return { severity: "high", label: "poor" };
-}
-
-/** Human-friendly metric labels used in issue summaries. */
-export const VITAL_LABELS: Record<keyof typeof VITAL_THRESHOLDS, string> = {
-  lcp: "LCP",
-  fcp: "FCP",
-  cls: "CLS",
-  inp: "INP",
-  ttfb: "TTFB",
-};
-
-export function formatVital(metric: keyof typeof VITAL_THRESHOLDS, value: number): string {
-  if (metric === "cls") return value.toFixed(3);
-  return `${Math.round(value)}ms`;
 }
