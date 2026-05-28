@@ -4,6 +4,7 @@ import { cacheCommand } from "./commands/cache.ts";
 import { checkCommand } from "./commands/check.ts";
 import { compareCommand } from "./commands/compare.ts";
 import { consoleCommand } from "./commands/console.ts";
+import { htmlCommand } from "./commands/html.ts";
 import { cssTraceCommand } from "./commands/css-trace.ts";
 import { explainCommand } from "./commands/explain.ts";
 import { journeyCommand } from "./commands/journey.ts";
@@ -276,6 +277,29 @@ program
   .option("--json", "Emit one-line JSON instead of human-readable text", false)
   .action(async (opts) => {
     process.exit(await consoleCommand(opts));
+  });
+
+program
+  .command("html")
+  .description(
+    "Dump page HTML or diff prod vs cand HTML for a section. No LLM, no checks — sub-10s debug loop (issue #31).",
+  )
+  .option("--url <url>", "Single-side mode: dump HTML of this URL")
+  .option("--prod <url>", "Diff mode: prod URL (use together with --cand --diff)")
+  .option("--cand <url>", "Diff mode: cand URL (use together with --prod --diff)")
+  .option("--selector <sel>", "Narrow output to a CSS selector (outer HTML of first match)")
+  .option("--pretty", "Format HTML with prettier", false)
+  .option("--diff", "Diff mode (required with --prod/--cand). Prints unified diff", false)
+  .option("--viewport <viewport>", "mobile | desktop | tablet", "mobile")
+  .option(
+    "--wait <ms>",
+    "Extra ms after networkidle so SSR/hydration settles",
+    (v) => Number(v),
+    2000,
+  )
+  .option("--json", "Emit one-line JSON instead of pretty text", false)
+  .action(async (opts) => {
+    process.exit(await htmlCommand(opts));
   });
 
 program

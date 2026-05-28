@@ -71,6 +71,7 @@ Individual flags always override the preset.
 | `parity list`      | List saved runs                                                               |
 | `parity check`     | Run a single check (`<name>`) — skips sitemap + LLM aggregation; sub-10s loop |
 | `parity console`   | Sub-10s capture of console errors/warnings + network failures for one URL     |
+| `parity html`      | Dump page/selector HTML or unified diff prod×cand (prettier + jsdiff)         |
 | `parity section`   | Focused prod×cand diff of a section: HTML + screenshot + computed styles      |
 | `parity prompt`    | Export issues as a Markdown prompt for any LLM                                |
 | `parity explain`   | LLM deep-dive on a specific issue (needs `ANTHROPIC_API_KEY`)                 |
