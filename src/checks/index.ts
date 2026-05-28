@@ -58,6 +58,56 @@ export const ALL_CHECKS: Check[] = [
   cacheCoverage,
 ];
 
+/**
+ * Map of kebab-case check name (as emitted by each check's `CheckResult.name`)
+ * to its function. Used by `parity check <name>` (issue #31) to run a single
+ * check on demand without going through the full pipeline.
+ *
+ * Maintained by hand so we don't pay the cost of invoking every check just
+ * to read its name. If you add a check to `ALL_CHECKS` above, also register
+ * it here.
+ */
+export const ALL_CHECKS_BY_NAME: Record<string, Check> = {
+  "http-status-parity": httpStatusParity,
+  "console-errors-baseline": consoleErrorsBaseline,
+  "html-structural-diff": htmlStructuralDiff,
+  "meta-seo-parity": metaSeoParity,
+  "visual-regression-keyframes": visualRegressionKeyframes,
+  "purchase-journey-flow": purchaseJourneyFlow,
+  "network-summary-delta": networkSummaryDelta,
+  "web-vitals-mobile": webVitalsMobile,
+  "image-loading-health": imageLoadingHealth,
+  "banner-aspect-ratio": bannerAspectRatio,
+  "cart-reveal-mode-divergence": cartRevealModeDivergence,
+  "lazy-section-presence": lazySectionPresence,
+  "seo-deep-audit": seoDeepAudit,
+  "cache-coverage": cacheCoverage,
+};
+
+/**
+ * Names of checks that REQUIRE flow captures (steps from purchase-journey).
+ * `parity check` blocks these — they need to be run via `parity journey`
+ * or `parity run --flows purchase-journey` instead.
+ */
+export const FLOW_DEPENDENT_CHECKS: ReadonlySet<string> = new Set([
+  "purchase-journey-flow",
+  "cart-reveal-mode-divergence",
+]);
+
+/**
+ * Safe accessor for `ALL_CHECKS_BY_NAME`. Cubic flagged that a direct
+ * `ALL_CHECKS_BY_NAME[userInput]` resolves prototype keys (e.g.
+ * `__proto__`, `toString`) to truthy Object methods, which would bypass
+ * the "check not found" branch and crash when called with a CheckContext.
+ *
+ * `Object.hasOwn` only matches keys WE registered, so unknown / prototype
+ * keys correctly fall through to `undefined`.
+ */
+export function getCheckByName(name: string): Check | undefined {
+  if (!Object.hasOwn(ALL_CHECKS_BY_NAME, name)) return undefined;
+  return ALL_CHECKS_BY_NAME[name];
+}
+
 export async function runAllChecks(ctx: CheckContext): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   for (const check of ALL_CHECKS) {
