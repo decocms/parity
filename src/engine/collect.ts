@@ -87,6 +87,61 @@ export async function installVitalsCollector(ctx: BrowserContext): Promise<void>
   await ctx.addInitScript({ content: VITALS_INIT_SCRIPT });
 }
 
+/**
+ * Chromium error codes that mean "the request was canceled, not a real
+ * failure". `ERR_ABORTED` fires when the page navigates away before an
+ * async request resolved — typical for tracking pixels in the
+ * fast multi-page vitals crawler (issue #40). `ERR_NETWORK_CHANGED`
+ * fires when the OS changes networks mid-request. Neither indicates a
+ * problem with the site under test.
+ *
+ * Exported so audit/check checks can use the same allowlist if they
+ * ever process raw error strings.
+ */
+export const CANCELLATION_ERROR_CODES: ReadonlyArray<string> = [
+  "net::ERR_ABORTED",
+  "net::ERR_NETWORK_CHANGED",
+];
+
+export function isCancellationError(errorText: string): boolean {
+  return CANCELLATION_ERROR_CODES.some((code) => errorText.includes(code));
+}
+
+/**
+ * URL substring patterns for third-party tracking endpoints that fire
+ * async, beacon-style requests after page load. When these get canceled
+ * by a navigation, they're not actionable for site quality — the user's
+ * site is fine; the pixel just didn't finish reporting. Safety net for
+ * cases where Playwright reports a different errorText (e.g. `ERR_FAILED`
+ * instead of `ERR_ABORTED`) but the underlying cause is the same.
+ *
+ * Conservative list: only well-known fire-and-forget pixels where
+ * failure is never useful to the developer auditing site quality. Real
+ * tracking failures that DO matter (e.g. checkout SDK errors) won't
+ * match any of these substrings.
+ *
+ * Exported so the audit's network check can also skip these when
+ * counting third-party errors.
+ */
+export const KNOWN_ASYNC_TRACKING_URL_PATTERNS: ReadonlyArray<string> = [
+  "google.com/ccm/collect",
+  "google.com/rmkt/collect",
+  "google-analytics.com/g/collect",
+  "google-analytics.com/collect",
+  "facebook.com/tr",
+  "facebook.net/signals",
+  "liadm.com/s/",
+  "revcontent.com/cm/pixel",
+  "criteo.com/delivery",
+  "criteo.net/delivery",
+  "doubleclick.net/pagead",
+  "voxus.tv/pixel",
+];
+
+export function isKnownAsyncTrackingUrl(url: string): boolean {
+  return KNOWN_ASYNC_TRACKING_URL_PATTERNS.some((pattern) => url.includes(pattern));
+}
+
 export interface CollectorState {
   console: ConsoleEntry[];
   network: NetworkEntry[];
@@ -123,9 +178,22 @@ export function attachCollectors(page: Page): CollectorState {
   });
 
   page.on("requestfailed", (req) => {
+    const errorText = req.failure()?.errorText ?? "unknown";
+    // Issue #40: async tracking pixels (Google Ads, Criteo, LiveIntent,
+    // GTM-fired beacons) get canceled by the next navigation in the
+    // fast multi-page vitals crawler — Playwright reports those as
+    // `net::ERR_ABORTED` (or `net::ERR_NETWORK_CHANGED`). They are NOT
+    // real failures: the same URLs complete with 200 in the main
+    // purchase-journey flow where the page stays loaded long enough.
+    // The HAR still records the abort for forensics; we just don't
+    // promote it to a console error that becomes a high-severity
+    // issue downstream.
+    if (isCancellationError(errorText) || isKnownAsyncTrackingUrl(req.url())) {
+      return;
+    }
     state.console.push({
       type: "error",
-      text: `[request-failed] ${req.url()} — ${req.failure()?.errorText ?? "unknown"}`,
+      text: `[request-failed] ${req.url()} — ${errorText}`,
     });
   });
 
