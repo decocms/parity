@@ -75,6 +75,20 @@ describe("bannerAspectRatio", () => {
     expect(issue?.severity).toBe("medium");
   });
 
+  it("cubic #30: shape muda mas NÃO é wide↔tall → MEDIUM (não escala pra high)", () => {
+    // wide (ratio 2.0) → near-square (ratio 1.0) é mudança de bucket mas
+    // não orientation-flip. Severity HIGH é reservado pra wide↔tall apenas.
+    const prodB = banner({ src: "/hero.jpg", width: 1600, height: 800, section: "Carousel" }); // 2.0 wide
+    const candB = banner({ src: "/hero.jpg", width: 800, height: 800, section: "Carousel" }); // 1.0 near-square
+    const { prod, cand } = makePairedPages({ prodHtml: html(prodB), candHtml: html(candB) });
+    const r = bannerAspectRatio(
+      makeContext({ prodPages: [prod], candPages: [cand], outDir: "/tmp" }),
+    );
+    const issue = r.issues.find((i) => i.id.startsWith("banner-aspect:ratio"));
+    expect(issue?.severity).toBe("medium");
+    expect(issue?.summary).not.toMatch(/variante mobile\/desktop/);
+  });
+
   it("flag MEDIUM quando contagem de banners é diferente", () => {
     const prodB =
       banner({ src: "/a.jpg", width: 1440, height: 600, section: "Carousel" }) +

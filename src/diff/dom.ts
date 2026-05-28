@@ -34,7 +34,7 @@ export const BANNER_WIDTH_THRESHOLD = 600;
 const BANNER_SECTION_RE = /(carousel|slider|banner|hero)/i;
 
 export interface BannerImage {
-  /** image src (deduplicated by stripping query strings for matching) */
+  /** Raw value of the `src` HTML attribute as captured from the page — not normalized. */
   src: string;
   /** value of the `width` HTML attribute, if present and numeric */
   width: number | null;

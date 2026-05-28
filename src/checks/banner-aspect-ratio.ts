@@ -111,22 +111,28 @@ function issuesForPair(pageKey: string, cmp: BannerCmp): Issue[] {
     });
   }
 
-  // 2. aspect-ratio drifted beyond tolerance — flag higher severity since
-  //    this typically means the wrong variant (mobile vs desktop) is rendering.
+  // 2. aspect-ratio drifted beyond tolerance.
+  //    HIGH severity is reserved for a true wide↔tall orientation flip
+  //    (e.g. prod renders a landscape banner where cand renders a portrait
+  //    one — strongest signal that the mobile variant was rendered at
+  //    desktop dimensions or vice-versa). Any other shape change
+  //    (wide↔near-square, tall↔near-square) is `medium`.
   if (prod.aspectRatio !== null && cand.aspectRatio !== null) {
     const ratioDelta = Math.abs(prod.aspectRatio - cand.aspectRatio) / prod.aspectRatio;
     if (ratioDelta >= ASPECT_RATIO_TOLERANCE) {
       const shape = (r: number) => (r > 1.5 ? "wide" : r < 0.8 ? "tall" : "near-square");
       const prodShape = shape(prod.aspectRatio);
       const candShape = shape(cand.aspectRatio);
-      const looksLikeWrongVariant = prodShape !== candShape;
+      const orientationFlipped =
+        (prodShape === "wide" && candShape === "tall") ||
+        (prodShape === "tall" && candShape === "wide");
       out.push({
         id: `banner-aspect:ratio:${pageKey}:${index}`,
-        severity: looksLikeWrongVariant ? "high" : "medium",
+        severity: orientationFlipped ? "high" : "medium",
         category: "visual",
         page: pageKey,
         check: "banner-aspect-ratio",
-        summary: `Aspect ratio divergente em ${label}: prod=${prod.width}×${prod.height} (${prod.aspectRatio.toFixed(2)}) vs cand=${cand.width}×${cand.height} (${cand.aspectRatio.toFixed(2)}) — Δ${(ratioDelta * 100).toFixed(0)}%${looksLikeWrongVariant ? ` (${prodShape} → ${candShape}, provável variante mobile/desktop trocada)` : ""}`,
+        summary: `Aspect ratio divergente em ${label}: prod=${prod.width}×${prod.height} (${prod.aspectRatio.toFixed(2)}) vs cand=${cand.width}×${cand.height} (${cand.aspectRatio.toFixed(2)}) — Δ${(ratioDelta * 100).toFixed(0)}%${orientationFlipped ? ` (${prodShape} ↔ ${candShape}, provável variante mobile/desktop trocada)` : ""}`,
       });
     }
   }
