@@ -54,15 +54,25 @@ function hasCarouselSection(sections: string[]): boolean {
 /**
  * SAFETY NET (issue #22). The primary defense is in
  * `src/engine/carousel-stabilizer.ts` which pins every detected carousel
- * to slide 0 BEFORE the screenshot fires — so prod and cand should already
- * show the same frame by the time we get here. But the stabilizer can only
- * reach carousels that expose a known API (Swiper, Splide, slick,
- * KeenSlider) or live inside a `[data-section]` that matches the regex.
- * Exotic / custom JS carousels slip through. For those, when BOTH sides
- * expose a carousel-named section, downgrade any critical/high hero-region
- * "different/missing/extra/image" diffs to `low` so the human report
- * doesn't shout. Real regressions in the hero (entire component vanished,
- * layout broken) are still emitted at their original severity.
+ * to slide 0 BEFORE the screenshot fires. The stabilizer covers the
+ * common libraries (Swiper, Splide, slick, KeenSlider) plus the
+ * generic [data-section] scroll-reset fallback. Exotic carousels can
+ * still slip through.
+ *
+ * For those, when BOTH sides expose a carousel-named section, we
+ * downgrade hero-region diffs to `low` — BUT only the diff types that
+ * are inherent to slide-framing/timing.
+ *
+ * Cubic flagged on PR #32 that the previous version also downgraded
+ * `missing-component` and `extra-component`. Those are STRUCTURAL —
+ * "a whole banner/section is gone" is a real regression, not framing.
+ * They are now excluded from the safety net so the original severity
+ * (typically `critical`/`high` from the LLM) survives.
+ *
+ * Types kept in the safety net (framing/timing only):
+ *  - different-component:  same slot, different visible content (= different slide)
+ *  - image-diff:           same slot, different image at compare time (= different slide)
+ *  - text-changed:         same slot, different caption text (= different slide)
  */
 function downgradeCarouselFramingDiffs(
   diffs: VisualDifference[],
@@ -71,8 +81,6 @@ function downgradeCarouselFramingDiffs(
   if (!bothHaveCarousel) return diffs;
   const CAROUSEL_FRAME_TYPES = new Set<VisualDifference["type"]>([
     "different-component",
-    "missing-component",
-    "extra-component",
     "image-diff",
     "text-changed",
   ]);

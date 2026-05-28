@@ -19,15 +19,23 @@ import type { SelectorKey } from "./selectors.ts";
 
 /**
  * Stabilize any carousel/slider on the page and then take a screenshot.
- * All step screenshots in the journey go through this so that prod and cand
- * frames match at compare-time (issue #22). Errors in the stabilizer are
- * swallowed — we'd rather have a slightly-off shot than a missing one.
+ * All step screenshots in the journey go through this so that prod and
+ * cand frames match at compare-time (issue #22).
+ *
+ * The stabilizer is raced against a 3s cap — if the page's JS queue is
+ * wedged we'd rather snap a possibly-mis-framed shot than burn the
+ * step's budget here. Cubic flagged the unbounded await on PR #32.
+ * Errors are swallowed for the same reason: a screenshot missing is
+ * worse than a screenshot mis-timed.
  */
 async function screenshotStable(
   page: Page,
   opts: { path: string; fullPage?: boolean },
 ): Promise<void> {
-  await stabilizeCarousels(page).catch(() => undefined);
+  await Promise.race([
+    stabilizeCarousels(page).catch(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
+  ]);
   await page
     .screenshot({ path: opts.path, fullPage: opts.fullPage ?? false })
     .catch(() => undefined);

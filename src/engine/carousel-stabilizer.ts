@@ -96,33 +96,32 @@ export const CAROUSEL_STABILIZER_INIT_SCRIPT = `
     } catch (_) {}
 
     // 5. Generic fallback — any element inside a [data-section] matching
-    //    carousel|slider|banner|hero, force scrollLeft to 0 and snap the
-    //    first child into view. Catches CSS-only scroll-snap carousels
+    //    carousel|slider|banner|hero, reset scrollLeft to 0 on any
+    //    scrolled descendant. Catches CSS-only scroll-snap carousels
     //    and custom Deco implementations.
+    //
+    //    Cubic flagged that the previous version did
+    //    querySelectorAll('*') + getComputedStyle per node — O(N) layout
+    //    flushes on every screenshot. Now we only touch elements with
+    //    non-zero scrollLeft (a DOM-level read, no layout flush) which
+    //    are the only ones we'd mutate anyway. Skips the entire
+    //    getComputedStyle scan.
     try {
       var BANNER_RE = /(carousel|slider|banner|hero)/i;
       var sections = document.querySelectorAll('[data-section]');
-      sections.forEach(function (sec) {
+      for (var s = 0; s < sections.length; s++) {
+        var sec = sections[s];
         var name = sec.getAttribute('data-section') || '';
-        if (!BANNER_RE.test(name)) return;
-        // Find the horizontally-scrollable child (overflow-x: auto/scroll).
-        var scrollers = sec.querySelectorAll('*');
-        scrollers.forEach(function (el) {
-          try {
-            var cs = el && el.ownerDocument && el.ownerDocument.defaultView
-              ? el.ownerDocument.defaultView.getComputedStyle(el)
-              : null;
-            if (!cs) return;
-            var oflow = cs.overflowX;
-            if ((oflow === 'auto' || oflow === 'scroll') && el.scrollLeft > 0) {
-              el.scrollLeft = 0;
-              counts.generic++;
-            }
-          } catch (_) {}
-        });
-        // Also reset the section's own scrollLeft if applicable.
+        if (!BANNER_RE.test(name)) continue;
         try { if (sec.scrollLeft > 0) { sec.scrollLeft = 0; counts.generic++; } } catch (_) {}
-      });
+        var scrollers = sec.querySelectorAll('*');
+        for (var i = 0; i < scrollers.length; i++) {
+          var el = scrollers[i];
+          if (el && el.scrollLeft > 0) {
+            try { el.scrollLeft = 0; counts.generic++; } catch (_) {}
+          }
+        }
+      }
     } catch (_) {}
 
     // 6. Set the freeze flag so future auto-advance ticks bail out (libs
