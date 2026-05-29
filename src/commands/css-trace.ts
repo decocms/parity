@@ -88,7 +88,20 @@ export async function tracePage(
   await page.waitForLoadState("load", { timeout: 12_000 }).catch(() => undefined);
   await page.waitForLoadState("networkidle", { timeout: 6_000 }).catch(() => undefined);
   await page.waitForTimeout(settleMs);
+  return traceLoadedPage(page, page.url(), selector);
+}
 
+/**
+ * CDP-only variant of `tracePage` for callers that already navigated and
+ * waited (e.g. `parity section` which runs the carousel stabilizer first).
+ * Skips the goto + waitForLoadState dance so the existing page state
+ * (animations pinned, hydration done) is preserved.
+ */
+export async function traceLoadedPage(
+  page: Page,
+  url: string,
+  selector: string,
+): Promise<TraceResult> {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("DOM.enable");
   await cdp.send("CSS.enable");

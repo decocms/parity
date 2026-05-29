@@ -74,6 +74,7 @@ Individual flags always override the preset.
 | `parity console`   | Sub-10s capture of console errors/warnings + network failures for one URL     |
 | `parity html`      | Dump page/selector HTML or unified diff prod×cand (prettier + jsdiff)         |
 | `parity section`   | Focused prod×cand diff of a section: HTML + screenshot + computed styles      |
+| `parity fix`       | Pixel-perfect bundle: heatmap + CSS source + LLM-ready Markdown prompt        |
 | `parity prompt`    | Export issues as a Markdown prompt for any LLM                                |
 | `parity explain`   | LLM deep-dive on a specific issue (needs `ANTHROPIC_API_KEY`)                 |
 | `parity learned`   | Inspect the learned-selectors library                                         |
@@ -104,6 +105,28 @@ When `--visual-pages > 0` and an LLM key is set, the report's **Visual Diff** ta
 - one-click "Export visual prompt" — Markdown ready to paste into Claude / ChatGPT to generate the fix
 
 The visual prompt focuses *only* on visual diffs, references the screenshot paths, and includes migration-specific guidance (register section in `setup.ts`, loader shape drift, useDevice hydration, etc).
+
+## Pixel-perfect fix loop
+
+When `parity run` flags a section but you want the LLM to actually patch it, `parity fix` bundles every signal into one Markdown prompt:
+
+```bash
+parity fix \
+  --prod https://www.example.com \
+  --cand https://example.deco-cx.workers.dev \
+  --selector 'header'
+```
+
+Writes (under `./parity-output/sections/`):
+
+- `section-<hash>-{prod,cand}.png` — locator screenshots, carousels stabilized
+- `section-<hash>-heatmap.png` — pixelmatch with bounding-box analysis
+- `section-<hash>-bundle.json` — machine-readable bundle (deltas + sources + bboxes)
+- `section-<hash>-prompt.md` — **paste-ready** Markdown with embedded images, computed-style deltas, CSS source per property, HTML diff, and an opinionated "summarize what you understand first, no code yet" instruction
+
+If `ANTHROPIC_API_KEY` is set, the LLM is invoked automatically and prints a one-paragraph diagnosis to stdout (uses Claude Vision on the screenshots). Pass `--no-llm` to stay offline.
+
+The same flags are available individually on `parity section`: `--heatmap`, `--css-source`, `--prompt`, `--llm-summary`. Use those when you only need one signal; `parity fix` is the "do everything" shortcut.
 
 ## Configuration (optional)
 

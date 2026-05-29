@@ -13,6 +13,15 @@ import {
   SECTION_STYLE_KEYS,
   readComputedStyles,
 } from "../engine/computed-styles.ts";
+import { traceLoadedPage } from "./css-trace.ts";
+import { type CssSource, resolveFromTrace } from "../engine/css-source-resolver.ts";
+import { diffScreenshots } from "../diff/visual.ts";
+import { analyzeHeatmapRegions } from "../diff/heatmap-regions.ts";
+import { assembleSectionDiffBundle } from "../diff/section-bundle.ts";
+import {
+  invokeUnderstandingSummary,
+  isUnderstandingAvailable,
+} from "../llm/section-understanding.ts";
 import type { Viewport } from "../types/schema.ts";
 
 export interface SectionOptions {
@@ -22,6 +31,14 @@ export interface SectionOptions {
   outputHtml?: boolean;
   screenshot?: boolean;
   computedStyles?: boolean;
+  /** Run pixelmatch + bounding-box analysis on the two screenshots. */
+  heatmap?: boolean;
+  /** For every divergent computed-style property, resolve which CSS rule produces it. */
+  cssSource?: boolean;
+  /** Emit a `<prefix>-bundle.json` + `<prefix>-prompt.md` LLM-ready bundle. */
+  prompt?: boolean;
+  /** Invoke Claude (Vision) with the bundle and print the 1-paragraph summary. */
+  llmSummary?: boolean;
   viewport: string;
   wait: string;
   outDir: string;
@@ -70,20 +87,32 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
     return 2;
   }
   // Default behaviour: if user passed NONE of the facet flags, enable all.
+  // The bundle/heatmap/css-source/prompt/llm-summary flags are ADDITIVE — they
+  // never count as "facets asked"; without them the command stays identical
+  // to its pre-bundle behavior.
   const facetsAsked =
     Boolean(opts.outputHtml) || Boolean(opts.screenshot) || Boolean(opts.computedStyles);
   const want = {
     html: facetsAsked ? Boolean(opts.outputHtml) : true,
     screenshot: facetsAsked ? Boolean(opts.screenshot) : true,
     styles: facetsAsked ? Boolean(opts.computedStyles) : true,
+    heatmap: Boolean(opts.heatmap),
+    cssSource: Boolean(opts.cssSource),
+    prompt: Boolean(opts.prompt) || Boolean(opts.llmSummary),
+    llmSummary: Boolean(opts.llmSummary),
   };
+  // Screenshots are a hard prerequisite for the heatmap; force them on
+  // silently so `--heatmap` alone "just works".
+  if (want.heatmap) want.screenshot = true;
 
   mkdirSync(opts.outDir, { recursive: true });
   const hash = hashSelector(opts.selector);
+  const filePrefix = `section-${hash}-${viewport}`;
   const screenshotPaths = {
-    prod: resolve(opts.outDir, `section-${hash}-${viewport}-prod.png`),
-    cand: resolve(opts.outDir, `section-${hash}-${viewport}-cand.png`),
+    prod: resolve(opts.outDir, `${filePrefix}-prod.png`),
+    cand: resolve(opts.outDir, `${filePrefix}-cand.png`),
   };
+  const heatmapPath = resolve(opts.outDir, `${filePrefix}-heatmap.png`);
 
   const browser = await launchBrowser({ headless: true });
   try {
@@ -96,6 +125,7 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
         wantScreenshot: want.screenshot,
         wantStyles: want.styles,
         wantHtml: want.html,
+        wantCssSource: want.cssSource,
         screenshotPath: screenshotPaths.prod,
       }),
       gatherSide(browser, {
@@ -106,9 +136,36 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
         wantScreenshot: want.screenshot,
         wantStyles: want.styles,
         wantHtml: want.html,
+        wantCssSource: want.cssSource,
         screenshotPath: screenshotPaths.cand,
       }),
     ]);
+
+    const heatmap = want.heatmap
+      ? computeHeatmap(prodSide, candSide, screenshotPaths, heatmapPath)
+      : null;
+
+    const bundlePaths = want.prompt
+      ? await buildPromptBundle({
+          opts,
+          viewport,
+          prodSide,
+          candSide,
+          screenshotPaths,
+          heatmapPath: heatmap?.wrote ? heatmapPath : undefined,
+          heatmap: heatmap?.analysis ?? undefined,
+          filePrefix,
+        })
+      : null;
+
+    let llmSummary: string | null = null;
+    if (want.llmSummary && bundlePaths) {
+      llmSummary = await maybeRunLlmSummary({
+        markdownPath: bundlePaths.markdownPath,
+        screenshotPaths,
+        heatmapPath: heatmap?.wrote ? heatmapPath : undefined,
+      });
+    }
 
     if (opts.json) {
       console.log(
@@ -120,11 +177,18 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
           prodSide,
           candSide,
           screenshotPaths: want.screenshot ? screenshotPaths : null,
+          heatmap: heatmap?.analysis ?? null,
+          heatmapPath: heatmap?.wrote ? heatmapPath : null,
+          bundle: bundlePaths,
+          llmSummary,
         }),
       );
       return verdict(prodSide, candSide);
     }
     await printResults({ opts, viewport, prodSide, candSide, screenshotPaths, want });
+    if (heatmap) printHeatmap(heatmap, heatmapPath);
+    if (bundlePaths) printBundlePaths(bundlePaths);
+    if (llmSummary) printLlmSummary(llmSummary);
     return verdict(prodSide, candSide);
   } finally {
     await browser.close().catch(() => undefined);
@@ -137,6 +201,9 @@ export interface SideData {
   styles: ComputedStylesResult | ComputedStylesNotFound | null;
   screenshotTaken: boolean;
   screenshotError?: string;
+  /** Map<property, CssSource | null> when --css-source was on. */
+  cssSources?: Map<string, CssSource | null>;
+  cssSourceError?: string;
 }
 
 async function gatherSide(
@@ -149,6 +216,7 @@ async function gatherSide(
     wantHtml: boolean;
     wantScreenshot: boolean;
     wantStyles: boolean;
+    wantCssSource: boolean;
     screenshotPath: string;
   },
 ): Promise<SideData> {
@@ -189,6 +257,19 @@ async function gatherSide(
 
     if (opts.wantStyles) {
       result.styles = await readComputedStyles(page, opts.selector);
+    }
+
+    if (opts.wantCssSource) {
+      try {
+        const trace = await traceLoadedPage(page, opts.url, opts.selector);
+        if (trace.found) {
+          result.cssSources = resolveFromTrace(trace, SECTION_STYLE_KEYS);
+        } else {
+          result.cssSourceError = `tracePage não encontrou '${opts.selector}'`;
+        }
+      } catch (err) {
+        result.cssSourceError = `tracePage falhou: ${(err as Error).message}`;
+      }
     }
 
     if (opts.wantScreenshot) {
@@ -426,4 +507,157 @@ function colorPatch(patch: string): string {
     else out.push(line);
   }
   return out.join("\n");
+}
+
+interface HeatmapState {
+  wrote: boolean;
+  analysis: ReturnType<typeof analyzeHeatmapRegions> | null;
+  error?: string;
+}
+
+function computeHeatmap(
+  prod: SideData,
+  cand: SideData,
+  paths: { prod: string; cand: string },
+  heatmapPath: string,
+): HeatmapState {
+  if (!prod.screenshotTaken || !cand.screenshotTaken) {
+    return {
+      wrote: false,
+      analysis: null,
+      error: "heatmap pulado: um dos screenshots falhou",
+    };
+  }
+  try {
+    diffScreenshots(paths.prod, paths.cand, heatmapPath, { maxPctDiff: 1 });
+    const analysis = analyzeHeatmapRegions(heatmapPath);
+    return { wrote: true, analysis };
+  } catch (err) {
+    return { wrote: false, analysis: null, error: (err as Error).message };
+  }
+}
+
+async function buildPromptBundle(args: {
+  opts: SectionOptions;
+  viewport: Viewport;
+  prodSide: SideData;
+  candSide: SideData;
+  screenshotPaths: { prod: string; cand: string };
+  heatmapPath?: string;
+  heatmap?: ReturnType<typeof analyzeHeatmapRegions>;
+  filePrefix: string;
+}): Promise<{ jsonPath: string; markdownPath: string; summary: string }> {
+  const { opts, viewport, prodSide, candSide, screenshotPaths, heatmapPath, heatmap, filePrefix } =
+    args;
+
+  let htmlBundle: { prod: string; cand: string; diffPatch: string } | undefined;
+  if (prodSide.html && candSide.html) {
+    const [pFmt, cFmt] = await Promise.all([formatHtml(prodSide.html), formatHtml(candSide.html)]);
+    htmlBundle = {
+      prod: pFmt,
+      cand: cFmt,
+      diffPatch: diff.createPatch(opts.selector, pFmt, cFmt, "prod", "cand"),
+    };
+  }
+
+  const computedStyles =
+    prodSide.styles && candSide.styles
+      ? { prod: prodSide.styles, cand: candSide.styles }
+      : undefined;
+
+  const cssSources =
+    prodSide.cssSources && candSide.cssSources
+      ? { prod: prodSide.cssSources, cand: candSide.cssSources }
+      : undefined;
+
+  const screenshots =
+    prodSide.screenshotTaken && candSide.screenshotTaken
+      ? {
+          prodPath: screenshotPaths.prod,
+          candPath: screenshotPaths.cand,
+          heatmapPath,
+        }
+      : undefined;
+
+  return assembleSectionDiffBundle({
+    selector: opts.selector,
+    pageKey: `${new URL(opts.prod).pathname}::${viewport}`,
+    viewport,
+    prodUrl: opts.prod,
+    candUrl: opts.cand,
+    html: htmlBundle,
+    screenshots,
+    heatmap,
+    computedStyles,
+    cssSources,
+    outDir: opts.outDir,
+    filePrefix,
+  });
+}
+
+async function maybeRunLlmSummary(args: {
+  markdownPath: string;
+  screenshotPaths: { prod: string; cand: string };
+  heatmapPath?: string;
+}): Promise<string | null> {
+  if (!isUnderstandingAvailable()) {
+    console.warn(
+      chalk.yellow(
+        "  --llm-summary pulado: nenhum ANTHROPIC_API_KEY ou OPENROUTER_API_KEY configurado.",
+      ),
+    );
+    return null;
+  }
+  const result = await invokeUnderstandingSummary({
+    markdownPath: args.markdownPath,
+    prodScreenshotPath: args.screenshotPaths.prod,
+    candScreenshotPath: args.screenshotPaths.cand,
+    heatmapPath: args.heatmapPath,
+  });
+  return result?.summary ?? null;
+}
+
+function printHeatmap(state: HeatmapState, heatmapPath: string): void {
+  console.log(chalk.bold("  Heatmap"));
+  if (state.error) {
+    console.log(chalk.yellow(`    ${state.error}`));
+    console.log("");
+    return;
+  }
+  if (!state.analysis) {
+    console.log(chalk.dim("    (sem dados de heatmap)"));
+    console.log("");
+    return;
+  }
+  const a = state.analysis;
+  const pct = (a.pctDiff * 100).toFixed(2);
+  console.log(`    ${chalk.cyan("diffPixels")}: ${a.diffPixels} (${pct}%)`);
+  if (a.boundingBox) {
+    const bb = a.boundingBox;
+    console.log(
+      `    ${chalk.cyan("boundingBox")}: x=${bb.x} y=${bb.y} w=${bb.width} h=${bb.height}`,
+    );
+  }
+  if (a.hotspots.length > 0) {
+    console.log(`    ${chalk.cyan("hotspots")}:`);
+    for (const h of a.hotspots.slice(0, 5)) {
+      console.log(`      (${h.x}, ${h.y}) ${h.width}×${h.height} — ${h.pixelCount} px`);
+    }
+  }
+  console.log(`    ${chalk.dim(`heatmap: ${heatmapPath}`)}`);
+  console.log("");
+}
+
+function printBundlePaths(b: { jsonPath: string; markdownPath: string; summary: string }): void {
+  console.log(chalk.bold("  Bundle"));
+  console.log(`    ${chalk.cyan("summary")}: ${b.summary}`);
+  console.log(`    ${chalk.cyan("json")}:    ${chalk.dim(b.jsonPath)}`);
+  console.log(`    ${chalk.cyan("prompt")}:  ${chalk.dim(b.markdownPath)}`);
+  console.log("");
+}
+
+function printLlmSummary(summary: string): void {
+  console.log(chalk.bold("  What the LLM understood"));
+  console.log(`    ${summary.split("\n").join("\n    ")}`);
+  console.log("");
 }
