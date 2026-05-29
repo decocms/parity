@@ -16,7 +16,15 @@ export type Category = z.infer<typeof Category>;
 export const Viewport = z.enum(["mobile", "tablet", "desktop"]);
 export type Viewport = z.infer<typeof Viewport>;
 
-export const FlowName = z.enum(["homepage", "plp", "pdp", "purchase-journey"]);
+export const FlowName = z.enum([
+  "homepage",
+  "plp",
+  "pdp",
+  "purchase-journey",
+  "search",
+  "cart-interactions",
+  "login",
+]);
 export type FlowName = z.infer<typeof FlowName>;
 
 export const Side = z.enum(["prod", "cand"]);
@@ -131,6 +139,36 @@ export const StepCapture = z.object({
       "unknown",
     ])
     .optional(),
+  /** For search flow steps: captures term, mode, and result/suggestion counts. */
+  searchValidation: z
+    .object({
+      term: z.string(),
+      mode: z.enum(["empty", "autocomplete", "results", "no-results"]),
+      resultCount: z.number().optional(),
+      suggestionCount: z.number().optional(),
+      hasEmptyState: z.boolean().optional(),
+    })
+    .optional(),
+  /** For cart-interactions flow: before/after snapshot of qty + price for the action. */
+  cartItemValidation: z
+    .object({
+      action: z.enum(["increment", "decrement", "remove", "apply-coupon"]),
+      before: z
+        .object({ qty: z.number().optional(), price: z.string().optional() })
+        .optional(),
+      after: z
+        .object({ qty: z.number().optional(), price: z.string().optional() })
+        .optional(),
+      succeeded: z.boolean(),
+    })
+    .optional(),
+  /** For login flow: stage in the form lifecycle + optional error message captured. */
+  loginValidation: z
+    .object({
+      stage: z.enum(["form-loaded", "submitted", "succeeded", "error-shown"]),
+      errorMessage: z.string().optional(),
+    })
+    .optional(),
 });
 export type StepCapture = z.infer<typeof StepCapture>;
 
@@ -229,6 +267,8 @@ export const VisualDiffPage = z.object({
   differences: z.array(VisualDifference),
   llmCalled: z.boolean(),
   llmError: z.string().optional(),
+  /** ISO timestamp when this verdict came from the cross-run cache instead of a fresh LLM call. */
+  cachedAt: z.string().optional(),
 });
 export type VisualDiffPage = z.infer<typeof VisualDiffPage>;
 
@@ -239,6 +279,14 @@ export const VisualDiffSummary = z.object({
   pagesPassed: z.number(),
   pagesFailed: z.number(),
   llmCallsUsed: z.number(),
+  /**
+   * Single binary signal for automation/agent loops. `true` iff every page in
+   * `results` has verdict === "pass". `false` if any page has "diffs" or
+   * "failed". Read this from report.json as the canonical "is parity OK?" flag.
+   */
+  parityOk: z.boolean(),
+  /** How many of the results came straight from the cross-run cache (no LLM hit). */
+  pagesFromCache: z.number(),
 });
 export type VisualDiffSummary = z.infer<typeof VisualDiffSummary>;
 
@@ -375,9 +423,59 @@ export const ParityRc = z.object({
       quantityIncrement: z.string().optional(),
       quantityInput: z.string().optional(),
       minicartCount: z.string().optional(),
+      // Search flow
+      searchTrigger: z.string().optional(),
+      searchInput: z.string().optional(),
+      searchSuggestions: z.string().optional(),
+      // Cart interactions flow
+      cartItemRow: z.string().optional(),
+      cartQuantityIncrement: z.string().optional(),
+      cartQuantityDecrement: z.string().optional(),
+      cartRemoveItem: z.string().optional(),
+      cartCouponInput: z.string().optional(),
+      cartCouponSubmit: z.string().optional(),
+      cartTotalPrice: z.string().optional(),
+      // PDP gallery + related
+      pdpGalleryThumbnail: z.string().optional(),
+      pdpGalleryMain: z.string().optional(),
+      pdpRelatedShelf: z.string().optional(),
+      // Login flow
+      loginTrigger: z.string().optional(),
+      loginEmailInput: z.string().optional(),
+      loginPasswordInput: z.string().optional(),
+      loginSubmit: z.string().optional(),
+      loginErrorMessage: z.string().optional(),
+      accountMenuTrigger: z.string().optional(),
     })
     .default({}),
   skipSteps: z.array(z.string()).default([]),
+  /** Search flow config — override LLM-discovered terms, customise typing speed. */
+  search: z
+    .object({
+      terms: z.array(z.string()).optional(),
+      noResultsTerm: z.string().optional(),
+      typeDelayMs: z.number().optional(),
+    })
+    .optional(),
+  /** Login flow config — gated by `enabled`. Credentials MUST come from env vars. */
+  login: z
+    .object({
+      enabled: z.boolean().default(false),
+    })
+    .optional(),
+  /** Footer-links-health check config. */
+  footer: z
+    .object({
+      maxLinks: z.number().default(20),
+      followExternal: z.boolean().default(false),
+    })
+    .optional(),
+  /** 404-page-parity check config. */
+  notFound: z
+    .object({
+      testUrl: z.string().optional(),
+    })
+    .optional(),
 });
 export type ParityRc = z.infer<typeof ParityRc>;
 

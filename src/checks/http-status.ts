@@ -4,6 +4,22 @@ import { pairCaptures } from "./lib/pairing.ts";
 
 export function httpStatusParity(ctx: CheckContext): CheckResult {
   const start = Date.now();
+  // Single-site mode (parity e2e: prod slot empty by convention). With no prod
+  // baseline, every captured cand page would otherwise be flagged as "missing
+  // in prod" — pure noise. Skip when prod is the empty side. If cand is the
+  // empty side (legitimate regression: prod captured but cand didn't), keep
+  // the existing comparative behaviour so we still surface the regression.
+  if (ctx.prodPages.length === 0 && ctx.candPages.length > 0) {
+    return {
+      name: "http-status-parity",
+      status: "skipped",
+      severity: "critical",
+      durationMs: Date.now() - start,
+      summary: "comparativo desabilitado: rodando em single-site (sem baseline prod)",
+      issues: [],
+      data: { pairs: 0, orphansProd: 0, orphansCand: 0 },
+    };
+  }
   const { pairs, orphansProd, orphansCand } = pairCaptures(ctx.prodPages, ctx.candPages);
   const issues: Issue[] = [];
 

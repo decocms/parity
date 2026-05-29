@@ -21,6 +21,16 @@ import { cartRevealModeDivergence } from "./cart-reveal-mode.ts";
 import { lazySectionPresence } from "./lazy-sections.ts";
 import { cacheCoverage } from "./cache-coverage.ts";
 import { seoDeepAudit } from "./seo-deep-audit.ts";
+import { searchPresence } from "./search-presence.ts";
+import { searchAutocomplete } from "./search-autocomplete.ts";
+import { searchResults } from "./search-results.ts";
+import { searchNoResults } from "./search-no-results.ts";
+import { cartInteractionsFlow } from "./cart-interactions-flow.ts";
+import { notFoundParity } from "./not-found-parity.ts";
+import { cookieCepModalCls } from "./cookie-cep-modal-cls.ts";
+import { pdpGalleryRelated } from "./pdp-gallery-related.ts";
+import { footerLinksHealth } from "./footer-links-health.ts";
+import { loginFlow } from "./login-flow.ts";
 
 export interface CheckContext {
   /** Page captures from prod side, across all flows/viewports */
@@ -33,8 +43,17 @@ export interface CheckContext {
   /** Resolved config */
   rc: ParityRc;
   ignore: ParityIgnore;
-  /** Output dir for diff artifacts (e.g. heatmap PNGs) */
+  /** Output dir for diff artifacts (e.g. heatmap PNGs). Per-run. */
   outDir: string;
+  /**
+   * Workspace-level cache dir (cross-run). Used by visual-regression to
+   * persist verdicts between `parity run` invocations so re-runs skip the
+   * LLM call for screenshot pairs that already passed. When undefined,
+   * caching is disabled (default for tests; populated by `run` command).
+   */
+  cacheDir?: string;
+  /** When true, ignore any existing cache entries and re-judge from scratch. */
+  noCache?: boolean;
   /** Viewports under test */
   viewports: Viewport[];
 }
@@ -56,6 +75,17 @@ export const ALL_CHECKS: Check[] = [
   lazySectionPresence,
   seoDeepAudit,
   cacheCoverage,
+  // Fase 2 — search + cart-interactions + site checks + login
+  searchPresence,
+  searchAutocomplete,
+  searchResults,
+  searchNoResults,
+  cartInteractionsFlow,
+  notFoundParity,
+  cookieCepModalCls,
+  pdpGalleryRelated,
+  footerLinksHealth,
+  loginFlow,
 ];
 
 /**
@@ -82,6 +112,16 @@ export const ALL_CHECKS_BY_NAME: Record<string, Check> = {
   "lazy-section-presence": lazySectionPresence,
   "seo-deep-audit": seoDeepAudit,
   "cache-coverage": cacheCoverage,
+  "search-presence": searchPresence,
+  "search-autocomplete": searchAutocomplete,
+  "search-results": searchResults,
+  "search-no-results": searchNoResults,
+  "cart-interactions-flow": cartInteractionsFlow,
+  "not-found-parity": notFoundParity,
+  "cookie-cep-modal-cls": cookieCepModalCls,
+  "pdp-gallery-related": pdpGalleryRelated,
+  "footer-links-health": footerLinksHealth,
+  "login-flow": loginFlow,
 };
 
 /**
@@ -92,6 +132,12 @@ export const ALL_CHECKS_BY_NAME: Record<string, Check> = {
 export const FLOW_DEPENDENT_CHECKS: ReadonlySet<string> = new Set([
   "purchase-journey-flow",
   "cart-reveal-mode-divergence",
+  "search-presence",
+  "search-autocomplete",
+  "search-results",
+  "search-no-results",
+  "cart-interactions-flow",
+  "login-flow",
 ]);
 
 /**

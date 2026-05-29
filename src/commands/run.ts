@@ -1,3 +1,4 @@
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
 import ora from "ora";
@@ -68,6 +69,23 @@ export interface RunOptions {
   visualPages?: number;
   /** Disable the visual-diff capture pass entirely. */
   noVisualDiff?: boolean;
+  /**
+   * Comma-separated paths to compare visually. When set, overrides
+   * sitemap-based sampling — the caller takes responsibility for picking
+   * which routes get verified. Recommended for agent loops that need
+   * deterministic coverage of specific flows (home, /account, a known PDP).
+   */
+  pages?: string;
+  /** Path to a text file with one path per line. Overrides --pages when both are set. */
+  pagesFile?: string;
+  /**
+   * Disable the cross-run cache that persists visual verdicts at
+   * `<output>/cache/verdicts.json`. By default the cache is enabled so
+   * re-runs skip the LLM call for pages whose screenshots haven't changed.
+   */
+  cache?: boolean;
+  /** Wipe the cache file before the run starts. */
+  clearCache?: boolean;
   /** Named bundle of defaults. Individual flags still override the preset. */
   preset?: "smoke" | "full" | "ci";
   /**
@@ -114,9 +132,10 @@ const PRESETS: Record<NonNullable<RunOptions["preset"]>, PresetDefaults> = {
     noVisualDiff: true,
     autoSelectors: false,
   },
-  // Full audit — purchase journey, both viewports, visual diff, extra vitals
+  // Full audit — purchase journey + search + cart interactions, both viewports,
+  // visual diff, extra vitals. Catches more regressions at the cost of ~2× runtime.
   full: {
-    flows: "purchase-journey",
+    flows: "purchase-journey,search,cart-interactions",
     viewports: "mobile,desktop",
     vitalsPages: 10,
     visualPages: 5,
@@ -178,6 +197,18 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   const rc = loadParityRc();
   rc.cep = opts.cep || rc.cep;
   const ignore = loadParityIgnore();
+
+  if (opts.clearCache) {
+    const cacheFile = join(opts.output, "cache", "verdicts.json");
+    if (existsSync(cacheFile)) {
+      try {
+        unlinkSync(cacheFile);
+        console.log(chalk.dim(`  cache wiped: ${cacheFile}`));
+      } catch (err) {
+        console.log(chalk.yellow(`  cache wipe falhou: ${(err as Error).message}`));
+      }
+    }
+  }
 
   // Pre-flight: confirm both URLs respond before spending 10 minutes on a
   // doomed run. We send the UA of the first viewport so the warm-up hits the
@@ -309,6 +340,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
             rc,
             ctx,
             outDir: paths.screenshotsDir,
+            runId,
             learned,
             platform,
             recoveryBudget: 3,
@@ -450,12 +482,21 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     }
 
     // Visual diff capture pass: home + sampled PLPs/PDPs from sitemap, with full-page screenshots
-    const visualPagesLimit = opts.noVisualDiff ? 0 : (opts.visualPages ?? 5);
+    const explicitPaths = resolveExplicitPages(opts.pagesFile, opts.pages);
+    const visualPagesLimit = opts.noVisualDiff
+      ? 0
+      : explicitPaths
+        ? explicitPaths.length
+        : (opts.visualPages ?? 5);
     if (browser && visualPagesLimit > 0) {
-      const visualSpinner = ora("Descobrindo páginas pra visual diff…").start();
+      const visualSpinner = ora(
+        explicitPaths
+          ? `Visual diff: ${explicitPaths.length} página(s) explícita(s) via --pages/--pages-file…`
+          : "Descobrindo páginas pra visual diff…",
+      ).start();
       try {
-        const sample = await discoverPagesFromSitemap(opts.prod, { sampleSize: visualPagesLimit });
-        const visualPaths = sample.all.map((p) => p.path);
+        const visualPaths = explicitPaths
+          ?? (await discoverPagesFromSitemap(opts.prod, { sampleSize: visualPagesLimit })).all.map((p) => p.path);
         // Don't re-capture paths we already have screenshots for (in flows or vitals extras)
         const alreadyCapturedKeys = new Set<string>();
         for (const p of allPageCaptures) {
@@ -520,6 +561,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     }
 
     spinner.start("Rodando checks…");
+    const cacheDir = join(opts.output, "cache");
     const checkCtx: CheckContext = {
       prodPages: allPageCaptures.filter((p) => p.side === "prod"),
       candPages: allPageCaptures.filter((p) => p.side === "cand"),
@@ -528,6 +570,8 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       rc,
       ignore,
       outDir: paths.runDir,
+      cacheDir,
+      noCache: opts.cache === false,
       viewports,
     };
     const checks = await runAllChecks(checkCtx);
@@ -669,6 +713,48 @@ function computeVerdict(checks: CheckResult[], issues: Issue[]): Verdict {
     checksFailed,
     checksSkipped,
   };
+}
+
+/**
+ * Resolve the list of paths the user wants to visually compare.
+ *  - `--pages-file` (when present) wins over `--pages`. One path per line,
+ *    `#` starts a comment, empty lines are ignored.
+ *  - `--pages` is a comma-separated list.
+ *  - Returns `null` when neither flag is set (caller falls back to sitemap
+ *    sampling).
+ *
+ * Paths are normalized: leading whitespace trimmed, missing leading "/"
+ * prepended. We DO NOT validate against the prod site here — invalid paths
+ * just yield 404 captures and surface as obvious diffs later.
+ */
+function resolveExplicitPages(
+  pagesFile: string | undefined,
+  pagesList: string | undefined,
+): string[] | null {
+  if (pagesFile) {
+    if (!existsSync(pagesFile)) {
+      throw new Error(`--pages-file não encontrado: ${pagesFile}`);
+    }
+    const raw = readFileSync(pagesFile, "utf-8");
+    const lines = raw
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !l.startsWith("#"));
+    return lines.map(normalizePath);
+  }
+  if (pagesList) {
+    const parts = pagesList
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parts.length === 0) return null;
+    return parts.map(normalizePath);
+  }
+  return null;
+}
+
+function normalizePath(p: string): string {
+  return p.startsWith("/") ? p : `/${p}`;
 }
 
 async function runWithConcurrency<T>(
@@ -868,6 +954,15 @@ function printSummary(
   console.log(
     `     issues: ${chalk.red(verdict.critical)} critical · ${chalk.yellow(verdict.high)} high · ${verdict.medium} medium · ${chalk.dim(`${verdict.low} low`)}`,
   );
+  if (run.visualDiff) {
+    const vd = run.visualDiff;
+    const parityIcon = vd.parityOk ? chalk.green("✔") : chalk.red("✖");
+    const parityLabel = vd.parityOk ? chalk.green("OK") : chalk.red("DIFFS");
+    const cacheNote = vd.pagesFromCache > 0 ? chalk.dim(` · ${vd.pagesFromCache} cached`) : "";
+    console.log(
+      `     visual: ${parityIcon} parityOk=${parityLabel} · ${vd.pagesChecked} pages · ${chalk.red(vd.pagesWithDiffs)} diffs · ${chalk.green(vd.pagesPassed)} pass${cacheNote}`,
+    );
+  }
   if (run.topIssues.length > 0) {
     console.log("");
     console.log(chalk.bold("  Top issues:"));

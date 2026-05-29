@@ -75,6 +75,8 @@ describe("renderHtmlReport — structure", () => {
       pagesPassed: 0,
       pagesFailed: 0,
       llmCallsUsed: 1,
+      parityOk: false,
+      pagesFromCache: 0,
       results: [
         {
           pageKey: "/::mobile",

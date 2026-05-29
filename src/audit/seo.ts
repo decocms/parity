@@ -108,7 +108,13 @@ export function auditSeo(pageKey: string, html: string): Issue[] {
   }
 
   // 4. Robots noindex (red flag — usually accidental)
-  if (meta.robots && /noindex/i.test(meta.robots)) {
+  // Some URL patterns SHOULD be noindex by best practice — search empty
+  // states, account areas, checkout, 404s, etc. Don't flag those.
+  if (
+    meta.robots &&
+    /noindex/i.test(meta.robots) &&
+    !isPageWhereNoindexIsExpected(pageKey)
+  ) {
     out.push({
       id: `audit:seo:noindex:${pageKey}`,
       severity: "high",
@@ -158,4 +164,40 @@ export function auditSeo(pageKey: string, html: string): Issue[] {
   }
 
   return out;
+}
+
+/**
+ * URL patterns where `noindex` is the SEO best practice (not a bug):
+ *  - empty search results / generic search landing
+ *  - 404 / error pages
+ *  - account / checkout / cart (private/transient state)
+ *  - login / signup
+ *
+ * `pageKey` typically holds the pathname (e.g. "/buscapagina", "/login") or
+ * a path+viewport key like "/login::mobile" — we just substring-match the
+ * meaningful slug, so both formats work.
+ */
+function isPageWhereNoindexIsExpected(pageKey: string): boolean {
+  // Strip the "::viewport" suffix that buildKey adds; treat the leading "/" as a
+  // word boundary anchor so a 2-char path like "/s" can be matched safely.
+  const path = pageKey.toLowerCase().split("::")[0]!;
+  return (
+    // search / empty-state — covers /search, /buscapagina (VTEX legacy), and /s (VTEX modern Intelligent Search short alias)
+    /^\/search(\/|\?|$)/.test(path) ||
+    /^\/busca(pagina)?(\/|\?|$)/.test(path) ||
+    /^\/s(\/|\?|$)/.test(path) ||
+    // 404 / error pages
+    /\/404(\/|$)/.test(path) ||
+    /\/not[-_]?found(\/|$)/.test(path) ||
+    /\/error(\/|$)/.test(path) ||
+    // private areas
+    /\/account(\/|$)/.test(path) ||
+    /\/minha[-_]?conta(\/|$)/.test(path) ||
+    /\/checkout(\/|$)/.test(path) ||
+    /\/cart(\/|$)/.test(path) ||
+    /\/carrinho(\/|$)/.test(path) ||
+    /\/login(\/|$)/.test(path) ||
+    /\/signup(\/|$)/.test(path) ||
+    /\/cadastr/.test(path)
+  );
 }

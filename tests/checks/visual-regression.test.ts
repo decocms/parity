@@ -330,4 +330,208 @@ describe("visualRegressionKeyframes", () => {
     delete process.env.ANTHROPIC_API_KEY;
     spy.mockRestore();
   });
+
+  it("emits visualDiff.parityOk=true when every page passes", async () => {
+    const prodPath = join(dir.path, "p.png");
+    const candPath = join(dir.path, "c.png");
+    makePng(prodPath, 50, 50, [100, 100, 100]);
+    makePng(candPath, 50, 50, [100, 100, 100]);
+    const r = await visualRegressionKeyframes(
+      makeContext({
+        outDir: dir.path,
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+      }),
+    );
+    const vd = r.data?.visualDiff as { parityOk: boolean; pagesFromCache: number };
+    expect(vd.parityOk).toBe(true);
+    expect(vd.pagesFromCache).toBe(0);
+  });
+
+  it("emits visualDiff.parityOk=false when any page has diffs", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: "tool_use",
+          name: "report_visual_differences",
+          input: {
+            differences: [
+              { type: "missing-component", region: "main", severity: "critical", description: "x" },
+            ],
+          },
+        },
+      ],
+    });
+    const prodPath = join(dir.path, "p.png");
+    const candPath = join(dir.path, "c.png");
+    makePng(prodPath, 50, 50, [0, 0, 0]);
+    makePng(candPath, 50, 50, [255, 255, 255]);
+    const r = await visualRegressionKeyframes(
+      makeContext({
+        outDir: dir.path,
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+      }),
+    );
+    const vd = r.data?.visualDiff as { parityOk: boolean };
+    expect(vd.parityOk).toBe(false);
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  it("falls back to 'diffs' verdict when LLM skipped + pctDiff is meaningfully high (no false OK)", async () => {
+    // Simulate the budget-cap bug: high pctDiff, no LLM call, no section
+    // drift. Old behavior would return verdict="pass". New behavior should
+    // surface this as "diffs" since we don't have a semantic read.
+    process.env.PARITY_MAX_LLM_CALLS = "0"; // force budget exhaustion
+    process.env.ANTHROPIC_API_KEY = "sk-test"; // LLM available but capped
+    const prodPath = join(dir.path, "p.png");
+    const candPath = join(dir.path, "c.png");
+    makePng(prodPath, 50, 50, [0, 0, 0]);
+    makePng(candPath, 50, 50, [255, 255, 255]); // ~100% pctDiff
+    const r = await visualRegressionKeyframes(
+      makeContext({
+        outDir: dir.path,
+        prodPages: [makePageCapture({ url: "https://x.com/account", side: "prod", screenshotPath: prodPath })],
+        candPages: [makePageCapture({ url: "https://x.com/account", side: "cand", screenshotPath: candPath })],
+      }),
+    );
+    const vd = r.data?.visualDiff as {
+      parityOk: boolean;
+      results: Array<{ verdict: string; llmCalled: boolean; pctDiff: number }>;
+    };
+    expect(vd.results[0]?.llmCalled).toBe(false);
+    expect(vd.results[0]?.pctDiff).toBeGreaterThan(0.5);
+    expect(vd.results[0]?.verdict).toBe("diffs");
+    expect(vd.parityOk).toBe(false);
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.PARITY_MAX_LLM_CALLS;
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("passes heatmap as 3rd image to the LLM when heatmap was written", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: "tool_use",
+          name: "report_visual_differences",
+          input: { differences: [] },
+        },
+      ],
+    });
+    const prodPath = join(dir.path, "p.png");
+    const candPath = join(dir.path, "c.png");
+    makePng(prodPath, 50, 50, [0, 0, 0]);
+    makePng(candPath, 50, 50, [255, 255, 255]);
+    await visualRegressionKeyframes(
+      makeContext({
+        outDir: dir.path,
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+      }),
+    );
+    expect(mockCreate).toHaveBeenCalledOnce();
+    const callArgs = mockCreate.mock.calls[0]?.[0];
+    const userMessage = callArgs?.messages?.[0]?.content;
+    const imageBlocks = (userMessage as Array<{ type: string }>)?.filter(
+      (block) => block.type === "image",
+    );
+    expect(imageBlocks?.length).toBe(3); // prod + cand + heatmap
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  it("uses cached verdict on second run with identical screenshots (no LLM call)", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: "tool_use",
+          name: "report_visual_differences",
+          input: { differences: [] }, // first run finds no diffs, caches pass
+        },
+      ],
+    });
+    const prodPath = join(dir.path, "p.png");
+    const candPath = join(dir.path, "c.png");
+    makePng(prodPath, 50, 50, [0, 0, 0]);
+    makePng(candPath, 50, 50, [255, 255, 255]); // forces LLM (pctDiff above trivial)
+    const cacheDir = join(dir.path, "cache");
+
+    const r1 = await visualRegressionKeyframes(
+      makeContext({
+        outDir: dir.path,
+        cacheDir,
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+      }),
+    );
+    const vd1 = r1.data?.visualDiff as { llmCallsUsed: number; pagesFromCache: number };
+    expect(vd1.llmCallsUsed).toBe(1);
+    expect(vd1.pagesFromCache).toBe(0);
+
+    // Reset the mock spy; if the cache works the 2nd run must NOT hit it.
+    mockCreate.mockClear();
+
+    const r2 = await visualRegressionKeyframes(
+      makeContext({
+        outDir: dir.path,
+        cacheDir,
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+      }),
+    );
+    const vd2 = r2.data?.visualDiff as {
+      llmCallsUsed: number;
+      pagesFromCache: number;
+      results: Array<{ cachedAt?: string; verdict: string }>;
+    };
+    expect(vd2.llmCallsUsed).toBe(0);
+    expect(vd2.pagesFromCache).toBe(1);
+    expect(vd2.results[0]?.cachedAt).toBeDefined();
+    expect(vd2.results[0]?.verdict).toBe("pass");
+    expect(mockCreate).not.toHaveBeenCalled();
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  it("noCache=true bypasses cache and forces a fresh LLM call", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    mockCreate.mockResolvedValue({
+      content: [
+        { type: "tool_use", name: "report_visual_differences", input: { differences: [] } },
+      ],
+    });
+    const prodPath = join(dir.path, "p.png");
+    const candPath = join(dir.path, "c.png");
+    makePng(prodPath, 50, 50, [0, 0, 0]);
+    makePng(candPath, 50, 50, [255, 255, 255]);
+    const cacheDir = join(dir.path, "cache");
+
+    // Seed the cache with a first run
+    await visualRegressionKeyframes(
+      makeContext({
+        outDir: dir.path,
+        cacheDir,
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+      }),
+    );
+    mockCreate.mockClear();
+
+    // Second run with noCache=true must ignore the seeded entry and call LLM again
+    const r = await visualRegressionKeyframes(
+      makeContext({
+        outDir: dir.path,
+        cacheDir,
+        noCache: true,
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+      }),
+    );
+    const vd = r.data?.visualDiff as { llmCallsUsed: number; pagesFromCache: number };
+    expect(mockCreate).toHaveBeenCalledOnce();
+    expect(vd.llmCallsUsed).toBe(1);
+    expect(vd.pagesFromCache).toBe(0);
+    delete process.env.ANTHROPIC_API_KEY;
+  });
 });

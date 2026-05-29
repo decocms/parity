@@ -46,12 +46,14 @@ export function cacheCoverage(ctx: CheckContext): CheckResult {
 
   if (oppCount > 0) {
     const severity = oppCount >= 10 || oppBytes > 1_000_000 ? "high" : "medium";
+    const isSingleSite = ctx.prodPages.length === 0;
+    const target = isSingleSite ? "no site" : "em cand";
     issues.push({
       id: "cache:opportunities-summary",
       severity,
       category: "performance",
       check: "cache-coverage",
-      summary: `${oppCount} requests cacheable em cand não estão sendo cacheadas (${(oppBytes / 1024).toFixed(0)} KB)`,
+      summary: `${oppCount} requests cacheable ${target} não estão sendo cacheadas (${(oppBytes / 1024).toFixed(0)} KB)`,
       details: buildOpportunityDetails(report, prodReport),
     });
   }

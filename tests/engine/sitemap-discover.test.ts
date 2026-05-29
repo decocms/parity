@@ -34,9 +34,29 @@ describe("classifyPath", () => {
     expect(classifyPath("/moda-feminina")).toBe("plp");
   });
 
-  it("classifies search routes as plp", () => {
-    expect(classifyPath("/search/foo")).toBe("plp");
-    expect(classifyPath("/busca/foo")).toBe("plp");
+  it("classifies search routes as search (not plp)", () => {
+    expect(classifyPath("/search")).toBe("search");
+    expect(classifyPath("/search/foo")).toBe("search");
+    expect(classifyPath("/busca")).toBe("search");
+    expect(classifyPath("/busca/foo")).toBe("search");
+    expect(classifyPath("/buscar/foo")).toBe("search");
+  });
+
+  it("classifies account / login / signup routes as auth (not plp via single-segment fallback)", () => {
+    // Bug surface: /account on a VTEX site used to fall through to "plp"
+    // because the single-segment slug heuristic ran before auth detection.
+    // Real-world impact: when cand renders the home at /account instead of
+    // the login modal, the verdict slot was wrong — the page never landed
+    // in the auth bucket for sampling.
+    expect(classifyPath("/account")).toBe("auth");
+    expect(classifyPath("/login")).toBe("auth");
+    expect(classifyPath("/signin")).toBe("auth");
+    expect(classifyPath("/signup")).toBe("auth");
+    expect(classifyPath("/conta")).toBe("auth");
+    expect(classifyPath("/entrar")).toBe("auth");
+    expect(classifyPath("/cadastro")).toBe("auth");
+    expect(classifyPath("/minha-conta")).toBe("auth");
+    expect(classifyPath("/account/orders")).toBe("auth");
   });
 
   it("bug-catcher: ignores trailing slash differences", () => {
@@ -66,5 +86,10 @@ describe("labelForDiscoveredPage", () => {
 
   it("returns 'Page' for other kinds", () => {
     expect(labelForDiscoveredPage("/contato", "other")).toBe("Page · /contato");
+  });
+
+  it("labels auth and search kinds distinctly", () => {
+    expect(labelForDiscoveredPage("/account", "auth")).toBe("Auth · /account");
+    expect(labelForDiscoveredPage("/search", "search")).toBe("Search · /search");
   });
 });

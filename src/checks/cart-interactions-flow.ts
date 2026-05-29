@@ -1,0 +1,111 @@
+import type { CheckResult, Issue } from "../types/schema.ts";
+import type { CheckContext } from "./index.ts";
+import { buildPairEvidence, findFlow, findStep, isSingleSite } from "./lib/flow-pairing.ts";
+
+const STEP_LABELS: Record<string, string> = {
+  "seed-cart": "Semear carrinho (add product)",
+  "read-baseline": "Ler baseline (qty/price)",
+  "increment-qty": "Incrementar quantidade",
+  "decrement-qty": "Decrementar quantidade",
+  "apply-invalid-coupon": "Aplicar cupom inválido",
+  "remove-item": "Remover item",
+  "verify-empty-state": "Verificar estado vazio",
+};
+
+const CRITICAL_STEPS = new Set(["seed-cart", "remove-item"]);
+
+/**
+ * Step-by-step parity check for the cart-interactions flow. Critical when
+ * cand fails an interaction that prod completed — typical regression after
+ * migrating cart store/state management.
+ */
+export function cartInteractionsFlow(ctx: CheckContext): CheckResult {
+  const start = Date.now();
+  const issues: Issue[] = [];
+  const single = isSingleSite(ctx.prodFlows, ctx.candFlows);
+
+  const hasFlow =
+    ctx.prodFlows.some((f) => f.flow === "cart-interactions") ||
+    ctx.candFlows.some((f) => f.flow === "cart-interactions");
+  if (!hasFlow) {
+    return {
+      name: "cart-interactions-flow",
+      status: "skipped",
+      severity: "critical",
+      durationMs: Date.now() - start,
+      summary: "cart-interactions flow não estava no escopo do run",
+      issues: [],
+    };
+  }
+
+  for (const viewport of ctx.viewports) {
+    const prodFlow = findFlow(ctx.prodFlows, "cart-interactions", viewport);
+    const candFlow = findFlow(ctx.candFlows, "cart-interactions", viewport);
+
+    if (single) {
+      const flow = prodFlow ?? candFlow;
+      if (!flow) continue;
+      for (const step of flow.steps ?? []) {
+        if (step.status === "failed") {
+          issues.push({
+            id: `cart-interactions:${viewport}:${step.name}:failed`,
+            severity: CRITICAL_STEPS.has(step.name) ? "critical" : "high",
+            category: "functional",
+            check: "cart-interactions-flow",
+            summary: `[${viewport}] Step "${STEP_LABELS[step.name] ?? step.name}" falhou: ${step.note ?? step.actionDescription ?? ""}`,
+            evidence: step.screenshotPath ? [{ kind: "screenshot", path: step.screenshotPath }] : [],
+          });
+        }
+      }
+      continue;
+    }
+
+    // Comparative mode
+    const prodSteps = new Map((prodFlow?.steps ?? []).map((s) => [s.name, s]));
+    const candSteps = new Map((candFlow?.steps ?? []).map((s) => [s.name, s]));
+    const allNames = new Set([...prodSteps.keys(), ...candSteps.keys()]);
+
+    for (const name of allNames) {
+      const p = prodSteps.get(name);
+      const c = candSteps.get(name);
+      if (!p || !c) continue;
+      const label = STEP_LABELS[name] ?? name;
+
+      if (p.status === "ok" && c.status === "failed") {
+        issues.push({
+          id: `cart-interactions:${viewport}:${name}:failed-cand`,
+          severity: CRITICAL_STEPS.has(name) ? "critical" : "high",
+          category: "functional",
+          check: "cart-interactions-flow",
+          summary: `[${viewport}] "${label}" falhou em cand (passou em prod) — ${c.note ?? c.actionDescription ?? ""}`,
+          evidence: buildPairEvidence(p, c),
+        });
+      } else if (p.status === "ok" && c.status === "skipped") {
+        issues.push({
+          id: `cart-interactions:${viewport}:${name}:skipped-cand`,
+          severity: CRITICAL_STEPS.has(name) ? "critical" : "medium",
+          category: "functional",
+          check: "cart-interactions-flow",
+          summary: `[${viewport}] "${label}" foi skipado em cand mas executou em prod — selector quebrou`,
+          evidence: buildPairEvidence(p, c),
+        });
+      }
+    }
+  }
+
+  const status: CheckResult["status"] =
+    issues.some((i) => i.severity === "critical")
+      ? "fail"
+      : issues.length > 0
+        ? "warn"
+        : "pass";
+
+  return {
+    name: "cart-interactions-flow",
+    status,
+    severity: "critical",
+    durationMs: Date.now() - start,
+    summary: `${issues.length} issue(s) — mode: ${single ? "single-site" : "comparative"}`,
+    issues,
+  };
+}

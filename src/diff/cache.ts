@@ -1,6 +1,6 @@
 import type { NetworkEntry } from "../types/schema.ts";
 
-export type CacheDecision = "hit" | "miss" | "bypass" | "unknown";
+export type CacheDecision = "hit" | "miss" | "bypass" | "cacheable" | "unknown";
 
 export type ResourceCategory =
   | "document"
@@ -19,19 +19,40 @@ export interface ClassifiedRequest {
   opportunity: boolean;
 }
 
+/** Minimum max-age to consider an asset "properly cacheable" (60s, so we don't
+ *  flag short-TTL responses as cached). VTEX edge defaults to 5min, Cloudflare
+ *  defaults to 4h for static — anything ≥60s is a deliberate cache config. */
+const CACHEABLE_MAX_AGE_MIN = 60;
+
+function parseMaxAge(cc: string): number | null {
+  const m = cc.match(/(?:^|[,\s;])s-maxage=(\d+)/i) ?? cc.match(/(?:^|[,\s;])max-age=(\d+)/i);
+  return m ? Number.parseInt(m[1]!, 10) : null;
+}
+
 /**
- * Determine cache HIT/MISS/BYPASS using common edge headers
- * (Cloudflare cf-cache-status, generic x-cache, Cache-Control).
+ * Determine cache HIT/MISS/BYPASS/CACHEABLE using common edge headers.
+ *
+ * "cacheable" is a NEW decision that means: the response is configured with a
+ * proper `cache-control: public, max-age=Nlong` even though Playwright reports
+ * `fromCache: false`. A fresh browser session always has an empty cache so
+ * `fromCache=false` is meaningless on first visit — what matters is whether
+ * the asset CAN be cached. Treating `cacheable` as "not an opportunity"
+ * eliminates 200+ false positives per run on sites that DO ship correct
+ * cache headers but were just visited cold.
  */
 export function cacheDecision(entry: NetworkEntry): CacheDecision {
   if (entry.fromCache) return "hit";
-  // Sniff from response headers via cacheControl as proxy
-  // (the full headers are not in NetworkEntry today; rely on what we have)
   const cc = (entry.cacheControl ?? "").toLowerCase();
   if (cc.includes("no-store") || cc.includes("no-cache") || cc.includes("private")) {
     return "bypass";
   }
-  // If we don't know, assume miss (worst-case for the report — surfaces opportunities)
+  if (cc.includes("public") || cc.includes("immutable")) {
+    const maxAge = parseMaxAge(cc) ?? 0;
+    if (maxAge >= CACHEABLE_MAX_AGE_MIN) return "cacheable";
+  }
+  // Even without `public`, a long max-age means the resource is meant to cache.
+  const maxAge = parseMaxAge(cc);
+  if (maxAge != null && maxAge >= CACHEABLE_MAX_AGE_MIN) return "cacheable";
   return "unknown";
 }
 
@@ -139,6 +160,11 @@ function isOpportunity(
   category: ResourceCategory,
 ): boolean {
   if (decision === "hit") return false;
+  // Asset already has a proper public/long-max-age cache config — not an
+  // opportunity, just a cold browser session. Don't bother the user with
+  // this on the report.
+  if (decision === "cacheable") return false;
+  if (decision === "bypass") return false;
   if (category === "third-party") return false;
   if (category === "api") return false; // intentional dynamic
   if (category === "document") return false; // sometimes intentional
@@ -172,7 +198,7 @@ const EMPTY_CATEGORY: ResourceCategory[] = [
 
 export function buildCacheReport(entries: NetworkEntry[], baseUrl: string): CacheReport {
   const all = classifyAll(entries, baseUrl);
-  const byDecision: Record<CacheDecision, number> = { hit: 0, miss: 0, bypass: 0, unknown: 0 };
+  const byDecision: Record<CacheDecision, number> = { hit: 0, miss: 0, bypass: 0, cacheable: 0, unknown: 0 };
   const byCategoryAcc: Record<ResourceCategory, { count: number; bytes: number; hits: number }> = {
     document: { count: 0, bytes: 0, hits: 0 },
     "static-asset": { count: 0, bytes: 0, hits: 0 },
@@ -202,7 +228,12 @@ export function buildCacheReport(entries: NetworkEntry[], baseUrl: string): Cach
     };
   }
   const consideredForRate = all.filter((r) => r.category !== "third-party");
-  const hits = consideredForRate.filter((r) => r.decision === "hit").length;
+  // "cacheable" assets (proper public/max-age headers) count as effectively
+  // cached for the hit-rate — they'd hit on the second visit. Without this,
+  // a cold-browser run reports near-0% hit rate even on well-configured sites.
+  const hits = consideredForRate.filter(
+    (r) => r.decision === "hit" || r.decision === "cacheable",
+  ).length;
   const hitRate = consideredForRate.length > 0 ? hits / consideredForRate.length : 0;
   const opportunities = all
     .filter((r) => r.opportunity)

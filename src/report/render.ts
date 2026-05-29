@@ -673,6 +673,45 @@ function renderFig(srcPath: string, alt: string, variantClass: string, label: st
         </figure>`;
 }
 
+/**
+ * Best-effort extraction of the scheme+host from a captured URL so we can
+ * build a `--prod`/`--cand` flag that points back at the same site. Returns
+ * the original input when parsing fails (URL malformed mid-run, etc.).
+ */
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Build the "drill into this one page" shell command. We pick
+ * `parity check visual-regression-keyframes` because it re-runs the same
+ * check the user is looking at, against the same prod/cand pair, on just
+ * this page+viewport — fastest way to see fresh full output (~10s).
+ */
+function buildVisualDeepDiveCommand(page: VisualDiffPage): string {
+  const prodOrigin = originOf(page.prodUrl);
+  const candOrigin = originOf(page.candUrl);
+  const pagePath = page.pagePath || "/";
+  return `parity check visual-regression-keyframes --prod ${prodOrigin} --cand ${candOrigin} --page '${pagePath}' --viewports ${page.viewport}`;
+}
+
+/**
+ * Build the deepest-dive shell command (HTML + screenshot + computed-styles +
+ * heatmap + CSS source + LLM 1-paragraph summary). Useful when the user wants
+ * to actually FIX a specific divergence — we default the selector to `body`
+ * so it works without the user needing to pick one upfront. They can rerun
+ * with a tighter selector when they spot the bad region.
+ */
+function buildVisualFixCommand(page: VisualDiffPage): string {
+  const prodUrl = page.prodUrl;
+  const candUrl = page.candUrl;
+  return `parity fix --prod ${prodUrl} --cand ${candUrl} --selector body --viewport ${page.viewport}`;
+}
+
 function renderVisualDiffPage(page: VisualDiffPage, runDir: string, openFirst: boolean): string {
   const verdictClass = page.verdict === "pass" ? "ok" : page.verdict === "failed" ? "bad" : "warn";
   const verdictLabel = page.verdict === "pass" ? "OK" : page.verdict === "failed" ? "FAIL" : "DIFFS";
@@ -690,6 +729,7 @@ function renderVisualDiffPage(page: VisualDiffPage, runDir: string, openFirst: b
   if (sectionsMissing > 0) headerBadges.push(`<span class="vd-badge bad">${sectionsMissing} section(s) ausente(s)</span>`);
   if (maxSev) headerBadges.push(`<span class="vd-badge sev-${maxSev}">${maxSev}</span>`);
   headerBadges.push(`<span class="vd-badge dim">${(page.pctDiff * 100).toFixed(2)}% pixels</span>`);
+  if (page.cachedAt) headerBadges.push(`<span class="vd-badge dim" title="reused from cross-run cache">cached</span>`);
 
   const heatmapHtml = page.heatmapPath
     ? renderFig(relPath(runDir, page.heatmapPath), "heatmap", "vd-fig-heatmap", "HEATMAP (pixelmatch)")
@@ -722,6 +762,35 @@ function renderVisualDiffPage(page: VisualDiffPage, runDir: string, openFirst: b
     ? `<div class="vd-error">⚠️ LLM Vision retornou erro: ${esc(page.llmError)}</div>`
     : "";
 
+  // For pages with diffs, surface the exact CLI commands to drill in. This
+  // shortens the "I see something off — how do I get more detail?" loop from
+  // "remember the command name" to "click copy, paste, run".
+  const showDeepDive = page.verdict !== "pass";
+  const deepDiveId = `vd-cmd-${page.pageKey.replace(/[^a-zA-Z0-9]/g, "_")}`;
+  const fixId = `vd-fix-${page.pageKey.replace(/[^a-zA-Z0-9]/g, "_")}`;
+  const pctLabel = `${(page.pctDiff * 100).toFixed(2)}%`;
+  const cmdCheck = buildVisualDeepDiveCommand(page);
+  const cmdFix = buildVisualFixCommand(page);
+  const deepDiveHtml = showDeepDive
+    ? `<div class="vd-deepdive">
+        <div class="vd-deepdive-title">Esta página tem <strong>${pctLabel}</strong> de diferença. Pra detalhes completos:</div>
+        <div class="vd-deepdive-cmd">
+          <div class="vd-deepdive-label">Re-rodar o visual-diff só nessa página (rápido, ~10s):</div>
+          <div class="vd-deepdive-row">
+            <code class="vd-deepdive-code" id="${deepDiveId}">${esc(cmdCheck)}</code>
+            <button class="copy-btn" data-copy-target="${deepDiveId}" type="button">copiar</button>
+          </div>
+        </div>
+        <div class="vd-deepdive-cmd">
+          <div class="vd-deepdive-label">Investigar fundo (HTML + screenshot + computed-styles + heatmap + LLM summary):</div>
+          <div class="vd-deepdive-row">
+            <code class="vd-deepdive-code" id="${fixId}">${esc(cmdFix)}</code>
+            <button class="copy-btn" data-copy-target="${fixId}" type="button">copiar</button>
+          </div>
+        </div>
+      </div>`
+    : "";
+
   return `
   <details class="vd-page" data-vd-verdict="${esc(page.verdict)}" data-vd-viewport="${esc(page.viewport)}" ${openFirst ? "open" : ""}>
     <summary class="vd-page-header">
@@ -741,10 +810,11 @@ function renderVisualDiffPage(page: VisualDiffPage, runDir: string, openFirst: b
         ? `<div class="vd-empty-msg">Nenhuma diferença relevante detectada nesta página. ✅</div>`
         : ""
       }
+      ${deepDiveHtml}
       <div class="vd-meta">
         <a href="${esc(page.prodUrl)}" target="_blank" rel="noreferrer">prod ↗</a>
         <a href="${esc(page.candUrl)}" target="_blank" rel="noreferrer">cand ↗</a>
-        <span class="dim">viewport: ${esc(page.viewport)} · llm: ${page.llmCalled ? "called" : "skipped"}</span>
+        <span class="dim">viewport: ${esc(page.viewport)} · llm: ${page.llmCalled ? "called" : page.cachedAt ? "cached" : "skipped"}</span>
       </div>
     </div>
   </details>`;

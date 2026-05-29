@@ -3,6 +3,7 @@ import type { LearnedSelectors } from "../learned/repo.ts";
 import type { Platform } from "../learned/platform.ts";
 import { pickCategoryLink } from "../llm/pick-plp.ts";
 import { suggestRecovery } from "../llm/recover-step.ts";
+import { resolveSearchTerms } from "../llm/resolve-search-terms.ts";
 import type {
   FlowCapture,
   FlowName,
@@ -53,6 +54,10 @@ export interface FlowContext {
   ctx: BrowserContext;
   /** Output dir for screenshots/HARs of this flow */
   outDir: string;
+  /** Stable identifier for the parent run — used to seed deterministic
+   *  artifacts (e.g. the unicode no-results search term). Optional so
+   *  legacy callers that didn't propagate it still work. */
+  runId?: string;
   /** Optional learned selectors library (cascade integration) */
   learned?: LearnedSelectors;
   /** Optional detected platform for the prod side */
@@ -147,6 +152,9 @@ const FLOW_DEADLINE_MS: Record<FlowName, number> = {
   plp: 180_000,
   pdp: 240_000,
   "purchase-journey": 420_000, // 9 steps × ~30s + LLM recovery + variant heuristic scroll
+  search: 300_000, // 6 steps (home + autocomplete + results + no-results + empty)
+  "cart-interactions": 240_000, // 7 steps (seed via PJ + qty + coupon + remove)
+  login: 180_000, // 5 steps (gated, only with credentials)
 };
 
 /**
@@ -165,6 +173,18 @@ export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCap
         return finalize(flow, ctx, await flowPdp(ctx), [], start);
       case "purchase-journey": {
         const { pages, steps } = await flowPurchaseJourney(ctx);
+        return finalize(flow, ctx, pages, steps, start);
+      }
+      case "search": {
+        const { pages, steps } = await flowSearch(ctx);
+        return finalize(flow, ctx, pages, steps, start);
+      }
+      case "cart-interactions": {
+        const { pages, steps } = await flowCartInteractions(ctx);
+        return finalize(flow, ctx, pages, steps, start);
+      }
+      case "login": {
+        const { pages, steps } = await flowLogin(ctx);
         return finalize(flow, ctx, pages, steps, start);
       }
     }
@@ -342,6 +362,11 @@ async function flowPdp(ctx: FlowContext): Promise<PageCapture[]> {
 }
 
 interface PurchaseJourneyResult {
+  pages: PageCapture[];
+  steps: StepCapture[];
+}
+
+interface FlowResult {
   pages: PageCapture[];
   steps: StepCapture[];
 }
@@ -1583,6 +1608,73 @@ async function validateAddToCart(
  * Ask the LLM to recover from a failed selector lookup. Returns a usable
  * locator + the suggested selector string, or null if the recovery failed.
  */
+/**
+ * Universal "find this element" helper.
+ *
+ * Cascade:
+ *   1. If `key` is set, try the SelectorKey cascade (override → learned → defaults).
+ *   2. If `extraSelectors` is set, try those next.
+ *   3. If `budget.remaining > 0`, ask the LLM to find an element matching `intent`.
+ *
+ * Returns `{ locator, selector, recoveredByLlm }` on first match, `null` otherwise.
+ * Mutates `budget.remaining` (decrements) only when the LLM recovery succeeds —
+ * matches the existing `attemptRecovery` calling convention.
+ *
+ * Usage:
+ *   const hit = await findElement(page, ctx, {
+ *     key: "searchInput",
+ *     intent: "Input <input> de busca onde o usuário digita o termo (não confundir com email/CEP).",
+ *     budget,
+ *   });
+ *   if (hit) await hit.locator.click();
+ */
+export async function findElement(
+  page: Page,
+  ctx: FlowContext,
+  opts: {
+    /** Optional selector key — when set, runs the override→learned→defaults cascade first. */
+    key?: SelectorKey;
+    /** Description of what we want, in PT-BR (used as the LLM recovery prompt). */
+    intent: string;
+    /** Optional explicit selectors to try AFTER the key's cascade. */
+    extraSelectors?: string[];
+    /** Shared LLM-recovery budget for the parent flow. Decremented on successful recovery. */
+    budget: { remaining: number };
+    /** Optional name surfaced in trace logs. Defaults to "find-element". */
+    stepName?: string;
+  },
+): Promise<{ locator: Locator; selector: string; recoveredByLlm: boolean } | null> {
+  const tried: string[] = [];
+
+  if (opts.key) {
+    const cascade = selFor(ctx, opts.key);
+    tried.push(...cascade);
+    const hit = await firstVisibleLocator(page, cascade);
+    if (hit) return { ...hit, recoveredByLlm: false };
+  }
+
+  if (opts.extraSelectors && opts.extraSelectors.length > 0) {
+    tried.push(...opts.extraSelectors);
+    const hit = await firstVisibleLocator(page, opts.extraSelectors);
+    if (hit) return { ...hit, recoveredByLlm: false };
+  }
+
+  if (opts.budget.remaining > 0) {
+    const recovered = await attemptRecovery(
+      page,
+      ctx,
+      opts.stepName ?? "find-element",
+      opts.intent,
+      tried,
+    );
+    if (recovered) {
+      opts.budget.remaining--;
+      return { ...recovered, recoveredByLlm: true };
+    }
+  }
+  return null;
+}
+
 async function attemptRecovery(
   page: Page,
   _ctx: FlowContext,
@@ -2268,4 +2360,1107 @@ async function detectEmptyCartBanner(page: Page): Promise<string | null> {
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Fase 2 flows — search / cart-interactions / login.
+// ---------------------------------------------------------------------------
+
+const NO_RESULTS_TEXT_PATTERNS: RegExp[] = [
+  /nenhum (resultado|produto|item)/i,
+  /n[aã]o encontramos/i,
+  /n[aã]o foi(ram)? encontrad/i,
+  /n[aã]o encontrad/i, // covers "não encontrada", "não encontrado", and the Miess "BUSCA NÃO ENCONTRADA"
+  /busca n[aã]o encontrada/i,
+  /sem resultados/i,
+  /no results/i,
+  /no products/i,
+  /\bno items\b/i,
+  /0 (resultado|produto|item)/i,
+  /didn[’']?t find/i,
+  /sorry,? we couldn[’']?t find/i,
+  // VTEX Intelligent Search typical strings
+  /n[aã]o encontramos resultados/i,
+  /resultados? para\s+["“'].*["”']\s*[\(:]?\s*0/i,
+];
+
+const PRODUCT_CARD_HEURISTIC_SELECTORS: string[] = [
+  // Most specific first — these almost never false-positive
+  "[data-product-card]",
+  "[data-testid='product-card']",
+  "[data-deco='view-product']",
+  "[data-product-id]",
+  "article[itemtype*='Product' i]",
+  // VTEX Intelligent Search
+  "[class*='galleryItem' i]",
+  "[class*='gallery-layout-container'] article",
+  // Generic fallbacks — only used if nothing more specific hit
+  ".shelf-item",
+  ".product-card",
+];
+
+/**
+ * Heuristic DOM count of product cards visible on a results page.
+ *
+ * The selectors above progress from "specific platform marker" → "generic class
+ * name". We pick the FIRST selector that returns >0 matches and trust that one
+ * (instead of `max`), because the more specific selectors anchor to platform
+ * convention and won't drift into recommendations carousels the way an
+ * `a[href*='/p/']` would.
+ */
+async function countProductCards(page: Page): Promise<number> {
+  for (const sel of PRODUCT_CARD_HEURISTIC_SELECTORS) {
+    const count = await withCap(page.locator(sel).count().catch(() => 0), 1_500, 0);
+    if (count > 0) return count;
+  }
+  return 0;
+}
+
+/**
+ * Detect a "no results" / empty-state banner.
+ *
+ * Three sources of truth checked (most reliable first):
+ *  1. Page innerText() — what the user actually sees on the rendered page.
+ *  2. The full HTML capture passed in (more reliable when SPA hydration is
+ *     slow and innerText misses a heading that's actually in the DOM).
+ *  3. Proximity heuristic — if the search term appears near a negative cue
+ *     ("não", "no", "0", "sem"), that's an empty-state pattern even if our
+ *     hardcoded regexes don't match the exact phrasing.
+ */
+async function detectNoResultsEmptyState(
+  page: Page,
+  capturedHtml: string,
+  term?: string,
+): Promise<boolean> {
+  const innerText = await withCap(
+    page.locator("body").innerText().catch(() => ""),
+    2_000,
+    "",
+  );
+
+  // Pool of text to scan: rendered innerText + raw HTML (catches text
+  // inserted between capture and our innerText call, or in attributes).
+  const haystack = `${innerText}\n${capturedHtml}`;
+
+  if (NO_RESULTS_TEXT_PATTERNS.some((re) => re.test(haystack))) return true;
+
+  if (term && term.length >= 4) {
+    const lowerHaystack = haystack.toLowerCase();
+    const idx = lowerHaystack.indexOf(term.toLowerCase());
+    if (idx >= 0) {
+      const around = haystack.slice(Math.max(0, idx - 120), idx + term.length + 120);
+      if (/\b(n[aã]o|nenhum|sem|\b0\b|zero|no)\b/i.test(around)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Build the URL the site uses for `?q=<term>` searches.
+ *
+ * Most platforms accept `/search?q=` (VTEX, Shopify) or `/s?q=` (VTEX legacy).
+ * If `searchUrlHint` is set in rc.search, use that; otherwise we'll attempt
+ * `/search?q=<term>` first and `/s?q=<term>` as fallback — Playwright will
+ * follow whichever 404s vs renders.
+ */
+function searchUrlFor(baseUrl: string, term: string, path = "/search"): string {
+  const u = new URL(path, baseUrl);
+  u.searchParams.set("q", term);
+  return u.toString();
+}
+
+async function flowSearch(ctx: FlowContext): Promise<FlowResult> {
+  const pages: PageCapture[] = [];
+  const steps: StepCapture[] = [];
+  const total = 6;
+  const reportStart = (idx: number, name: string) =>
+    ctx.onStep?.({ phase: "start", name, index: idx, total });
+  const reportEnd = (
+    idx: number,
+    name: string,
+    status: StepCapture["status"],
+    durationMs: number,
+    note?: string,
+  ) => ctx.onStep?.({ phase: "end", name, index: idx, total, status, durationMs, note });
+
+  const typeDelayMs = ctx.rc.search?.typeDelayMs ?? 80;
+  const budget = { remaining: ctx.recoveryBudget ?? 3 };
+  const page = await ctx.ctx.newPage();
+
+  try {
+    // Step 1: visit-home
+    reportStart(1, "visit-home");
+    const homeCap = await capturePage(page, {
+      url: ctx.baseUrl,
+      side: ctx.side,
+      viewport: ctx.viewport,
+      screenshotPath: screenshotPath(ctx, "search-1-home"),
+    });
+    pages.push(homeCap);
+    const step1Status: StepCapture["status"] =
+      homeCap.status >= 200 && homeCap.status < 400 ? "ok" : "failed";
+    steps.push({
+      step: 1,
+      name: "visit-home",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: step1Status,
+      durationMs: homeCap.durationMs,
+      url: homeCap.finalUrl,
+      screenshotPath: homeCap.screenshotPath,
+      actionDescription: `Navegou pra home \`${ctx.baseUrl}\` (HTTP ${homeCap.status})`,
+    });
+    reportEnd(1, "visit-home", step1Status, homeCap.durationMs);
+    if (step1Status === "failed") return { pages, steps };
+
+    // Resolve search terms (with-results + no-results)
+    const terms = await resolveSearchTerms(ctx.baseUrl, homeCap.html, {
+      rc: ctx.rc,
+      runId: ctx.runId,
+    }).catch(() => ({ withResults: "produto", noResults: `zzqxxq-${Date.now().toString(36)}` }));
+
+    // Step 2: open-search — click trigger if input not already visible.
+    // `findElement` handles the cascade (override → learned → defaults → LLM recovery).
+    reportStart(2, "open-search");
+    const t2 = Date.now();
+    let inputHit = await findElement(page, ctx, {
+      key: "searchInput",
+      intent:
+        "Encontrar o <input> de BUSCA na página (campo de texto onde o usuário digita o termo a buscar). NÃO retorne input de email, newsletter, ou CEP.",
+      budget,
+      stepName: "find-search-input",
+    });
+    let usedTrigger: string | null = null;
+    let triggerRecoveredByLlm = false;
+    let inputRecoveredByLlm = inputHit?.recoveredByLlm ?? false;
+
+    if (!inputHit) {
+      const triggerHit = await findElement(page, ctx, {
+        key: "searchTrigger",
+        intent:
+          "Encontrar o ícone/botão de lupa/busca no header que ABRE o input de busca quando clicado (mobile geralmente esconde o input atrás de um trigger).",
+        budget,
+        stepName: "open-search-trigger",
+      });
+      if (triggerHit) {
+        usedTrigger = triggerHit.selector;
+        triggerRecoveredByLlm = triggerHit.recoveredByLlm;
+        await withCap(triggerHit.locator.click({ timeout: 3_000 }).catch(() => undefined), 4_000, undefined);
+        await page.waitForTimeout(500);
+        // Try cascade again now that the input might be visible.
+        inputHit = await findElement(page, ctx, {
+          key: "searchInput",
+          intent:
+            "Após clicar no trigger de busca, encontrar o <input> de BUSCA que apareceu (não confundir com email/CEP).",
+          budget,
+          stepName: "find-search-input-after-trigger",
+        });
+        if (inputHit?.recoveredByLlm) inputRecoveredByLlm = true;
+      }
+    }
+    if (!inputHit) {
+      steps.push({
+        ...makeSkipStep(2, "open-search", ctx, "search input not detected (incluindo recovery LLM)"),
+        actionDescription: "Não encontramos input de busca — flow skipado.",
+      });
+      reportEnd(2, "open-search", "skipped", Date.now() - t2, "search input not detected");
+      // Try one more thing: navigate directly to /search?q=<term> for step 4.
+      // But skip steps 3 (autocomplete) and 6 (empty state) gracefully.
+      // Continue to step 4 below using URL-based search.
+    } else {
+      const recoverNote = [
+        triggerRecoveredByLlm ? "trigger via LLM" : null,
+        inputRecoveredByLlm ? "input via LLM" : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      steps.push({
+        step: 2,
+        name: "open-search",
+        side: ctx.side,
+        viewport: ctx.viewport,
+        status: "ok",
+        durationMs: Date.now() - t2,
+        screenshotPath: screenshotPath(ctx, "search-2-open"),
+        selectorKey: "searchInput",
+        usedSelector: inputHit.selector,
+        recoveredByLlm: triggerRecoveredByLlm || inputRecoveredByLlm || undefined,
+        actionDescription: usedTrigger
+          ? `Clicou trigger \`${usedTrigger}\` e revelou input \`${inputHit.selector}\`${recoverNote ? ` (${recoverNote})` : ""}`
+          : `Input de busca visível: \`${inputHit.selector}\`${recoverNote ? ` (${recoverNote})` : ""}`,
+      });
+      reportEnd(2, "open-search", "ok", Date.now() - t2);
+      await screenshotStable(page, { path: screenshotPath(ctx, "search-2-open") });
+    }
+
+    // Step 3: type-and-autocomplete — type with delay, wait for suggestions
+    reportStart(3, "type-and-autocomplete");
+    const t3 = Date.now();
+    let suggestionCount = 0;
+    let autocompleteSelectorUsed: string | undefined;
+    if (inputHit) {
+      await withCap(
+        inputHit.locator
+          .pressSequentially(terms.withResults, { delay: typeDelayMs, timeout: 5_000 })
+          .catch(() => undefined),
+        Math.max(5_000, terms.withResults.length * (typeDelayMs + 50)),
+        undefined,
+      );
+      // Wait for any suggestions container to appear; first to win.
+      const suggestionSelectors = selFor(ctx, "searchSuggestions");
+      for (const sel of suggestionSelectors) {
+        try {
+          const loc = page.locator(sel).first();
+          const visible = await withCap(
+            loc.waitFor({ state: "visible", timeout: 3_000 }).then(() => true).catch(() => false),
+            3_500,
+            false,
+          );
+          if (visible) {
+            autocompleteSelectorUsed = sel;
+            // Count children that look like suggestion items.
+            suggestionCount = await withCap(
+              page
+                .locator(`${sel} a, ${sel} li, ${sel} [role='option']`)
+                .count()
+                .catch(() => 0),
+              1_500,
+              0,
+            );
+            break;
+          }
+        } catch {
+          /* try next */
+        }
+      }
+    }
+    const step3Status: StepCapture["status"] = inputHit
+      ? "ok" // ok even without autocomplete — the check decides if absence is a regression
+      : "skipped";
+    steps.push({
+      step: 3,
+      name: "type-and-autocomplete",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: step3Status,
+      durationMs: Date.now() - t3,
+      screenshotPath: screenshotPath(ctx, "search-3-autocomplete"),
+      selectorKey: "searchSuggestions",
+      usedSelector: autocompleteSelectorUsed,
+      actionDescription: inputHit
+        ? `Digitou "${terms.withResults}" e ${
+            autocompleteSelectorUsed ? `viu ${suggestionCount} sugestões` : "não viu autocomplete"
+          }`
+        : "Sem input — autocomplete skipado.",
+      searchValidation: {
+        term: terms.withResults,
+        mode: "autocomplete",
+        suggestionCount,
+      },
+    });
+    if (inputHit) await screenshotStable(page, { path: screenshotPath(ctx, "search-3-autocomplete") });
+    reportEnd(3, "type-and-autocomplete", step3Status, Date.now() - t3);
+
+    // Step 4: submit-results — press Enter or navigate URL-based
+    reportStart(4, "submit-results");
+    const t4 = Date.now();
+    let resultsCap: PageCapture | null = null;
+    if (inputHit) {
+      // Submit via Enter
+      await Promise.all([
+        page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined),
+        inputHit.locator.press("Enter").catch(() => undefined),
+      ]);
+      // Wait a beat for the SPA to settle
+      await page.waitForTimeout(1_000);
+      resultsCap = await capturePage(page, {
+        url: page.url(),
+        side: ctx.side,
+        viewport: ctx.viewport,
+        screenshotPath: screenshotPath(ctx, "search-4-results"),
+      });
+    } else {
+      // Fallback: navigate URL-based
+      resultsCap = await capturePage(page, {
+        url: searchUrlFor(ctx.baseUrl, terms.withResults),
+        side: ctx.side,
+        viewport: ctx.viewport,
+        screenshotPath: screenshotPath(ctx, "search-4-results"),
+      });
+    }
+    pages.push(resultsCap);
+    const resultCount = await countProductCards(page);
+    const step4Status: StepCapture["status"] =
+      resultsCap.status >= 200 && resultsCap.status < 400 ? "ok" : "failed";
+    steps.push({
+      step: 4,
+      name: "submit-results",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: step4Status,
+      durationMs: Date.now() - t4,
+      url: resultsCap.finalUrl,
+      screenshotPath: resultsCap.screenshotPath,
+      actionDescription: `Submeteu busca "${terms.withResults}" — HTTP ${resultsCap.status}, ${resultCount} produtos detectados`,
+      searchValidation: {
+        term: terms.withResults,
+        mode: "results",
+        resultCount,
+      },
+    });
+    reportEnd(4, "submit-results", step4Status, Date.now() - t4);
+
+    // Step 5: search-no-results — exercise the empty state
+    reportStart(5, "search-no-results");
+    const t5 = Date.now();
+    const noResultsCap = await capturePage(page, {
+      url: searchUrlFor(ctx.baseUrl, terms.noResults),
+      side: ctx.side,
+      viewport: ctx.viewport,
+      screenshotPath: screenshotPath(ctx, "search-5-no-results"),
+    });
+    pages.push(noResultsCap);
+    // Wait for SPA hydration — VTEX Intelligent Search renders the empty-state
+    // banner client-side after the SSR shell. Without this wait, innerText
+    // and the per-page HTML both miss the "Nenhum resultado" message.
+    await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
+    await page.waitForTimeout(800);
+    const nrResultCount = await countProductCards(page);
+    const hasEmptyState = await detectNoResultsEmptyState(
+      page,
+      noResultsCap.html,
+      terms.noResults,
+    );
+    const step5Status: StepCapture["status"] =
+      noResultsCap.status >= 200 && noResultsCap.status < 400 ? "ok" : "failed";
+    steps.push({
+      step: 5,
+      name: "search-no-results",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: step5Status,
+      durationMs: Date.now() - t5,
+      url: noResultsCap.finalUrl,
+      screenshotPath: noResultsCap.screenshotPath,
+      actionDescription: `Buscou termo unicode "${terms.noResults}" — ${nrResultCount} produtos, empty state ${hasEmptyState ? "visível" : "ausente"}`,
+      searchValidation: {
+        term: terms.noResults,
+        mode: "no-results",
+        resultCount: nrResultCount,
+        hasEmptyState,
+      },
+    });
+    reportEnd(5, "search-no-results", step5Status, Date.now() - t5);
+
+    // Step 6: search-empty-state — /search with no query
+    reportStart(6, "search-empty-state");
+    const t6 = Date.now();
+    const emptyCap = await capturePage(page, {
+      url: new URL("/search", ctx.baseUrl).toString(),
+      side: ctx.side,
+      viewport: ctx.viewport,
+      screenshotPath: screenshotPath(ctx, "search-6-empty"),
+    });
+    pages.push(emptyCap);
+    const step6Status: StepCapture["status"] =
+      emptyCap.status >= 200 && emptyCap.status < 500 ? "ok" : "failed";
+    steps.push({
+      step: 6,
+      name: "search-empty-state",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: step6Status,
+      durationMs: Date.now() - t6,
+      url: emptyCap.finalUrl,
+      screenshotPath: emptyCap.screenshotPath,
+      actionDescription: `Visitou /search sem query — HTTP ${emptyCap.status}`,
+      searchValidation: {
+        term: "",
+        mode: "empty",
+      },
+    });
+    reportEnd(6, "search-empty-state", step6Status, Date.now() - t6);
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+
+  return { pages, steps };
+}
+
+/**
+ * Read the quantity input value + total price from an open minicart/cart.
+ *
+ * Best-effort: any selector miss returns undefined for that field.
+ */
+async function parseCartTotals(
+  page: Page,
+  ctx: FlowContext,
+): Promise<{ qty?: number; price?: string }> {
+  const out: { qty?: number; price?: string } = {};
+  // Qty: try quantityInput inside any cart row, else any visible quantity input.
+  const qtySelectors = [
+    ...selFor(ctx, "cartItemRow").map((s) => `${s} input[type='number']`),
+    ...selFor(ctx, "quantityInput"),
+  ];
+  for (const sel of qtySelectors) {
+    const value = await withCap(
+      page.locator(sel).first().inputValue().catch(() => ""),
+      1_000,
+      "",
+    );
+    const n = Number.parseInt(value, 10);
+    if (Number.isFinite(n) && n > 0) {
+      out.qty = n;
+      break;
+    }
+  }
+  // Price: cartTotalPrice innerText
+  for (const sel of selFor(ctx, "cartTotalPrice")) {
+    const text = await withCap(
+      page.locator(sel).first().innerText().catch(() => ""),
+      1_000,
+      "",
+    );
+    if (text.trim()) {
+      out.price = text.trim().slice(0, 60);
+      break;
+    }
+  }
+  return out;
+}
+
+/**
+ * Seed an item into the cart by replaying a slim version of PJ steps 1-6
+ * (home → PLP → PDP → add-to-cart) + step 7 (open-minicart). Returns the
+ * pages captured + the minicart open status. Used by flowCartInteractions.
+ *
+ * This is best-effort: any failure (no PDP found, variant required, etc)
+ * surfaces as a "skipped" step. Variant selection complexity is intentionally
+ * omitted — sites that require variants will skip cart-interactions, which
+ * is a reasonable default.
+ */
+async function seedCartForInteractions(
+  page: Page,
+  ctx: FlowContext,
+): Promise<{ pages: PageCapture[]; opened: boolean; note?: string }> {
+  const pages: PageCapture[] = [];
+  // Home
+  const homeCap = await capturePage(page, {
+    url: ctx.baseUrl,
+    side: ctx.side,
+    viewport: ctx.viewport,
+    screenshotPath: screenshotPath(ctx, "cart-seed-home"),
+  });
+  pages.push(homeCap);
+  if (homeCap.status >= 400) return { pages, opened: false, note: `home HTTP ${homeCap.status}` };
+
+  // PLP
+  const plpHit = ctx.rc.plpUrlHint
+    ? { url: new URL(ctx.rc.plpUrlHint, ctx.baseUrl).toString(), selector: "__hint__" }
+    : await findCategoryUrl(page, ctx);
+  if (!plpHit) return { pages, opened: false, note: "no category link found" };
+  const plpCap = await capturePage(page, {
+    url: plpHit.url,
+    side: ctx.side,
+    viewport: ctx.viewport,
+    screenshotPath: screenshotPath(ctx, "cart-seed-plp"),
+  });
+  pages.push(plpCap);
+  if (plpCap.status >= 400) return { pages, opened: false, note: `plp HTTP ${plpCap.status}` };
+
+  // PDP
+  const pdpHit = await findProductUrl(page, ctx);
+  if (!pdpHit) return { pages, opened: false, note: "no product card on PLP" };
+  const pdpCap = await capturePage(page, {
+    url: pdpHit.url,
+    side: ctx.side,
+    viewport: ctx.viewport,
+    screenshotPath: screenshotPath(ctx, "cart-seed-pdp"),
+  });
+  pages.push(pdpCap);
+  if (pdpCap.status >= 400) return { pages, opened: false, note: `pdp HTTP ${pdpCap.status}` };
+
+  // Add to cart (no variant handling — best-effort)
+  const buyHit = await firstVisibleLocator(page, selFor(ctx, "buyButton"));
+  if (!buyHit) return { pages, opened: false, note: "no buy button on PDP" };
+  await buyHit.locator.click({ timeout: 5_000 }).catch(() => undefined);
+  await page.waitForTimeout(1_500);
+
+  // Open minicart
+  const miniHit = await firstVisibleLocator(page, selFor(ctx, "minicartTrigger"));
+  if (!miniHit) return { pages, opened: false, note: "minicart trigger not found" };
+  await miniHit.locator.click({ timeout: 5_000 }).catch(() => undefined);
+  await page.waitForTimeout(1_000);
+
+  // Heuristic confirmation: at least one cart item row visible
+  const rowHit = await firstVisibleLocator(page, selFor(ctx, "cartItemRow"));
+  return { pages, opened: !!rowHit, note: rowHit ? undefined : "no cart item visible after add-to-cart" };
+}
+
+async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult> {
+  const pages: PageCapture[] = [];
+  const steps: StepCapture[] = [];
+  const total = 7;
+  const budget = { remaining: ctx.recoveryBudget ?? 3 };
+  const reportStart = (idx: number, name: string) =>
+    ctx.onStep?.({ phase: "start", name, index: idx, total });
+  const reportEnd = (
+    idx: number,
+    name: string,
+    status: StepCapture["status"],
+    durationMs: number,
+    note?: string,
+  ) => ctx.onStep?.({ phase: "end", name, index: idx, total, status, durationMs, note });
+
+  const page = await ctx.ctx.newPage();
+  try {
+    // Step 1: seed-cart (home → PLP → PDP → add → open minicart)
+    reportStart(1, "seed-cart");
+    const t1 = Date.now();
+    const seed = await seedCartForInteractions(page, ctx);
+    pages.push(...seed.pages);
+    const step1Status: StepCapture["status"] = seed.opened ? "ok" : "skipped";
+    steps.push({
+      step: 1,
+      name: "seed-cart",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: step1Status,
+      durationMs: Date.now() - t1,
+      url: page.url(),
+      screenshotPath: screenshotPath(ctx, "cart-seed-end"),
+      note: seed.note,
+      actionDescription: seed.opened
+        ? "Carrinho aberto com 1 item (home → PLP → PDP → add → minicart)"
+        : `Não conseguiu semear carrinho: ${seed.note ?? "razão desconhecida"}`,
+    });
+    if (seed.opened) await screenshotStable(page, { path: screenshotPath(ctx, "cart-seed-end") });
+    reportEnd(1, "seed-cart", step1Status, Date.now() - t1, seed.note);
+    if (!seed.opened) {
+      // Skip all subsequent steps
+      for (let i = 2; i <= 7; i++) {
+        steps.push(makeSkipStep(i, ["read-baseline", "increment-qty", "decrement-qty", "apply-invalid-coupon", "remove-item", "verify-empty-state"][i - 2]!, ctx, "cart-not-seeded"));
+      }
+      return { pages, steps };
+    }
+
+    // Step 2: read-baseline
+    reportStart(2, "read-baseline");
+    const t2 = Date.now();
+    const baseline = await parseCartTotals(page, ctx);
+    steps.push({
+      step: 2,
+      name: "read-baseline",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: "ok",
+      durationMs: Date.now() - t2,
+      screenshotPath: screenshotPath(ctx, "cart-2-baseline"),
+      actionDescription: `Baseline: qty=${baseline.qty ?? "?"}, price=${baseline.price ?? "?"}`,
+      detail: { baseline },
+    });
+    await screenshotStable(page, { path: screenshotPath(ctx, "cart-2-baseline") });
+    reportEnd(2, "read-baseline", "ok", Date.now() - t2);
+
+    // Step 3: increment-qty
+    reportStart(3, "increment-qty");
+    const t3 = Date.now();
+    const incHit = await findElement(page, ctx, {
+      key: "cartQuantityIncrement",
+      intent:
+        "Encontrar o botão '+' / 'aumentar quantidade' dentro de um item do carrinho aberto (minicart drawer ou /cart). Não confundir com botão de promoção/cupom.",
+      budget,
+      stepName: "cart-increment",
+    });
+    let incAfter: { qty?: number; price?: string } = {};
+    let incOk = false;
+    if (incHit) {
+      await incHit.locator.click({ timeout: 3_000 }).catch(() => undefined);
+      await page.waitForTimeout(1_500);
+      incAfter = await parseCartTotals(page, ctx);
+      incOk = (incAfter.qty ?? 0) > (baseline.qty ?? 0);
+    }
+    steps.push({
+      step: 3,
+      name: "increment-qty",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: incHit ? (incOk ? "ok" : "failed") : "skipped",
+      durationMs: Date.now() - t3,
+      screenshotPath: screenshotPath(ctx, "cart-3-increment"),
+      selectorKey: "cartQuantityIncrement",
+      usedSelector: incHit?.selector,
+      actionDescription: incHit
+        ? `Click increment → qty ${baseline.qty ?? "?"} → ${incAfter.qty ?? "?"}`
+        : "Increment button não encontrado",
+      cartItemValidation: {
+        action: "increment",
+        before: baseline,
+        after: incAfter,
+        succeeded: incOk,
+      },
+    });
+    await screenshotStable(page, { path: screenshotPath(ctx, "cart-3-increment") });
+    reportEnd(3, "increment-qty", incHit ? (incOk ? "ok" : "failed") : "skipped", Date.now() - t3);
+
+    // Step 4: decrement-qty
+    reportStart(4, "decrement-qty");
+    const t4 = Date.now();
+    const decHit = await findElement(page, ctx, {
+      key: "cartQuantityDecrement",
+      intent:
+        "Encontrar o botão '-' / 'diminuir quantidade' dentro de um item do carrinho aberto.",
+      budget,
+      stepName: "cart-decrement",
+    });
+    let decAfter: { qty?: number; price?: string } = {};
+    let decOk = false;
+    if (decHit) {
+      await decHit.locator.click({ timeout: 3_000 }).catch(() => undefined);
+      await page.waitForTimeout(1_500);
+      decAfter = await parseCartTotals(page, ctx);
+      decOk = (decAfter.qty ?? 0) < (incAfter.qty ?? Infinity);
+    }
+    steps.push({
+      step: 4,
+      name: "decrement-qty",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: decHit ? (decOk ? "ok" : "failed") : "skipped",
+      durationMs: Date.now() - t4,
+      screenshotPath: screenshotPath(ctx, "cart-4-decrement"),
+      selectorKey: "cartQuantityDecrement",
+      usedSelector: decHit?.selector,
+      actionDescription: decHit
+        ? `Click decrement → qty ${incAfter.qty ?? "?"} → ${decAfter.qty ?? "?"}`
+        : "Decrement button não encontrado",
+      cartItemValidation: {
+        action: "decrement",
+        before: incAfter,
+        after: decAfter,
+        succeeded: decOk,
+      },
+    });
+    await screenshotStable(page, { path: screenshotPath(ctx, "cart-4-decrement") });
+    reportEnd(4, "decrement-qty", decHit ? (decOk ? "ok" : "failed") : "skipped", Date.now() - t4);
+
+    // Step 5: apply-invalid-coupon
+    reportStart(5, "apply-invalid-coupon");
+    const t5 = Date.now();
+    const couponInputHit = await findElement(page, ctx, {
+      key: "cartCouponInput",
+      intent:
+        "Encontrar o <input> de CUPOM / código promocional no carrinho aberto (placeholder costuma ser 'Digite seu cupom', 'Insira o código'). NÃO confundir com input de CEP/frete.",
+      budget,
+      stepName: "cart-coupon-input",
+    });
+    const before5 = await parseCartTotals(page, ctx);
+    let couponErrorShown = false;
+    let couponSubmitted = false;
+    if (couponInputHit) {
+      await couponInputHit.locator.fill("INVALIDCOUPON123-XYZ").catch(() => undefined);
+      const submitHit = await findElement(page, ctx, {
+        key: "cartCouponSubmit",
+        intent:
+          "Encontrar o botão de submeter cupom — 'Aplicar', 'Apply', 'Validar' — junto ao input de cupom no carrinho.",
+        budget,
+        stepName: "cart-coupon-submit",
+      });
+      if (submitHit) {
+        couponSubmitted = true;
+        await submitHit.locator.click({ timeout: 3_000 }).catch(() => undefined);
+        await page.waitForTimeout(1_500);
+        // Detect error: page text mentions inválido/invalid/não encontrado
+        const text = await withCap(
+          page.locator("body").innerText().catch(() => ""),
+          1_500,
+          "",
+        );
+        couponErrorShown = /(inv[aá]lid|n[aã]o encontrado|n[aã]o existe|expired|expirado)/i.test(text);
+      }
+    }
+    const after5 = await parseCartTotals(page, ctx);
+    const totalUnchanged = before5.price === after5.price;
+    const couponStatus: StepCapture["status"] = couponInputHit
+      ? couponSubmitted
+        ? couponErrorShown && totalUnchanged
+          ? "ok"
+          : "failed"
+        : "skipped"
+      : "skipped";
+    steps.push({
+      step: 5,
+      name: "apply-invalid-coupon",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: couponStatus,
+      durationMs: Date.now() - t5,
+      screenshotPath: screenshotPath(ctx, "cart-5-coupon"),
+      selectorKey: "cartCouponInput",
+      usedSelector: couponInputHit?.selector,
+      actionDescription: couponInputHit
+        ? couponSubmitted
+          ? `Cupom inválido aplicado — erro visível: ${couponErrorShown}, total inalterado: ${totalUnchanged}`
+          : "Coupon input encontrado, submit button ausente"
+        : "Coupon input não encontrado",
+      cartItemValidation: {
+        action: "apply-coupon",
+        before: before5,
+        after: after5,
+        succeeded: couponStatus === "ok",
+      },
+    });
+    await screenshotStable(page, { path: screenshotPath(ctx, "cart-5-coupon") });
+    reportEnd(5, "apply-invalid-coupon", couponStatus, Date.now() - t5);
+
+    // Step 6: remove-item
+    reportStart(6, "remove-item");
+    const t6 = Date.now();
+    const removeHit = await findElement(page, ctx, {
+      key: "cartRemoveItem",
+      intent:
+        "Encontrar o botão de REMOVER ITEM (ícone de lixeira, 'Remover', 'Excluir') dentro de um item do carrinho. Não confundir com fechar minicart drawer.",
+      budget,
+      stepName: "cart-remove-item",
+    });
+    let removed = false;
+    if (removeHit) {
+      await removeHit.locator.click({ timeout: 3_000 }).catch(() => undefined);
+      await page.waitForTimeout(1_500);
+      // Removed if no cart-item-row remains visible
+      const stillThere = await firstVisibleLocator(page, selFor(ctx, "cartItemRow"));
+      removed = !stillThere;
+    }
+    steps.push({
+      step: 6,
+      name: "remove-item",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: removeHit ? (removed ? "ok" : "failed") : "skipped",
+      durationMs: Date.now() - t6,
+      screenshotPath: screenshotPath(ctx, "cart-6-remove"),
+      selectorKey: "cartRemoveItem",
+      usedSelector: removeHit?.selector,
+      actionDescription: removeHit
+        ? removed
+          ? "Item removido — carrinho vazio"
+          : "Click no remove mas item ainda visível"
+        : "Remove button não encontrado",
+      cartItemValidation: {
+        action: "remove",
+        before: after5,
+        after: { qty: removed ? 0 : after5.qty },
+        succeeded: removed,
+      },
+    });
+    await screenshotStable(page, { path: screenshotPath(ctx, "cart-6-remove") });
+    reportEnd(6, "remove-item", removeHit ? (removed ? "ok" : "failed") : "skipped", Date.now() - t6);
+
+    // Step 7: verify-empty-state
+    reportStart(7, "verify-empty-state");
+    const t7 = Date.now();
+    const emptyText = await detectEmptyCartBanner(page);
+    const emptyStatus: StepCapture["status"] = emptyText ? "ok" : removed ? "failed" : "skipped";
+    steps.push({
+      step: 7,
+      name: "verify-empty-state",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: emptyStatus,
+      durationMs: Date.now() - t7,
+      screenshotPath: screenshotPath(ctx, "cart-7-empty"),
+      actionDescription: emptyText
+        ? `Empty state visível: "${emptyText.slice(0, 80)}"`
+        : "Empty state não detectado",
+      note: emptyText ?? undefined,
+    });
+    await screenshotStable(page, { path: screenshotPath(ctx, "cart-7-empty") });
+    reportEnd(7, "verify-empty-state", emptyStatus, Date.now() - t7);
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+
+  return { pages, steps };
+}
+
+/**
+ * Login flow — gated. Only runs when:
+ *  1. `ctx.rc.login?.enabled === true`
+ *  2. env vars `PARITY_LOGIN_EMAIL` AND `PARITY_LOGIN_PASSWORD` are set.
+ *
+ * If either condition is missing, the flow returns a homepage capture and
+ * all login steps marked `skipped` — so the check can distinguish "not
+ * enabled" from "broken login".
+ *
+ * Credential handling: env vars only. NEVER read credentials from
+ * `.parityrc.json` (which is committed to git). Passwords are not echoed
+ * to logs, screenshots, or HTML capture — `fill()` masks the password
+ * input by default, and we set `inputmask='password'` discipline by only
+ * using the inputs we discovered.
+ */
+async function flowLogin(ctx: FlowContext): Promise<FlowResult> {
+  const pages: PageCapture[] = [];
+  const steps: StepCapture[] = [];
+  const total = 5;
+  const reportStart = (idx: number, name: string) =>
+    ctx.onStep?.({ phase: "start", name, index: idx, total });
+  const reportEnd = (
+    idx: number,
+    name: string,
+    status: StepCapture["status"],
+    durationMs: number,
+    note?: string,
+  ) => ctx.onStep?.({ phase: "end", name, index: idx, total, status, durationMs, note });
+
+  const enabled = ctx.rc.login?.enabled === true;
+  const email = process.env.PARITY_LOGIN_EMAIL;
+  const password = process.env.PARITY_LOGIN_PASSWORD;
+  const credentialsPresent = !!email && !!password;
+  const budget = { remaining: ctx.recoveryBudget ?? 3 };
+
+  const page = await ctx.ctx.newPage();
+  try {
+    // Step 1: visit-home (always runs so we have a screenshot baseline)
+    reportStart(1, "visit-home");
+    const homeCap = await capturePage(page, {
+      url: ctx.baseUrl,
+      side: ctx.side,
+      viewport: ctx.viewport,
+      screenshotPath: screenshotPath(ctx, "login-1-home"),
+    });
+    pages.push(homeCap);
+    const step1Status: StepCapture["status"] =
+      homeCap.status >= 200 && homeCap.status < 400 ? "ok" : "failed";
+    steps.push({
+      step: 1,
+      name: "visit-home",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: step1Status,
+      durationMs: homeCap.durationMs,
+      url: homeCap.finalUrl,
+      screenshotPath: homeCap.screenshotPath,
+      actionDescription: `Navegou pra home \`${ctx.baseUrl}\``,
+    });
+    reportEnd(1, "visit-home", step1Status, homeCap.durationMs);
+
+    if (!enabled || !credentialsPresent) {
+      const reason = !enabled
+        ? "login.enabled !== true in .parityrc.json"
+        : "PARITY_LOGIN_EMAIL/PASSWORD not set";
+      for (let i = 2; i <= 5; i++) {
+        steps.push(
+          makeSkipStep(
+            i,
+            ["open-login", "submit-invalid", "submit-valid", "verify-account-area"][i - 2]!,
+            ctx,
+            reason,
+          ),
+        );
+      }
+      return { pages, steps };
+    }
+
+    // Step 2: open-login — click trigger OR navigate to /login
+    reportStart(2, "open-login");
+    const t2 = Date.now();
+    let emailHit = await findElement(page, ctx, {
+      key: "loginEmailInput",
+      intent: "Encontrar o <input> de email no formulário de login (NÃO confundir com input de newsletter ou cadastro).",
+      budget,
+      stepName: "login-email-input",
+    });
+    if (!emailHit) {
+      const triggerHit = await findElement(page, ctx, {
+        key: "loginTrigger",
+        intent: "Encontrar o link/botão 'Entrar' / 'Login' / 'Minha conta' no header que abre o formulário de login.",
+        budget,
+        stepName: "login-trigger",
+      });
+      if (triggerHit) {
+        await triggerHit.locator.click({ timeout: 5_000 }).catch(() => undefined);
+        await page.waitForTimeout(1_500);
+        emailHit = await findElement(page, ctx, {
+          key: "loginEmailInput",
+          intent: "Após clicar em 'Entrar', encontrar o <input> de email no form de login.",
+          budget,
+          stepName: "login-email-after-trigger",
+        });
+      }
+    }
+    if (!emailHit) {
+      // Last resort: navigate to /login
+      await page.goto(new URL("/login", ctx.baseUrl).toString(), { timeout: 15_000 }).catch(() => undefined);
+      await page.waitForTimeout(1_000);
+      emailHit = await findElement(page, ctx, {
+        key: "loginEmailInput",
+        intent: "Em /login, encontrar o <input> de email do formulário.",
+        budget,
+        stepName: "login-email-on-login-page",
+      });
+    }
+    const passwordHit = emailHit
+      ? await findElement(page, ctx, {
+          key: "loginPasswordInput",
+          intent: "Encontrar o <input> de senha (type='password') no formulário de login.",
+          budget,
+          stepName: "login-password-input",
+        })
+      : null;
+    const formReady = !!(emailHit && passwordHit);
+    steps.push({
+      step: 2,
+      name: "open-login",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: formReady ? "ok" : "failed",
+      durationMs: Date.now() - t2,
+      url: page.url(),
+      screenshotPath: screenshotPath(ctx, "login-2-form"),
+      selectorKey: "loginEmailInput",
+      usedSelector: emailHit?.selector,
+      actionDescription: formReady
+        ? `Form de login carregado (\`${emailHit!.selector}\` + password)`
+        : "Form de login não encontrado",
+      loginValidation: { stage: "form-loaded" },
+    });
+    if (formReady) await screenshotStable(page, { path: screenshotPath(ctx, "login-2-form") });
+    reportEnd(2, "open-login", formReady ? "ok" : "failed", Date.now() - t2);
+    if (!formReady) {
+      for (let i = 3; i <= 5; i++) {
+        steps.push(
+          makeSkipStep(
+            i,
+            ["submit-invalid", "submit-valid", "verify-account-area"][i - 3]!,
+            ctx,
+            "form-not-loaded",
+          ),
+        );
+      }
+      return { pages, steps };
+    }
+
+    // Step 3: submit-invalid — wrong credentials, expect error
+    reportStart(3, "submit-invalid");
+    const t3 = Date.now();
+    await emailHit!.locator.fill(`invalid-${Date.now()}@parity-test.invalid`).catch(() => undefined);
+    await passwordHit!.locator.fill("wrong-password-on-purpose").catch(() => undefined);
+    const submitHit = await findElement(page, ctx, {
+      key: "loginSubmit",
+      intent: "Encontrar o botão de submeter login ('Entrar', 'Login', 'Acessar') dentro do form de login.",
+      budget,
+      stepName: "login-submit",
+    });
+    if (submitHit) await submitHit.locator.click({ timeout: 5_000 }).catch(() => undefined);
+    await page.waitForTimeout(2_000);
+    const errorHit = await findElement(page, ctx, {
+      key: "loginErrorMessage",
+      intent: "Encontrar a mensagem de erro mostrada após login falho — geralmente em [role='alert'] ou perto do form.",
+      budget,
+      stepName: "login-error-message",
+    });
+    const errorMsg = errorHit
+      ? await withCap(errorHit.locator.innerText().catch(() => ""), 1_500, "")
+      : "";
+    const errorShown = !!errorHit || /invalid|inv[aá]lid|incorret|n[aã]o (existe|cadastrad)/i.test(errorMsg);
+    steps.push({
+      step: 3,
+      name: "submit-invalid",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: errorShown ? "ok" : "failed",
+      durationMs: Date.now() - t3,
+      url: page.url(),
+      screenshotPath: screenshotPath(ctx, "login-3-invalid"),
+      actionDescription: errorShown
+        ? `Erro de credencial inválida visível: "${errorMsg.slice(0, 80)}"`
+        : "Submit de credencial inválida não mostrou erro",
+      loginValidation: {
+        stage: "error-shown",
+        errorMessage: errorMsg.slice(0, 200) || undefined,
+      },
+    });
+    await screenshotStable(page, { path: screenshotPath(ctx, "login-3-invalid") });
+    reportEnd(3, "submit-invalid", errorShown ? "ok" : "failed", Date.now() - t3);
+
+    // Step 4: submit-valid — real credentials, expect redirect to account area
+    reportStart(4, "submit-valid");
+    const t4 = Date.now();
+    // Re-find inputs (form may have been re-rendered after error)
+    const emailHit2 = await firstVisibleLocator(page, selFor(ctx, "loginEmailInput"));
+    const passwordHit2 = await firstVisibleLocator(page, selFor(ctx, "loginPasswordInput"));
+    if (emailHit2 && passwordHit2) {
+      await emailHit2.locator.fill(email!).catch(() => undefined);
+      await passwordHit2.locator.fill(password!).catch(() => undefined);
+      const submitHit2 = await firstVisibleLocator(page, selFor(ctx, "loginSubmit"));
+      if (submitHit2) {
+        await Promise.all([
+          page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined),
+          submitHit2.locator.click({ timeout: 5_000 }).catch(() => undefined),
+        ]);
+        await page.waitForTimeout(2_000);
+      }
+    }
+    const accountMenuHit = await findElement(page, ctx, {
+      key: "accountMenuTrigger",
+      intent: "Após login bem-sucedido, encontrar o menu de conta logada no header (avatar, 'Olá <nome>', link 'Minha conta').",
+      budget,
+      stepName: "login-account-menu",
+    });
+    const loggedIn = !!accountMenuHit;
+    steps.push({
+      step: 4,
+      name: "submit-valid",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: loggedIn ? "ok" : "failed",
+      durationMs: Date.now() - t4,
+      url: page.url(),
+      screenshotPath: screenshotPath(ctx, "login-4-valid"),
+      actionDescription: loggedIn
+        ? `Login bem-sucedido — accountMenu visível (\`${accountMenuHit!.selector}\`)`
+        : "Login com credenciais reais não logou — accountMenu não detectado",
+      loginValidation: { stage: loggedIn ? "succeeded" : "submitted" },
+    });
+    await screenshotStable(page, { path: screenshotPath(ctx, "login-4-valid") });
+    reportEnd(4, "submit-valid", loggedIn ? "ok" : "failed", Date.now() - t4);
+
+    // Step 5: verify-account-area — navigate to /account and check page renders
+    reportStart(5, "verify-account-area");
+    const t5 = Date.now();
+    const accountUrlCandidates = ["/account", "/minha-conta", "/account/orders"];
+    let accountCap: PageCapture | null = null;
+    for (const path of accountUrlCandidates) {
+      const cap = await capturePage(page, {
+        url: new URL(path, ctx.baseUrl).toString(),
+        side: ctx.side,
+        viewport: ctx.viewport,
+        screenshotPath: screenshotPath(ctx, "login-5-account"),
+      });
+      if (cap.status >= 200 && cap.status < 400) {
+        accountCap = cap;
+        break;
+      }
+    }
+    if (accountCap) pages.push(accountCap);
+    const step5Status: StepCapture["status"] = accountCap ? "ok" : "failed";
+    steps.push({
+      step: 5,
+      name: "verify-account-area",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: step5Status,
+      durationMs: Date.now() - t5,
+      url: accountCap?.finalUrl ?? page.url(),
+      screenshotPath: accountCap?.screenshotPath ?? screenshotPath(ctx, "login-5-account"),
+      actionDescription: accountCap
+        ? `Área logada acessível em ${accountCap.finalUrl} (HTTP ${accountCap.status})`
+        : "Nenhuma URL de account respondeu 2xx — sessão pode não ter persistido",
+    });
+    reportEnd(5, "verify-account-area", step5Status, Date.now() - t5);
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+
+  return { pages, steps };
 }

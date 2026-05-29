@@ -35,6 +35,8 @@ function makeVisualDiff(over: Partial<VisualDiffSummary> = {}): VisualDiffSummar
     pagesPassed: 0,
     pagesFailed: 0,
     llmCallsUsed: 1,
+    parityOk: false,
+    pagesFromCache: 0,
     results: [makeVisualPage()],
     ...over,
   };

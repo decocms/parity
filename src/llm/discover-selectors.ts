@@ -13,6 +13,17 @@ export interface DiscoveredSelectors {
   cepInputPdp?: string;
   cepInputCart?: string;
   checkoutButton?: string;
+  // Search flow
+  searchTrigger?: string;
+  searchInput?: string;
+  searchSuggestions?: string;
+  // PDP gallery + related (visible on PDP, not home — LLM should leave empty if unsure)
+  pdpGalleryThumbnail?: string;
+  pdpGalleryMain?: string;
+  pdpRelatedShelf?: string;
+  // Login (only meaningful when rc.login.enabled === true; LLM may leave empty)
+  loginTrigger?: string;
+  accountMenuTrigger?: string;
 }
 
 const DISCOVER_SELECTORS_TOOL = {
@@ -56,6 +67,46 @@ const DISCOVER_SELECTORS_TOOL = {
         type: "string",
         description:
           "CSS selector for the FINAL 'Go to checkout' / 'Finalizar compra' / 'Finalizar' button INSIDE the mini-cart drawer or cart page — the one user clicks AFTER reviewing cart items to proceed to checkout/payment. **IMPORTANT**: this is DIFFERENT from `minicart_trigger` (which is the cart ICON in the header). The checkout button is typically a big colored button at the bottom of the cart drawer or cart page. If you cannot see it on the home page (which is common — it's only rendered after add-to-cart), return EMPTY STRING. NEVER return the same selector as `minicart_trigger`.",
+      },
+      search_trigger: {
+        type: "string",
+        description:
+          "CSS selector for the SEARCH ICON / LUPA in the header that opens the search input — typically only on MOBILE (desktop usually has the input always visible). Return EMPTY STRING if the search input is already visible on the home and no trigger is needed.",
+      },
+      search_input: {
+        type: "string",
+        description:
+          "CSS selector for the SEARCH <input> (e.g. \"input[type='search']\", \"input[name='q']\", or \"[role='searchbox']\"). MUST be reachable from the home — either directly visible or after clicking `search_trigger`. NEVER return an email/newsletter/CEP input.",
+      },
+      search_suggestions: {
+        type: "string",
+        description:
+          "CSS selector for the container that shows AUTOCOMPLETE suggestions while typing (e.g. \"[role='listbox']\", \".vtex-search-bar__autocomplete\", \"[data-search-suggestions]\"). May not exist on the home (lazy-rendered after typing). Return EMPTY STRING if you cannot detect it.",
+      },
+      pdp_gallery_thumbnail: {
+        type: "string",
+        description:
+          "CSS selector for thumbnail images in the PDP image gallery. Typically lives on the PDP — return EMPTY STRING if you only have the home HTML and cannot infer the platform convention safely.",
+      },
+      pdp_gallery_main: {
+        type: "string",
+        description:
+          "CSS selector for the MAIN image in the PDP image gallery (the large central image). Return EMPTY STRING if unsure — defaults handle it.",
+      },
+      pdp_related_shelf: {
+        type: "string",
+        description:
+          "CSS selector for the 'Related products' / 'Você também pode gostar' shelf on a PDP. Return EMPTY STRING if uncertain.",
+      },
+      login_trigger: {
+        type: "string",
+        description:
+          "CSS selector for the LOGIN / 'Entrar' / account-icon link in the header. EMPTY STRING if the site appears to have no login surface.",
+      },
+      account_menu_trigger: {
+        type: "string",
+        description:
+          "CSS selector for the LOGGED-IN account menu trigger in the header (e.g. 'Olá, João' link, account avatar). EMPTY STRING when only a 'Login' link is visible.",
       },
       reasoning: {
         type: "string",
@@ -111,6 +162,21 @@ REGRAS:
    cupom é desconto, não frete.
 
 7. Sempre teste mentalmente: "este seletor pegaria o elemento certo na home E também em PDPs/cart?"
+
+8. **Search**: \`search_input\` deve apontar pro INPUT de busca (não pra um <a> que vai pra página de busca).
+   \`search_trigger\` só faz sentido se o input fica oculto até clicar (mobile). Se o input já está
+   visível na header desktop, retorne string vazia em \`search_trigger\`.
+   \`search_suggestions\` quase nunca está visível na home (só após digitar); se você não detectar,
+   retorne string vazia — NUNCA chute.
+
+9. **PDP gallery / related**: você está vendo a HOME, então NÃO consegue ver thumbnails de PDP nem
+   shelf de "Related Products". Só preencha esses 3 campos se você reconhecer a plataforma e tiver
+   alta confiança no padrão (ex: VTEX usa \`.vtex-store-components-3-x-productImageTag--main\`).
+   Caso contrário, deixe string vazia — defaults cuidam disso.
+
+10. **Login**: \`login_trigger\` é o link "Entrar" / "Login" / ícone de pessoa na header (anônimo).
+    \`account_menu_trigger\` é o que aparece QUANDO LOGADO ("Olá, João", avatar) — provavelmente
+    NÃO está na home anônima. Se você só vê "Login", retorne string vazia para \`account_menu_trigger\`.
 
 Responda SEMPRE via tool_use report_selectors. Não escreva texto livre fora da tool call.
 `.trim();
@@ -209,6 +275,14 @@ export async function discoverSelectorsFromUrl(
     cepInputPdp: emptyToUndef(input.cep_input_pdp),
     cepInputCart: emptyToUndef(input.cep_input_cart),
     checkoutButton: emptyToUndef(input.checkout_button),
+    searchTrigger: emptyToUndef(input.search_trigger),
+    searchInput: emptyToUndef(input.search_input),
+    searchSuggestions: emptyToUndef(input.search_suggestions),
+    pdpGalleryThumbnail: emptyToUndef(input.pdp_gallery_thumbnail),
+    pdpGalleryMain: emptyToUndef(input.pdp_gallery_main),
+    pdpRelatedShelf: emptyToUndef(input.pdp_related_shelf),
+    loginTrigger: emptyToUndef(input.login_trigger),
+    accountMenuTrigger: emptyToUndef(input.account_menu_trigger),
   };
   // Sanity: the LLM commonly confuses the header cart icon with the
   // checkout button. If it returned the SAME selector (or a prefix match)

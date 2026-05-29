@@ -40,15 +40,20 @@ describe("httpStatusParity", () => {
     expect(orphan?.severity).toBe("high");
   });
 
-  it("flags pages only in cand as low (extra coverage, not a regression)", () => {
+  it("single-site mode (prod vazio, cand com páginas): skipa sem flagear", () => {
+    // parity e2e: por convenção prodPages é [] e candPages tem o conteúdo.
+    // Flagear "missing-prod" pra TODA página de cand é ruído puro.
     const r = httpStatusParity(
       makeContext({
         prodPages: [],
-        candPages: [makePageCapture({ url: "https://x.com/new", side: "cand" })],
+        candPages: [
+          makePageCapture({ url: "https://x.com/new", side: "cand" }),
+          makePageCapture({ url: "https://x.com/other", side: "cand" }),
+        ],
       }),
     );
-    const newPage = r.issues.find((i) => i.id.includes("missing-prod"));
-    expect(newPage?.severity).toBe("low");
+    expect(r.status).toBe("skipped");
+    expect(r.issues).toEqual([]);
   });
 
   it("pairs by pathname + viewport (different hosts allowed)", () => {

@@ -22,6 +22,16 @@ Built originally for Fresh → TanStack Start migrations of Deco storefronts, bu
 | Lazy section presence         | Deco `/deco/render` and `/_loader/*` routes responding                 |
 | SEO deep audit                | robots.txt, sitemap, noindex regressions                               |
 | Cache coverage                | Cache hit rate, opportunities to cache                                 |
+| **Search presence**           | Search input reachable from home in both                               |
+| **Search autocomplete**       | Typing reveals suggestions; cand keeps parity with prod                |
+| **Search results**            | Same keyword returns comparable product counts                         |
+| **Search no-results**         | Unicode garbage term shows empty state, doesn't match products         |
+| **Cart interactions**         | Increment / decrement / coupon / remove all behave in cand             |
+| **404 parity**                | Invalid URL returns 404 (no catch-all 200 in cand)                     |
+| **Cookie/CEP modal CLS**      | Modals don't introduce layout shifts >0.1 in cand                      |
+| **PDP gallery + related**     | Image gallery + "Related products" shelf still render                  |
+| **Footer links health**       | Institutional links (privacy, contact, etc.) aren't broken in cand     |
+| **Login flow** _(opt-in)_     | Valid credentials log in; invalid ones show a clear error              |
 
 All results are aggregated (optionally via Claude) and ranked by severity. Each issue includes screenshots, reproduction, and a suggested fix.
 
@@ -62,6 +72,7 @@ Individual flags always override the preset.
 | ------------------ | ----------------------------------------------------------------------------- |
 | `parity run`       | Full comparison run between two URLs                                          |
 | `parity audit`     | **Single-site** absolute audit (no prod×cand). Console + Vitals + SEO + Imgs  |
+| `parity e2e`       | **Single-site** functional end-to-end: all flows + all checks. ONE URL.       |
 | `parity journey`   | CI-friendly: only the purchase journey, with JUnit / GitHub annotations       |
 | `parity vitals`    | Crawl N pages, compare Web Vitals prod vs cand                                |
 | `parity cache`     | CDN cache analysis, opportunities, request categorization                     |
@@ -128,6 +139,27 @@ If `ANTHROPIC_API_KEY` is set, the LLM is invoked automatically and prints a one
 
 The same flags are available individually on `parity section`: `--heatmap`, `--css-source`, `--prompt`, `--llm-summary`. Use those when you only need one signal; `parity fix` is the "do everything" shortcut.
 
+## `parity e2e` — single-site functional run
+
+The `audit` command runs absolute checks (vitals, console, network, images, SEO) — useful but doesn't exercise interactions. `parity e2e` runs **all the functional flows** (homepage, plp, pdp, purchase-journey, search, cart-interactions, optionally login) against a single URL plus all parity checks in single-site mode.
+
+```bash
+# Quick e2e for a single site (no comparison, ~3-5min)
+parity e2e --url https://www.example.com
+
+# Pick specific flows
+parity e2e --url https://www.example.com --flows=search,cart-interactions
+
+# Override LLM-discovered search term
+parity e2e --url https://www.example.com --search-terms="camisa,promocao"
+
+# With login (credentials via env or flags)
+PARITY_LOGIN_EMAIL=test@example.com PARITY_LOGIN_PASSWORD=*** \
+  parity e2e --url https://www.example.com --flows=login
+```
+
+**Use `parity e2e` when** you want to validate "does this site actually work end-to-end?" — pre-launch, post-deploy, partner sites. **Use `parity run` when** you need to detect *regressions* between two versions (prod vs migration candidate).
+
 ## Configuration (optional)
 
 `.parityrc.json` at the project root — selector overrides and run defaults:
@@ -142,10 +174,25 @@ The same flags are available individually on `parity section`: `--heatmap`, `--c
     "minicartTrigger": "[data-minicart-trigger]",
     "cepInputPdp": "input[name='shipping-zipcode']",
     "cepInputCart": "input[name='cart-zipcode']",
-    "checkoutButton": "a:has-text('Finalizar compra')"
-  }
+    "checkoutButton": "a:has-text('Finalizar compra')",
+    "searchInput": "input[type='search']",
+    "cartCouponInput": "input[name*='coupon']"
+  },
+  "search": {
+    "terms": ["camisa", "promocao"]
+  },
+  "footer": {
+    "maxLinks": 20,
+    "followExternal": false
+  },
+  "notFound": {
+    "testUrl": "/this-page-definitely-does-not-exist"
+  },
+  "login": { "enabled": true }
 }
 ```
+
+> **Credentials are NEVER read from `.parityrc.json`.** Set `PARITY_LOGIN_EMAIL` and `PARITY_LOGIN_PASSWORD` as environment variables (`.parityrc.json` is for non-secret config only).
 
 `.parityignore` — noise suppression:
 

@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { baselineList, baselineSet, baselineUnset } from "./commands/baseline.ts";
 import { auditCommand } from "./commands/audit.ts";
 import { cacheCommand } from "./commands/cache.ts";
+import { e2eCommand } from "./commands/e2e.ts";
 import { checkCommand } from "./commands/check.ts";
 import { compareCommand } from "./commands/compare.ts";
 import { consoleCommand } from "./commands/console.ts";
@@ -53,7 +54,24 @@ program
   .option("--no-learn", "Don't write to learned-selectors.json (read-only mode)")
   .option("--vitals-pages <n>", "Extra pages from sitemap to crawl for Vitals coverage (default 10)", (v) => Number(v), 10)
   .option("--visual-pages <n>", "Pages to compare visually via LLM (home + sampled PLPs/PDPs from sitemap, default 5)", (v) => Number(v), 5)
+  .option(
+    "--pages <list>",
+    "Comma-separated paths to compare visually (overrides sitemap discovery). E.g. \"/,/account,/p/some-product\". Use this when you want deterministic coverage instead of sampled.",
+  )
+  .option(
+    "--pages-file <path>",
+    "Read paths to compare visually from a text file (one path per line). Lines starting with # are ignored. Overrides --pages when both are present.",
+  )
   .option("--no-visual-diff", "Skip the visual diff capture pass entirely")
+  .option(
+    "--no-cache",
+    "Disable the cross-run visual-diff cache (forces a fresh LLM judgment on every page).",
+  )
+  .option(
+    "--clear-cache",
+    "Wipe the visual-diff verdict cache (parity-output/cache/verdicts.json) before the run.",
+    false,
+  )
   .option(
     "--bypass-cache",
     "Bypass CDN/edge caches: append a cache-busting query param and send Cache-Control: no-cache on every request. Use right after a deploy to avoid false failures from stale CF edge content.",
@@ -92,6 +110,37 @@ program
   )
   .action(async (opts) => {
     process.exit(await auditCommand(opts));
+  });
+
+program
+  .command("e2e")
+  .description(
+    "Single-site functional end-to-end. Runs all functional flows (homepage, plp, pdp, purchase-journey, search, cart-interactions, optionally login) against ONE URL, then runs all checks in single-site mode. Use for 'does this site actually work?' verification — broader than `audit` (which only does vitals/console/network/images/seo).",
+  )
+  .requiredOption("--url <url>", "Base URL of the site to test")
+  .option(
+    "--flows <list>",
+    "Comma-separated flows. Default: homepage,plp,pdp,purchase-journey,search,cart-interactions (login is opt-in)",
+    "",
+  )
+  .option("--viewports <list>", "Comma-separated viewports", "mobile,desktop")
+  .option("--cep <cep>", "CEP for shipping calculation", "01310-100")
+  .option(
+    "--search-terms <list>",
+    "Comma-separated search terms to use (override LLM auto-discovery)",
+  )
+  .option("--login-email <email>", "Login email (also PARITY_LOGIN_EMAIL env var)")
+  .option("--login-password <pwd>", "Login password (also PARITY_LOGIN_PASSWORD env var)")
+  .option("--output <dir>", "Output directory", "./parity-output")
+  .option("--open", "Open the HTML report after the run completes", false)
+  .option("--json", "Emit one-line JSON instead of pretty text", false)
+  .option(
+    "--fail-on <severities>",
+    "Comma-separated severities that cause exit 1 (default: critical,high)",
+    "critical,high",
+  )
+  .action(async (opts) => {
+    process.exit(await e2eCommand(opts));
   });
 
 program

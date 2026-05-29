@@ -786,6 +786,49 @@ export const REPORT_CSS = `
     color: var(--text-muted);
     font-size: 14px;
   }
+  .vd-deepdive {
+    margin-top: 16px;
+    padding: 12px 14px;
+    background: color-mix(in srgb, var(--accent-action) 6%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-action) 25%, transparent);
+    border-radius: 6px;
+  }
+  .vd-deepdive-title {
+    font-size: 13px;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+  }
+  .vd-deepdive-title strong {
+    color: var(--state-bad);
+    font-weight: 600;
+  }
+  .vd-deepdive-cmd { margin-top: 8px; }
+  .vd-deepdive-cmd:first-of-type { margin-top: 0; }
+  .vd-deepdive-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .vd-deepdive-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .vd-deepdive-code {
+    flex: 1;
+    display: block;
+    padding: 8px 10px;
+    background: var(--surface-overlay);
+    border: 1px solid var(--border-default);
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow-x: auto;
+  }
   .vd-meta {
     margin-top: 12px;
     padding-top: 10px;

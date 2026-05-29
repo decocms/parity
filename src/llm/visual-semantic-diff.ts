@@ -6,6 +6,13 @@ import { callTool } from "./client.ts";
 /** Max height to send to Vision. Trades cost for catching below-the-fold diffs (footer, lower shelves). */
 const MAX_HEIGHT = 8000;
 
+/**
+ * Cache invalidation key. Bump whenever the prompt or tool schema changes —
+ * cached verdicts under a different version are ignored so stale judgments
+ * don't outlive prompt iterations.
+ */
+export const LLM_PROMPT_VERSION = "v2-heatmap";
+
 export type DifferenceType = VisualDifferenceType;
 export type Region = VisualRegion;
 export type { VisualDifference };
@@ -65,10 +72,15 @@ const REPORT_VISUAL_DIFFS_TOOL = {
 
 const SYSTEM_PROMPT = `
 Você é um QA visual especialista em migrações de sites de e-commerce Deco
-(Fresh → TanStack Start). Recebe duas screenshots da MESMA página:
+(Fresh → TanStack Start). Recebe DUAS ou TRÊS imagens:
 
 1ª imagem = prod (Fresh, fonte da verdade)
 2ª imagem = cand (TanStack, candidata recém-migrada)
+3ª imagem (quando presente) = heatmap pixelmatch:
+  - Pixels VERMELHOS indicam onde prod e cand divergem pixel-a-pixel.
+  - Use o heatmap como MAPA pra orientar onde olhar — mas julgue SEMANTICAMENTE
+    olhando 1ª e 2ª. Vermelho num carrossel rotacionando é ruído; vermelho
+    cobrindo metade da página geralmente é página renderizando rota errada.
 
 Sua tarefa: identificar diferenças SEMÂNTICAS que importam pra qualidade do
 site migrado. Você responde APENAS via tool_use report_visual_differences.
@@ -80,19 +92,31 @@ CONSIDERE COMO DIFERENÇA REAL:
 - Imagens diferentes ou faltando (hero, logo, banners de categoria)
 - Layout shift significativo (elementos em posição muito diferente)
 - Estilo (cor, tipografia) substancialmente diferente que muda a percepção
+- **Página rota-errada**: se um lado mostra uma página (ex: login, /account, PDP)
+  e o outro lado mostra conteúdo TOTALMENTE diferente (ex: home, PLP, 404),
+  reporte como \`missing-component\` com severity \`critical\`. O candidato
+  provavelmente está renderizando a rota errada — isso é o pior bug possível
+  pra uma migração.
 
 IGNORE COMO RUÍDO (não reporte):
 - Anti-aliasing e diferenças sub-pixel
 - Ordem de banners rotativos / carrosséis em estados diferentes
 - Tooltips visíveis em apenas um lado
-- Cookies banners / pop-ups consent em estados diferentes
 - Ads injetados por extensões
 - Hora/data dinâmicas (timestamp, countdown)
 - Stock counters / preços com pequena variação dinâmica
 - Pixel-level rendering quirks
 
+REGRA DE MODAL/POPUP (importante — não confundir com rota-errada):
+- Modal/popup visível em SÓ um lado é ruído APENAS se o conteúdo de fundo dos
+  dois lados é o mesmo (ex: cookie banner em prod, sem cookie banner em cand,
+  mas ambos mostram a home).
+- Se um lado mostra modal/conteúdo X e o outro mostra conteúdo Y completamente
+  diferente (ex: prod tem modal de login sobre fundo de login, cand mostra a
+  home), reporte como \`missing-component\` \`critical\` — é o caso rota-errada.
+
 SEVERIDADE:
-- critical: feature inteira faltando (header sumiu, carrinho não existe, busca quebrada visualmente)
+- critical: feature inteira faltando (header sumiu, carrinho não existe, busca quebrada visualmente), página renderizando rota errada
 - high: section importante diferente ou faltando (hero errado, shelf principal vazio, footer cortado)
 - medium: diferença significativa em componente secundário (cor de CTA, espaçamento, imagem trocada)
 - low: cosmético menor (alinhamento pequeno, ícone com 2px de diferença)
@@ -119,6 +143,19 @@ function loadCroppedPngBase64(path: string, maxHeight = MAX_HEIGHT): string {
 export interface VisualDiffInput {
   prodPath: string;
   candPath: string;
+  /**
+   * Optional pixelmatch heatmap PNG. When provided, sent as the 3rd image so
+   * the LLM has a literal red-overlay map of where pixels diverge. Helps catch
+   * cases where prod and cand look superficially similar (same chrome) but the
+   * main content area is rendering an entirely different route.
+   */
+  heatmapPath?: string;
+  /**
+   * Raw pctDiff from pixelmatch (0–1). Passed in the user text so the LLM can
+   * weight its judgment: a 60%+ pctDiff with no obvious carousel/dynamic-content
+   * explanation strongly suggests the candidate is rendering the wrong route.
+   */
+  pctDiff?: number;
   pageContext?: string;
   viewport?: string;
   /** Deco sections detected in prod HTML (data-section attribute). */
@@ -137,6 +174,13 @@ export interface VisualDiffInput {
 
 function buildContextBlock(input: VisualDiffInput): string {
   const lines: string[] = [];
+  if (typeof input.pctDiff === "number") {
+    const pct = (input.pctDiff * 100).toFixed(2);
+    lines.push(
+      "",
+      `**pctDiff bruto do pixelmatch: ${pct}%.** Acima de 30% sem explicação clara (carrossel girando, banner promo alternando, imagens dinâmicas, fontes carregando) é forte indício de página renderizando conteúdo errado — investigue com mais cuidado.`,
+    );
+  }
   if (input.sectionsOnlyInProd && input.sectionsOnlyInProd.length > 0) {
     lines.push(
       "",
@@ -163,9 +207,18 @@ export async function visualSemanticDiff(
 ): Promise<VisualDifference[] | null> {
   let prodB64: string;
   let candB64: string;
+  let heatmapB64: string | undefined;
   try {
     prodB64 = loadCroppedPngBase64(input.prodPath);
     candB64 = loadCroppedPngBase64(input.candPath);
+    if (input.heatmapPath) {
+      try {
+        heatmapB64 = loadCroppedPngBase64(input.heatmapPath);
+      } catch (err) {
+        // Heatmap is optional — if it fails to load, drop it and proceed with 2 images.
+        console.error(`[llm-visual-diff] heatmap skipped: ${(err as Error).message}`);
+      }
+    }
   } catch (err) {
     console.error(`[llm-visual-diff] failed to load PNGs: ${(err as Error).message}`);
     return null;
@@ -173,14 +226,21 @@ export async function visualSemanticDiff(
 
   const context = `${input.pageContext ?? "a página"}${input.viewport ? ` (${input.viewport})` : ""}`;
   const contextBlock = buildContextBlock(input);
-  const userText = `Compare as duas screenshots de ${context}. 1ª = prod (Fresh, fonte da verdade), 2ª = cand (TanStack, migrada).${contextBlock}`;
+  const heatmapHint = heatmapB64
+    ? " A 3ª imagem é o heatmap pixelmatch (vermelho = pixels que divergem)."
+    : "";
+  const userText = `Compare as duas screenshots de ${context}. 1ª = prod (Fresh, fonte da verdade), 2ª = cand (TanStack, migrada).${heatmapHint}${contextBlock}`;
+  const userImages: Array<{ base64: string; mediaType: "image/png" }> = [
+    { base64: prodB64, mediaType: "image/png" },
+    { base64: candB64, mediaType: "image/png" },
+  ];
+  if (heatmapB64) {
+    userImages.push({ base64: heatmapB64, mediaType: "image/png" });
+  }
   const result = await callTool<{ differences?: Partial<VisualDifference>[] }>({
     systemPrompt: SYSTEM_PROMPT,
     userText,
-    userImages: [
-      { base64: prodB64, mediaType: "image/png" },
-      { base64: candB64, mediaType: "image/png" },
-    ],
+    userImages,
     maxTokens: 2000,
     tool: {
       name: REPORT_VISUAL_DIFFS_TOOL.name,
