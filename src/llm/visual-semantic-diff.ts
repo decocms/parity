@@ -11,7 +11,7 @@ const MAX_HEIGHT = 8000;
  * cached verdicts under a different version are ignored so stale judgments
  * don't outlive prompt iterations.
  */
-export const LLM_PROMPT_VERSION = "v2-heatmap";
+export const LLM_PROMPT_VERSION = "v3-skeleton";
 
 export type DifferenceType = VisualDifferenceType;
 export type Region = VisualRegion;
@@ -107,6 +107,19 @@ IGNORE COMO RUÍDO (não reporte):
 - Stock counters / preços com pequena variação dinâmica
 - Pixel-level rendering quirks
 
+REGRA DE SKELETON / LOADING (timing — não regressão):
+- Skeletons / shimmers / placeholders cinzas com padrão de "card vazio" indicam
+  que o lado em questão ainda estava buscando dados quando a screenshot foi
+  tirada. Se UM lado mostra skeletons e o OUTRO lado mostra o componente real
+  carregado pra o MESMO slot (mesma região, mesmo tipo de componente), isso é
+  timing-noise, NÃO regressão.
+- Nesses casos a severidade deve ser \`low\` no máximo. Nunca \`critical\` ou
+  \`high\`. Indique no \`description\` algo como "skeleton-vs-loaded — pode ser
+  timing" pra o leitor humano não perder tempo.
+- Exceção: se um lado mostra a região INTEIRA em skeleton infinito (sem
+  componente nem placeholder) enquanto o outro tem o conteúdo completo, isso
+  pode ser um bug real de fetch — aí severity \`medium\`.
+
 REGRA DE MODAL/POPUP (importante — não confundir com rota-errada):
 - Modal/popup visível em SÓ um lado é ruído APENAS se o conteúdo de fundo dos
   dois lados é o mesmo (ex: cookie banner em prod, sem cookie banner em cand,
@@ -170,6 +183,14 @@ export interface VisualDiffInput {
    * "different active slide" — they're timing noise (issue #22).
    */
   bothHaveCarousel?: boolean;
+  /**
+   * Skeleton/loader elements still present in each side's final HTML. When
+   * one side has noticeably more skeletons than the other, the LLM should
+   * downgrade any "missing-component" diffs in that region — they likely
+   * reflect a render race, not a real regression.
+   */
+  prodSkeletonCount?: number;
+  candSkeletonCount?: number;
 }
 
 function buildContextBlock(input: VisualDiffInput): string {
@@ -194,6 +215,19 @@ function buildContextBlock(input: VisualDiffInput): string {
     lines.push(
       "",
       "**Ambos os lados expõem um carousel/slider no DOM.** Diferenças no conteúdo do hero (banner diferente, texto diferente, imagem diferente) provavelmente são apenas slides diferentes do mesmo carousel capturados em momentos distintos. NÃO reporte essas diferenças como critical/high. Se o carousel inteiro sumir, ou o layout do hero quebrar, isso sim reporte normalmente.",
+    );
+  }
+  const prodSkel = input.prodSkeletonCount ?? 0;
+  const candSkel = input.candSkeletonCount ?? 0;
+  // Imbalance threshold: a few skeleton elements is normal (e.g. SVG
+  // shimmer in a logo); a difference of 5+ between sides strongly suggests
+  // one finished its data fetch and the other didn't.
+  if (Math.abs(prodSkel - candSkel) >= 5) {
+    const heavier = prodSkel > candSkel ? "prod" : "cand";
+    const lighter = prodSkel > candSkel ? "cand" : "prod";
+    lines.push(
+      "",
+      `**Desbalanço de skeleton/loaders detectado no DOM**: ${heavier} ainda tem ${Math.max(prodSkel, candSkel)} elementos skeleton enquanto ${lighter} tem ${Math.min(prodSkel, candSkel)}. Isso indica que ${heavier} não terminou o data fetch quando a screenshot foi tirada. Diferenças onde ${heavier} mostra placeholder cinza e ${lighter} mostra o componente carregado são TIMING NOISE — reporte com severity \`low\` no máximo e mencione "skeleton-vs-loaded" no description.`,
     );
   }
   if (input.prodSections && input.prodSections.length > 0) {

@@ -59,6 +59,15 @@ export interface DomSnapshot {
     banners: BannerImage[];
   };
   decoSectionsRendered: string[];
+  /**
+   * Number of elements that look like skeleton/loader placeholders still
+   * present in the captured HTML — `.skeleton`, `[aria-busy="true"]`,
+   * `[class*="shimmer"]`, Tailwind `.animate-pulse`, etc. Non-zero means
+   * the page's data fetch hadn't fully resolved when the snapshot was
+   * taken; the visual-diff LLM uses this to discount "missing-component"
+   * diffs that are actually just one side racing ahead.
+   */
+  skeletonCount: number;
 }
 
 function parseDim(raw: string | undefined): number | null {
@@ -161,7 +170,32 @@ export function snapshotDom(html: string): DomSnapshot {
     if (v) decoSectionsRendered.push(v);
   });
 
-  return { counts, meta, imageStats, decoSectionsRendered: [...new Set(decoSectionsRendered)] };
+  // Skeleton/loader detection — kept in sync with SKELETON_SELECTOR in
+  // src/engine/collect.ts. Mirror via cheerio rather than importing because
+  // the engine module pulls in Playwright which we don't want at parse time.
+  let skeletonCount = 0;
+  for (const sel of [
+    "[aria-busy='true']",
+    "[data-skeleton]",
+    "[data-loading='true']",
+    ".skeleton",
+    "[class*='skeleton' i]",
+    "[class*='Skeleton']",
+    "[class*='shimmer' i]",
+    ".animate-pulse",
+    ".placeholder-shimmer",
+    ".react-loading-skeleton",
+  ]) {
+    skeletonCount += $(sel).length;
+  }
+
+  return {
+    counts,
+    meta,
+    imageStats,
+    decoSectionsRendered: [...new Set(decoSectionsRendered)],
+    skeletonCount,
+  };
 }
 
 export interface DomDiff {

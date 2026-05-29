@@ -497,21 +497,21 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       try {
         const visualPaths = explicitPaths
           ?? (await discoverPagesFromSitemap(opts.prod, { sampleSize: visualPagesLimit })).all.map((p) => p.path);
-        // Don't re-capture paths we already have screenshots for (in flows or vitals extras)
-        const alreadyCapturedKeys = new Set<string>();
-        for (const p of allPageCaptures) {
-          try {
-            alreadyCapturedKeys.add(`${new URL(p.url).pathname}::${p.viewport}::${p.side}`);
-          } catch {
-            /* skip */
-          }
-        }
+        // Always (re-)capture visual-diff pages with the visual-diff capture
+        // settings (4s settleMs, 45s timeoutMs, scrollToLoad: true), even when
+        // the same path was already captured by a flow (homepage, purchase-
+        // journey). Flow captures use shorter settles tuned for click-driven
+        // step flow, not for full-page screenshots — using them as the source
+        // of truth for visual comparison produced false "missing-component"
+        // diffs because lazy-loaded shelves below the fold hadn't rendered.
+        // The duplicate captures end up in `allPageCaptures` but `pairCaptures`
+        // keys by path::viewport and keeps the last one wins, so the
+        // visual-diff capture (pushed after flows) is the one the check uses.
 
         const tasks: Array<{ path: string; viewport: Viewport; side: Side }> = [];
         for (const viewport of viewports) {
           for (const path of visualPaths) {
             for (const side of ["prod", "cand"] as Side[]) {
-              if (alreadyCapturedKeys.has(`${path}::${viewport}::${side}`)) continue;
               tasks.push({ path, viewport, side });
             }
           }
@@ -537,8 +537,14 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
                   side: task.side,
                   viewport: task.viewport,
                   screenshotPath,
-                  settleMs: 1800,
-                  timeoutMs: 30_000,
+                  // These screenshots are the source of truth for the LLM
+                  // visual-diff verdict — short settle time made the LLM
+                  // see half-rendered prod pages and report phantom
+                  // "missing-component" diffs. 4s settle + the post-scroll
+                  // networkidle wait inside capturePage produces stable
+                  // captures on VTEX/Shopify storefronts with lazy shelves.
+                  settleMs: 4_000,
+                  timeoutMs: 45_000,
                   scrollToLoad: true,
                 });
                 allPageCaptures.push(cap);

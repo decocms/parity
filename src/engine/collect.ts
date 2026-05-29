@@ -274,7 +274,59 @@ function parseIntOrNull(v: string | undefined): number | null {
  * sections, and analytics. Returns to top at the end so screenshots start
  * from header (full-page screenshot stitches the whole height regardless).
  */
+/**
+ * Selectors that strongly indicate a skeleton/loader placeholder. Captures
+ * a broad set of conventions: Tailwind `.animate-pulse`, classic `.skeleton`,
+ * `react-loading-skeleton`, `[aria-busy]`, and the common Deco/VTEX shelf
+ * placeholders that block real content from rendering during fetch.
+ */
+export const SKELETON_SELECTOR =
+  "[aria-busy='true'],[data-skeleton],[data-loading='true'],.skeleton,[class*='skeleton' i],[class*='Skeleton'],[class*='shimmer' i],.animate-pulse,.placeholder-shimmer,.react-loading-skeleton";
+
+/**
+ * Poll the page until skeleton placeholders disappear (or `maxMs` elapses).
+ *
+ * Heavy storefronts (VTEX intelligent search shelves, Shopify collection
+ * grids, Deco lazy sections) commonly render skeleton cards while the data
+ * fetch is in flight. If we screenshot too early we capture a forest of
+ * placeholders, and the visual-diff LLM downstream then reports phantom
+ * "missing-component" diffs because one side raced ahead.
+ *
+ * We poll every 500ms — `setInterval` would be cheaper, but the polling
+ * loop is bounded by `maxMs` and runs at most ~12 iterations so the
+ * overhead is negligible compared to a 30s+ page capture.
+ */
+async function waitForSkeletonsToResolve(page: Page, maxMs = 10_000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    const count = await page
+      .evaluate((sel) => document.querySelectorAll(sel).length, SKELETON_SELECTOR)
+      .catch(() => 0);
+    if (count === 0) return;
+    await page.waitForTimeout(500).catch(() => undefined);
+  }
+}
+
 async function scrollFullPage(page: Page): Promise<void> {
+  // Scrolling exists to trigger IntersectionObserver-gated lazy sections
+  // (VTEX intelligent search shelves, Shopify collection grids, deferred
+  // hero banners). Three tuning calls that the obvious version got wrong:
+  //
+  //  - **Step pause (400ms, was 220ms).** 220ms is below the typical fetch
+  //    latency from a VTEX shelf API hit (300-700ms). The viewport passed
+  //    over the section before the products arrived, so the IO never saw
+  //    "loaded" and downstream screenshots captured skeletons. 400ms lets
+  //    each shelf get a fetch dispatched while the viewport sits on it.
+  //
+  //  - **Bottom dwell (1500ms, was 400ms).** Footer and "you might also
+  //    like" carousels typically only fetch when the bottom of the page
+  //    enters the viewport. A 400ms dwell isn't enough for the resulting
+  //    requests to land and render — bumped to 1500.
+  //
+  //  - **Return-to-top settle (700ms).** Some lazy frameworks fire IO
+  //    "leave" callbacks when we snap back to 0 and re-skeletonize the
+  //    sections that just rendered. The extra dwell at top lets those
+  //    re-renders complete (if they happen) before the screenshot fires.
   await page.evaluate(async () => {
     await new Promise<void>((resolve) => {
       const step = Math.max(window.innerHeight * 0.8, 600);
@@ -284,14 +336,13 @@ async function scrollFullPage(page: Page): Promise<void> {
         window.scrollTo(0, y);
         y += step;
         if (y < max) {
-          setTimeout(tick, 220);
+          setTimeout(tick, 400);
         } else {
-          // Final scroll to bottom to make sure footer-side lazy loads
           window.scrollTo(0, max);
           setTimeout(() => {
             window.scrollTo(0, 0);
-            resolve();
-          }, 400);
+            setTimeout(resolve, 700);
+          }, 1500);
         }
       };
       tick();
@@ -409,7 +460,20 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
             new Promise<void>((resolve) => setTimeout(resolve, Math.min(10_000, remaining()))),
           ]);
           dlog(opts.side, opts.viewport, `    capturePage: scrollFullPage done (remaining=${remaining()}ms)`);
-          await page.waitForTimeout(Math.min(600, remaining()));
+          // Scrolling to the bottom kicks off a wave of lazy fetches (product
+          // shelves, hero images, footer widgets). Before the screenshot
+          // fires, give those a real chance to land — otherwise we capture
+          // a forest of skeleton placeholders and the LLM downstream thinks
+          // half the page is "missing-component". Bumped from a flat 600ms
+          // to (networkidle race up to 3s) + 800ms after observing prod
+          // screenshots of miess home rendering ~30% skeletons.
+          if (remaining() > 2_000) {
+            dlog(opts.side, opts.viewport, `    capturePage: post-scroll networkidle (cap=${Math.min(3_000, remaining())}ms)`);
+            await page
+              .waitForLoadState("networkidle", { timeout: Math.min(3_000, remaining()) })
+              .catch(() => undefined);
+          }
+          await page.waitForTimeout(Math.min(800, remaining()));
         }
       }
     } catch (err) {
@@ -442,6 +506,21 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
         stabilizeCarousels(page).catch(() => undefined),
         new Promise<void>((resolve) => setTimeout(resolve, Math.min(3_000, remaining()))),
       ]);
+      // Wait for skeleton placeholders (shelf-cards, lazy sections, busy
+      // panels) to resolve before the screenshot fires. Without this we'd
+      // capture half the page as shimmer loaders, and the visual-diff LLM
+      // would report phantom "missing-component" diffs because one side
+      // happened to finish first. 6s cap is enough for VTEX intelligent
+      // search to populate a shelf; pages without skeletons short-circuit
+      // on the first poll.
+      const skeletonBudget = Math.min(10_000, remaining());
+      if (skeletonBudget > 500) {
+        dlog(opts.side, opts.viewport, `    capturePage: waitForSkeletons (cap=${skeletonBudget}ms)`);
+        await Promise.race([
+          waitForSkeletonsToResolve(page, skeletonBudget).catch(() => undefined),
+          new Promise<void>((resolve) => setTimeout(resolve, skeletonBudget)),
+        ]);
+      }
       dlog(opts.side, opts.viewport, `    capturePage: screenshot start (cap=${Math.min(15_000, remaining())}ms)`);
       await Promise.race([
         page.screenshot({ path: opts.screenshotPath, fullPage: true, animations: "disabled" }).catch(() => undefined),

@@ -74,6 +74,39 @@ describe("snapshotDom", () => {
     const s = snapshotDom(HTML_PROD);
     expect(s.decoSectionsRendered).toContain("hero");
   });
+
+  describe("skeletonCount", () => {
+    it("returns 0 for HTML with no skeleton elements", () => {
+      const s = snapshotDom(HTML_PROD);
+      expect(s.skeletonCount).toBe(0);
+    });
+
+    it("counts elements matching common skeleton patterns", () => {
+      const html = `
+        <html><body>
+          <div class="skeleton"></div>
+          <div class="product-skeleton"></div>
+          <div class="ProductSkeleton"></div>
+          <div class="animate-pulse"></div>
+          <div aria-busy="true"></div>
+          <div data-skeleton></div>
+          <div data-loading="true"></div>
+          <div class="shimmer-card"></div>
+          <div class="react-loading-skeleton"></div>
+        </body></html>`;
+      const s = snapshotDom(html);
+      // 9 distinct elements above; we count each via its first matching selector
+      // (the loop sums per-selector hits so some overlap is expected, but
+      // shouldn't undercount).
+      expect(s.skeletonCount).toBeGreaterThanOrEqual(9);
+    });
+
+    it("counts repeated skeletons (typical shelf card pattern)", () => {
+      const cards = "<div class='skeleton-card'></div>".repeat(8);
+      const s = snapshotDom(`<html><body>${cards}</body></html>`);
+      expect(s.skeletonCount).toBeGreaterThanOrEqual(8);
+    });
+  });
 });
 
 describe("diffDom", () => {
