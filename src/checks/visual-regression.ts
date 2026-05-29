@@ -129,6 +129,64 @@ function downgradeCarouselFramingDiffs(
 }
 
 /**
+ * Detection that the LLM-reported description likely refers to a
+ * skeleton/loading state rather than a missing component. Catches both
+ * Portuguese and English wording the model tends to emit, since the prompt
+ * mixes languages.
+ */
+const SKELETON_DESCRIPTION_RE =
+  /skeleton|placeholder|shimmer|loading|carregando|esqueleto|esquemático|cinza|gray box|gray card|empty card|empty placeholder|loader/i;
+
+/**
+ * Safety net for skeleton-vs-loaded diffs the LLM emits as critical/high
+ * despite the prompt rule. When the two sides have an imbalanced skeleton
+ * count AND the description hints at a loading state, downgrade to `low`.
+ *
+ * Mirrors the carousel downgrade in spirit — we'd rather over-downgrade a
+ * flaky-timing diff than have it pollute the parity verdict. Real
+ * "missing-component" diffs (whole section truly absent) don't match this
+ * pattern because the LLM describes them with concrete component names,
+ * not "skeleton" / "placeholder".
+ */
+function downgradeSkeletonImbalanceDiffs(
+  diffs: VisualDifference[],
+  prodSkeletonCount: number,
+  candSkeletonCount: number,
+): VisualDifference[] {
+  if (Math.abs(prodSkeletonCount - candSkeletonCount) < SKELETON_IMBALANCE_THRESHOLD) {
+    return diffs;
+  }
+  const heavier = prodSkeletonCount > candSkeletonCount ? "prod" : "cand";
+  return diffs.map((d) => {
+    if (d.severity === "low") return d;
+    // Only downgrade missing/different-component patterns — color/style
+    // diffs aren't usually skeleton-related and shouldn't get muted.
+    const eligible: VisualDifference["type"][] = [
+      "missing-component",
+      "different-component",
+      "extra-component",
+    ];
+    if (!eligible.includes(d.type)) return d;
+    if (!SKELETON_DESCRIPTION_RE.test(d.description)) return d;
+    return {
+      ...d,
+      severity: "low" as const,
+      description: `${d.description} [downgraded: skeleton-vs-loaded — ${heavier} ainda tinha placeholders carregando quando a screenshot foi tirada; provável timing noise]`,
+    };
+  });
+}
+
+/**
+ * When the difference between the two sides' skeleton counts crosses this
+ * threshold, we treat the imbalance as a real timing signal (one side hadn't
+ * resolved its fetch). Used both to inform the LLM prompt and to gate the
+ * post-process downgrade. 5 is chosen empirically: a typical Deco home page
+ * has 1-2 skeleton-flavored elements baseline (loading SVGs, brand
+ * shimmers), and a single missing shelf adds 4+ skeleton cards.
+ */
+const SKELETON_IMBALANCE_THRESHOLD = 5;
+
+/**
  * Per-pair intermediate state computed in pass 1 (pixelmatch + DOM extraction
  * + cache lookup) and consumed in pass 2 (priorized LLM calls).
  */
@@ -142,6 +200,8 @@ interface PreparedPair {
   sectionsOnlyInProd: string[];
   sectionsOnlyInCand: string[];
   bothHaveCarousel: boolean;
+  prodSkeletonCount: number;
+  candSkeletonCount: number;
   hash?: string;
   cacheHit?: {
     differences: VisualDifference[];
@@ -224,6 +284,8 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
     const prodSet = new Set(prodSections);
     const sectionsOnlyInProd = prodSections.filter((s) => !candSet.has(s));
     const sectionsOnlyInCand = candSections.filter((s) => !prodSet.has(s));
+    const prodSkeletonCount = prodSnapshot?.skeletonCount ?? 0;
+    const candSkeletonCount = candSnapshot?.skeletonCount ?? 0;
 
     const bothHaveCarousel =
       hasCarouselSection(prodSections) && hasCarouselSection(candSections);
@@ -260,6 +322,8 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
       sectionsOnlyInProd,
       sectionsOnlyInCand,
       bothHaveCarousel,
+      prodSkeletonCount,
+      candSkeletonCount,
       hash,
       cacheHit,
       preflightIssues,
@@ -317,6 +381,8 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
           candSections: p.candSections,
           sectionsOnlyInProd: p.sectionsOnlyInProd,
           bothHaveCarousel: p.bothHaveCarousel,
+          prodSkeletonCount: p.prodSkeletonCount,
+          candSkeletonCount: p.candSkeletonCount,
         });
         differences = diffs ?? [];
       } catch (err) {
@@ -326,6 +392,11 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
 
     if (differences.length > 0) {
       differences = downgradeCarouselFramingDiffs(differences, p.bothHaveCarousel);
+      differences = downgradeSkeletonImbalanceDiffs(
+        differences,
+        p.prodSkeletonCount,
+        p.candSkeletonCount,
+      );
     }
 
     const verdict = decideVerdict({

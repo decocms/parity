@@ -494,6 +494,98 @@ describe("visualRegressionKeyframes", () => {
     delete process.env.ANTHROPIC_API_KEY;
   });
 
+  it("downgrades skeleton-vs-loaded diffs to 'low' when one side has many skeletons and LLM flagged them as missing/different", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: "tool_use",
+          name: "report_visual_differences",
+          input: {
+            differences: [
+              {
+                type: "missing-component",
+                region: "shelf",
+                severity: "critical",
+                description: "Product shelf shows only gray skeleton placeholder cards in cand while prod has fully loaded products",
+              },
+              {
+                type: "missing-component",
+                region: "footer",
+                severity: "high",
+                description: "Footer 'About Us' navigation block is absent in cand — entire <ul> markup removed",
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const prodPath = join(dir.path, "p.png");
+    const candPath = join(dir.path, "c.png");
+    makePng(prodPath, 50, 50, [0, 0, 0]);
+    makePng(candPath, 50, 50, [255, 255, 255]);
+    // Imbalanced skeletons: cand has 8 skeletons, prod has none
+    const prodHtml = "<html><body><div data-section='Shelf'><div class='product'>real product</div></div></body></html>";
+    const candHtml = `<html><body><div data-section='Shelf'>${"<div class='skeleton'></div>".repeat(8)}</div></body></html>`;
+    const r = await visualRegressionKeyframes(
+      makeContext({
+        outDir: dir.path,
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath, html: prodHtml })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath, html: candHtml })],
+      }),
+    );
+    const semantic = r.issues.filter((i) => i.id.includes("visual:semantic"));
+    const shelfIssue = semantic.find((i) => i.summary.includes("[shelf]"));
+    const footerIssue = semantic.find((i) => i.summary.includes("[footer]"));
+    // shelf diff matches skeleton wording → downgraded to low
+    expect(shelfIssue?.severity).toBe("low");
+    expect(shelfIssue?.summary).toMatch(/skeleton-vs-loaded/);
+    // footer diff is unrelated → keeps original severity
+    expect(footerIssue?.severity).toBe("high");
+    expect(footerIssue?.summary).not.toMatch(/downgraded/);
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  it("does NOT downgrade when skeleton imbalance is below threshold (1-2 baseline skeletons are noise)", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: "tool_use",
+          name: "report_visual_differences",
+          input: {
+            differences: [
+              {
+                type: "missing-component",
+                region: "shelf",
+                severity: "critical",
+                description: "Product shelf section is showing skeleton loaders in cand",
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const prodPath = join(dir.path, "p.png");
+    const candPath = join(dir.path, "c.png");
+    makePng(prodPath, 50, 50, [0, 0, 0]);
+    makePng(candPath, 50, 50, [255, 255, 255]);
+    // Only 2-skeleton imbalance: under the 5 threshold, should NOT downgrade
+    const prodHtml = "<html><body><div class='skeleton'></div></body></html>";
+    const candHtml = "<html><body><div class='skeleton'></div><div class='skeleton'></div><div class='skeleton'></div></body></html>";
+    const r = await visualRegressionKeyframes(
+      makeContext({
+        outDir: dir.path,
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath, html: prodHtml })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath, html: candHtml })],
+      }),
+    );
+    const shelfIssue = r.issues.find((i) => i.id.includes("visual:semantic") && i.summary.includes("[shelf]"));
+    expect(shelfIssue?.severity).toBe("critical"); // unchanged
+    expect(shelfIssue?.summary).not.toMatch(/downgraded/);
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
   it("noCache=true bypasses cache and forces a fresh LLM call", async () => {
     process.env.ANTHROPIC_API_KEY = "sk-test";
     mockCreate.mockResolvedValue({

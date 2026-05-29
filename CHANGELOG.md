@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.10.0](https://github.com/decocms/parity/compare/v0.9.0...v0.10.0) (2026-05-29)
+
+### Added
+
+* **skeleton-aware capture pipeline:** `capturePage` now waits up to 6s for skeleton/loader placeholders (`.skeleton`, `[aria-busy]`, `.animate-pulse`, `.shimmer*`, `react-loading-skeleton`, generic `[class*='skeleton' i]`) to resolve before the screenshot fires. Stops the visual-diff LLM from reporting phantom "missing-component" diffs because one side raced ahead. `DomSnapshot.skeletonCount` exposes residual skeletons to downstream consumers.
+* **skeleton-vs-loaded downgrade post-process:** when prod and cand differ in skeleton count by ≥5, LLM-reported `missing-component`/`different-component`/`extra-component` diffs whose description mentions skeleton/placeholder/shimmer wording are downgraded to `low` with an explanatory `[downgraded: skeleton-vs-loaded — ...]` suffix. Mirrors the carousel safety net from issue #22.
+
+### Fixed
+
+* **scrollFullPage timing on heavy storefronts:** scroll step delay raised from 220ms → 400ms (gives shelf APIs time to dispatch before viewport moves past), bottom dwell from 400ms → 1500ms (footer + bottom carousels get to finish), plus a new 700ms settle after returning to the top (covers lazy frameworks that re-skeletonize on IntersectionObserver "leave"). This was the root cause of prod screenshots capturing 30-60% skeleton placeholders on Miess `/`, `/super-live`, `/intt-day`.
+* **post-scroll networkidle wait:** added a 3s `networkidle` race after `scrollFullPage` in `capturePage`, plus 800ms (was 600ms) settle. Catches the lazy-fetch wave kicked off during the scroll-through before the screenshot fires.
+* **visual-diff `settleMs` for the dedicated capture pass:** bumped from 1.8s → 4s and outer `timeoutMs` from 30s → 45s. These screenshots are the source of truth for the LLM verdict — flaky captures translate directly to flaky verdicts.
+
+### Changed
+
+* **`LLM_PROMPT_VERSION` → `v3-skeleton`:** prompt now includes an explicit "skeleton/loading is timing, not regression" rule plus the prod/cand skeleton-count imbalance context. Bump invalidates all v2-keyed cache entries so prior verdicts get re-judged under the new heuristic.
+
 ## [0.9.0](https://github.com/decocms/parity/compare/v0.8.1...v0.9.0) (2026-05-29)
 
 ### Added
