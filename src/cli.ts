@@ -8,6 +8,7 @@ import { consoleCommand } from "./commands/console.ts";
 import { htmlCommand } from "./commands/html.ts";
 import { cssTraceCommand } from "./commands/css-trace.ts";
 import { explainCommand } from "./commands/explain.ts";
+import { fixCommand } from "./commands/fix.ts";
 import { journeyCommand } from "./commands/journey.ts";
 import { learnedStats } from "./commands/learned.ts";
 import { vitalsCommand } from "./commands/vitals.ts";
@@ -358,6 +359,26 @@ program
   .option("--output-html", "Include the HTML diff facet (default: on if no facet flag passed)", false)
   .option("--screenshot", "Include the screenshot facet (locator screenshot per side)", false)
   .option("--computed-styles", "Include the computed-styles diff facet", false)
+  .option(
+    "--heatmap",
+    "Run pixelmatch on the two screenshots and analyze diff regions (bounding box + hotspots). Implies --screenshot.",
+    false,
+  )
+  .option(
+    "--css-source",
+    "For each divergent computed-style property, resolve which CSS rule (stylesheet + selector) produced it via CDP. Useful when the LLM needs to know which file to edit.",
+    false,
+  )
+  .option(
+    "--prompt",
+    "Emit an LLM-ready bundle: <prefix>-bundle.json (machine-readable) + <prefix>-prompt.md (opinionated Markdown with embedded images). Implies all signals.",
+    false,
+  )
+  .option(
+    "--llm-summary",
+    "After building the bundle, invoke Claude (needs ANTHROPIC_API_KEY) and print a 1-paragraph 'what I understood' summary. Does NOT generate a patch. Implies --prompt.",
+    false,
+  )
   .option("--viewport <viewport>", "mobile | desktop | tablet", "mobile")
   .option("--wait <ms>", "Extra ms after networkidle so hydration settles", "2000")
   .option("--out-dir <dir>", "Where to write the screenshots", "./parity-output/sections")
@@ -371,10 +392,45 @@ program
         outputHtml: opts.outputHtml,
         screenshot: opts.screenshot,
         computedStyles: opts.computedStyles,
+        heatmap: opts.heatmap,
+        cssSource: opts.cssSource,
+        prompt: opts.prompt,
+        llmSummary: opts.llmSummary,
         viewport: opts.viewport,
         wait: opts.wait,
         outDir: opts.outDir,
         json: opts.json,
+      }),
+    );
+  });
+
+program
+  .command("fix")
+  .description(
+    "Pixel-perfect debug shortcut: run `parity section` with ALL signals on (HTML + screenshot + computed-styles + heatmap + CSS source) and emit an LLM-ready Markdown bundle. When ANTHROPIC_API_KEY is set, also prints a 1-paragraph summary of what Claude understood from the signals — does NOT generate a patch (you ask for that in a follow-up turn).",
+  )
+  .requiredOption("--prod <url>", "Production URL (source of truth)")
+  .requiredOption("--cand <url>", "Candidate URL (migrated)")
+  .requiredOption("--selector <sel>", "CSS selector for the section to fix")
+  .option("--viewport <viewport>", "mobile | desktop | tablet", "mobile")
+  .option("--wait <ms>", "Extra ms after networkidle so hydration settles", "2000")
+  .option("--out-dir <dir>", "Where to write the bundle + screenshots", "./parity-output/sections")
+  .option("--json", "Emit one-line JSON instead of pretty text", false)
+  .option(
+    "--no-llm",
+    "Skip the LLM call (still writes the markdown bundle). Use when offline or to avoid API costs.",
+  )
+  .action(async (opts) => {
+    process.exit(
+      await fixCommand({
+        prod: opts.prod,
+        cand: opts.cand,
+        selector: opts.selector,
+        viewport: opts.viewport,
+        wait: opts.wait,
+        outDir: opts.outDir,
+        json: opts.json,
+        noLlm: !opts.llm,
       }),
     );
   });

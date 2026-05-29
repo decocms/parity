@@ -40,14 +40,14 @@ export interface CssTraceOptions {
   json?: boolean;
 }
 
-interface CssProperty {
+export interface CssProperty {
   name: string;
   value: string;
   important: boolean;
   disabled?: boolean;
 }
 
-interface MatchedRule {
+export interface MatchedRule {
   /** "user-agent" | "inline" | "<stylesheet URL>" */
   source: string;
   /** Selector that matched (the specific one inside selectorList). */
@@ -68,7 +68,7 @@ interface MatchedRule {
   inheritedFromDistance?: number;
 }
 
-interface TraceResult {
+export interface TraceResult {
   url: string;
   selector: string;
   found: boolean;
@@ -78,7 +78,7 @@ interface TraceResult {
   rules: MatchedRule[];
 }
 
-async function tracePage(
+export async function tracePage(
   page: Page,
   url: string,
   selector: string,
@@ -88,7 +88,20 @@ async function tracePage(
   await page.waitForLoadState("load", { timeout: 12_000 }).catch(() => undefined);
   await page.waitForLoadState("networkidle", { timeout: 6_000 }).catch(() => undefined);
   await page.waitForTimeout(settleMs);
+  return traceLoadedPage(page, page.url(), selector);
+}
 
+/**
+ * CDP-only variant of `tracePage` for callers that already navigated and
+ * waited (e.g. `parity section` which runs the carousel stabilizer first).
+ * Skips the goto + waitForLoadState dance so the existing page state
+ * (animations pinned, hydration done) is preserved.
+ */
+export async function traceLoadedPage(
+  page: Page,
+  url: string,
+  selector: string,
+): Promise<TraceResult> {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("DOM.enable");
   await cdp.send("CSS.enable");
