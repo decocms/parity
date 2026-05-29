@@ -3019,7 +3019,7 @@ async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult> {
       await decHit.locator.click({ timeout: 3_000 }).catch(() => undefined);
       await page.waitForTimeout(1_500);
       decAfter = await parseCartTotals(page, ctx);
-      decOk = (decAfter.qty ?? 0) < (incAfter.qty ?? Infinity);
+      decOk = (decAfter.qty ?? 0) < (incAfter.qty ?? Number.POSITIVE_INFINITY);
     }
     steps.push({
       step: 4,
