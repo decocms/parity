@@ -1,6 +1,6 @@
 import { resolveSitemapUrls } from "../diff/sitemap.ts";
 
-export type PageKind = "home" | "plp" | "pdp" | "other";
+export type PageKind = "home" | "plp" | "pdp" | "search" | "auth" | "other";
 
 export interface ClassifiedPage {
   path: string;
@@ -23,6 +23,17 @@ export function classifyPath(pathname: string): PageKind {
   const p = pathname.replace(/\/+$/, "") || "/";
   if (p === "/" || p === "") return "home";
 
+  // Auth pages — checked before single-segment PLP fallback so `/account`
+  // and `/login` don't get misclassified as a department slug. Bug surfaced
+  // when /account verdict came back as "pass" because cand was rendering the
+  // home page instead of the login modal — the page never got into the right
+  // sampling bucket to flag as auth-specific drift.
+  if (/^\/(account|login|signin|signup|conta|entrar|cadastro|cadastrar|register|minha-conta|meu-perfil)(?:\/|$)/.test(p)) return "auth";
+
+  // Search pages — distinct bucket so quotas can ensure at least one search
+  // surface gets tested even on sites with thousands of PLPs.
+  if (/^\/(search|busca|buscar|s)(?:\/|$|\?)/.test(p)) return "search";
+
   // PDP heuristics — common product URL shapes
   // VTEX: /algum-produto/p  or /algum-produto-12345/p
   if (/\/p(?:\/|$)/.test(p)) return "pdp";
@@ -37,7 +48,6 @@ export function classifyPath(pathname: string): PageKind {
   // Shopify / Woo: /collections/, /categoria/, /category/
   if (/^\/collections?\//.test(p)) return "plp";
   if (/^\/categorias?\//.test(p) || /^\/category\//.test(p)) return "plp";
-  if (/^\/search\//.test(p) || /^\/busca\//.test(p)) return "plp";
   // VTEX departments / categories — single segment of slugs
   // (e.g. /vestidos, /moda-feminina) — defer to "other" unless segment heuristic matches
   const segments = p.split("/").filter(Boolean);
@@ -131,6 +141,14 @@ export async function discoverPagesFromSitemap(
 export function labelForDiscoveredPage(path: string, kind: PageKind): string {
   if (kind === "home") return "Home";
   const niceKind =
-    kind === "plp" ? "PLP" : kind === "pdp" ? "PDP" : "Page";
+    kind === "plp"
+      ? "PLP"
+      : kind === "pdp"
+        ? "PDP"
+        : kind === "search"
+          ? "Search"
+          : kind === "auth"
+            ? "Auth"
+            : "Page";
   return `${niceKind} · ${path}`;
 }

@@ -29,6 +29,16 @@ Do **not** run parity for:
 | "is the new site missing cache?"             | `parity cache --cand ... --pages 30`                               |
 | "I want an LLM prompt with all the issues"   | `parity prompt <runId>` (writes Markdown to stdout)                |
 | "explain this specific issue"                | `parity explain <runId> <issueId>` (needs `ANTHROPIC_API_KEY`)     |
+| "does THIS single site actually work?"       | `parity e2e --url ... --flows ...` (no comparison — pre-launch / partner audit) |
+| "exercise search / cart / login on a site"   | `parity e2e --url ... --flows=search,cart-interactions,login`      |
+
+### `parity run` vs `parity e2e` — decision tree
+
+- Have two URLs (prod source-of-truth + candidate)? → `parity run` (regression detection)
+- Have ONE URL and want to validate it works end-to-end? → `parity e2e` (functional validation)
+- Have ONE URL and only need absolute checks (vitals/console/SEO)? → `parity audit` (lighter, no flows)
+
+`parity e2e` reuses the same flows + checks as `parity run`, just in single-site mode (checks adapt with absolute criteria when one side is empty).
 
 ## Reading the JSON output
 
@@ -41,8 +51,11 @@ Do **not** run parity for:
   issues: Issue[],          // all raw issues from every check
   checks: CheckResult[],    // one per check; .data has structured details
   visualDiff: {
-    pagesChecked, pagesWithDiffs, pagesPassed,
-    results: VisualDiffPage[]   // per page: prod/cand screenshots, sections, LLM diffs
+    pagesChecked, pagesWithDiffs, pagesPassed, pagesFailed,
+    parityOk: boolean,         // ⭐ binary signal — see below
+    pagesFromCache: number,    // how many verdicts came from cross-run cache
+    llmCallsUsed: number,
+    results: VisualDiffPage[]  // per page: prod/cand screenshots, sections, LLM diffs, cachedAt?
   },
   flowCaptures: FlowCapture[]   // per-flow page captures with vitals + network
 }
@@ -52,10 +65,21 @@ To programmatically decide if a migration is ready:
 
 ```ts
 const run = JSON.parse(fs.readFileSync(`${runDir}/report.json`));
+
+// Binary signal — most agent loops want this.
+if (run.visualDiff?.parityOk === false) {
+  // at least one page is rendering wrong; surface to user
+  const broken = run.visualDiff.results.filter(p => p.verdict !== "pass");
+  // each entry has pageKey, viewport, pctDiff, differences, sectionsOnlyInProd
+}
+
+// Issue-level gating (independent of visual parity)
 if (run.verdict.critical === 0 && run.verdict.high === 0) {
   // ship it
 }
 ```
+
+`visualDiff.parityOk` is `true` iff every page in `results` has `verdict === "pass"`. The check itself accounts for the budget-cap edge case: pages where the LLM was skipped AND pctDiff was meaningfully high are surfaced as `"diffs"` rather than silently falling through to `"pass"`. Trust this flag for "is parity OK?" automation.
 
 ## Driving fixes from the output
 
@@ -82,11 +106,36 @@ The CLI never fails just because the LLM is unavailable. Issues will still be re
 
 ## Cost-conscious usage
 
-A `--preset full` run with visual diff ≈ 6-12 Claude calls × ~$0.01-0.02 each. Cheap, but in tight loops:
+A `--preset full` run with visual diff ≈ 6-24 Claude calls × ~$0.01-0.02 each. Cheap, but in tight loops:
 
 - Use `--preset smoke` first (no LLM, ~30s) to validate the URLs respond
 - Use `--no-visual-diff` if you only care about functional checks
 - Use `parity journey` (no aggregation step) for the tightest CI loop
+- **The cross-run cache** (`parity-output/cache/verdicts.json`) automatically skips the LLM call on pages whose screenshots haven't changed since the last verdict. Re-runs after a partial fix typically only spend LLM calls on the pages that actually changed.
+
+## Picking which pages to verify
+
+Default behavior: `parity run` discovers a representative sample from prod's sitemap (1 home + a few PLPs + a few PDPs, capped by `--visual-pages`).
+
+When you need deterministic coverage (e.g. you know `/account` and `/checkout` are the routes at risk), bypass discovery:
+
+```bash
+# explicit list — useful when an agent loop knows which routes matter
+parity run --prod ... --cand ... --pages "/,/account,/p/known-product,/categoria/calcas"
+
+# read paths from a file (one per line; # for comments)
+parity run --prod ... --cand ... --pages-file ./targets.txt
+```
+
+These flags override sitemap sampling entirely. Every listed path gets captured + compared, no cap from `--visual-pages`.
+
+## Cache flags
+
+- Default: cache is **on**. Persists at `<output>/cache/verdicts.json` between runs.
+- `--no-cache` — ignore existing cache entries; force fresh LLM judgment on every page.
+- `--clear-cache` — wipe the cache file before the run starts (use after a prompt change or when verdicts feel stale).
+
+The cache key is `sha256(prod_screenshot_bytes + cand_screenshot_bytes + LLM_PROMPT_VERSION)`. Any byte change in either screenshot invalidates the entry naturally. The `LLM_PROMPT_VERSION` constant (in `src/llm/visual-semantic-diff.ts`) bumps the entire cache atomically when the prompt or tool schema changes — no need to wipe by hand.
 
 Hard caps already in place:
 

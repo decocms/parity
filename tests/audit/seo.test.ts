@@ -42,6 +42,46 @@ describe("auditSeo", () => {
     expect(issue?.severity).toBe("high");
   });
 
+  it("noindex em /buscapagina (VTEX legacy) → ignorado (boa prática)", () => {
+    const r = auditSeo(
+      "/buscapagina::mobile",
+      html(`<title>Busca</title><meta name="robots" content="noindex, follow">`),
+    );
+    expect(r.find((i) => i.id.includes("noindex"))).toBeUndefined();
+  });
+
+  it("noindex em /search → ignorado", () => {
+    const r = auditSeo(
+      "/search::mobile",
+      html(`<title>Search</title><meta name="robots" content="noindex, follow">`),
+    );
+    expect(r.find((i) => i.id.includes("noindex"))).toBeUndefined();
+  });
+
+  it("noindex em /account → ignorado", () => {
+    const r = auditSeo(
+      "/account/orders::mobile",
+      html(`<title>Pedidos</title><meta name="robots" content="noindex">`),
+    );
+    expect(r.find((i) => i.id.includes("noindex"))).toBeUndefined();
+  });
+
+  it("noindex em /s (VTEX Intelligent Search) → ignorado", () => {
+    const r = auditSeo(
+      "/s::mobile",
+      html(`<title>Busca</title><meta name="robots" content="noindex, follow">`),
+    );
+    expect(r.find((i) => i.id.includes("noindex"))).toBeUndefined();
+  });
+
+  it("noindex em /store (não é VTEX /s) → flagado normalmente", () => {
+    const r = auditSeo(
+      "/store::mobile",
+      html(`<title>Store</title><meta name="robots" content="noindex">`),
+    );
+    expect(r.find((i) => i.id.includes("noindex"))?.severity).toBe("high");
+  });
+
   it("canonical ausente → medium", () => {
     const r = auditSeo("/::mobile", html("<title>Loja online incrível</title>"));
     const issue = r.find((i) => i.id.includes("canonical-missing"));

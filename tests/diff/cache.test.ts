@@ -39,9 +39,16 @@ describe("cacheDecision", () => {
     expect(cacheDecision(entry({ cacheControl: "No-Store" }))).toBe("bypass");
   });
 
-  it("falls back to unknown when we cannot determine", () => {
-    expect(cacheDecision(entry({ cacheControl: "max-age=60" }))).toBe("unknown");
+  it("returns 'cacheable' when there's a deliberate max-age ≥60s (asset is properly configured)", () => {
+    expect(cacheDecision(entry({ cacheControl: "max-age=60" }))).toBe("cacheable");
+    expect(cacheDecision(entry({ cacheControl: "public, max-age=3600" }))).toBe("cacheable");
+    expect(cacheDecision(entry({ cacheControl: "public, max-age=31536000, immutable" }))).toBe("cacheable");
+  });
+
+  it("falls back to unknown when cache-control is missing or zero", () => {
     expect(cacheDecision(entry({ cacheControl: null }))).toBe("unknown");
+    expect(cacheDecision(entry({ cacheControl: "max-age=0" }))).toBe("unknown");
+    expect(cacheDecision(entry({ cacheControl: "max-age=30" }))).toBe("unknown");
   });
 });
 

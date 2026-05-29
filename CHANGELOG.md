@@ -5,7 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.5.1](https://github.com/decocms/parity/compare/v0.5.0...v0.5.1) (2026-05-27)
+## [0.9.0](https://github.com/decocms/parity/compare/v0.8.1...v0.9.0) (2026-05-29)
+
+### Added
+
+* **e2e command:** new `parity e2e --url=<URL>` for single-site functional validation. Runs all functional flows (homepage, plp, pdp, purchase-journey, search, cart-interactions, optionally login) plus all checks in single-site mode. Use for pre-launch / partner-site verification when there's no prod baseline to compare against.
+* **search flow:** new `flowSearch` (6 steps: visit-home → open-search → type-and-autocomplete → submit-results → search-no-results → search-empty-state). Resolves the search term inteligentemente via cascade (rc.search.terms → cache → LLM suggest → PT-BR fallbacks). Generates a deterministic unicode `no-results` term per run to exercise the empty-state UI without false matches.
+* **cart-interactions flow:** new `flowCartInteractions` (7 steps: seed-cart → read-baseline → increment-qty → decrement-qty → apply-invalid-coupon → remove-item → verify-empty-state). Seeds via PJ-style navigation (home → PLP → PDP → add → minicart) then exercises each cart interaction with before/after qty+price validation.
+* **login flow:** new `flowLogin` (5 steps, gated by `rc.login.enabled` + `PARITY_LOGIN_EMAIL` / `PARITY_LOGIN_PASSWORD` env vars). Validates invalid-credential error + valid-credential redirect + account area access. Credentials never read from `.parityrc.json` (env vars only).
+* **10 new checks:** `search-presence`, `search-autocomplete`, `search-results`, `search-no-results`, `cart-interactions-flow`, `not-found-parity`, `cookie-cep-modal-cls`, `pdp-gallery-related`, `footer-links-health`, `login-flow`. All adapt to comparative (`parity run`) vs single-site (`parity e2e`) mode.
+* **universal `findElement(page, ctx, { key, intent, budget })` helper:** unifies the override → learned → defaults → LLM-recovery cascade behind one call. Replaces ~80 lines of boilerplate across the new flows and is now the recommended pattern for any new selector-driven step.
+* **21 new selector keys:** `searchTrigger`, `searchInput`, `searchSuggestions`, `cartItemRow`, `cartQuantityIncrement`/`Decrement`, `cartRemoveItem`, `cartCouponInput`/`Submit`, `cartTotalPrice`, `pdpGalleryThumbnail`/`Main`, `pdpRelatedShelf`, `loginTrigger`/`EmailInput`/`PasswordInput`/`Submit`/`ErrorMessage`, `accountMenuTrigger`. Defaults cover VTEX/Shopify/Deco patterns; LLM discovery extended to suggest them when missing.
+* **`StepCapture` validations:** `searchValidation` (term/mode/resultCount/suggestionCount/hasEmptyState), `cartItemValidation` (action/before/after/succeeded), `loginValidation` (stage/errorMessage).
+* **`ParityRc` blocks:** `search.terms` / `search.noResultsTerm`, `login.enabled`, `footer.maxLinks` / `followExternal`, `notFound.testUrl`.
+* **preset `full`:** now includes `search,cart-interactions` alongside `purchase-journey`.
+
+### Fixed
+
+* **cache-coverage false positives:** assets with `cache-control: public, max-age=N≥60s` are no longer flagged as "MISS opportunities" just because `fromCache=false` (which is always the case on a cold Playwright session). New `cacheable` decision state recognizes properly-configured cache headers. On Miess this dropped flagged opportunities from 323 → 0 — the assets had 1-year `max-age` headers and weren't actually misconfigured.
+* **http-status-parity in single-site mode:** the check no longer flags every captured page as "missing in prod" when `parity e2e` runs with an empty prod slot by convention. Returns `skipped` when prod is empty and cand has content.
+* **audit-seo noindex exceptions:** `/search`, `/buscapagina` (VTEX legacy), `/s` (VTEX Intelligent Search), `/account`, `/checkout`, `/cart`, `/login`, `/404` and friends no longer trigger `noindex` high-severity issues — those routes SHOULD be noindex by SEO best practice.
+* **search-no-results severity scaling:** unicode term returning 1-10 products is now `medium` "fuzzy fallback" rather than `critical` "matches everything"; only >10 products without empty state remains critical. Matches real VTEX Intelligent Search behavior on stores like Miess.
+* **search empty-state detection:** waits for SPA hydration (`networkidle` + 800ms) before checking; combines `innerText` + captured HTML + proximity heuristic so VTEX Intelligent Search empty states are reliably detected.
+* **cache-coverage wording in single-site mode:** says `"no site"` instead of `"em cand"` when running without a prod baseline.
+* **e2e flow `runId` propagation:** `FlowContext.runId` is now plumbed from `e2e.ts` / `run.ts` so the deterministic no-results unicode term uses the actual run id (was previously taking the literal string `"screenshots"` from `outDir.split("/").pop()`).
 
 ### Fixed
 

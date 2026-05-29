@@ -47,10 +47,14 @@ describe("VisualDiffSummary schema", () => {
       pagesPassed: 0,
       pagesFailed: 0,
       llmCallsUsed: 0,
+      parityOk: true,
+      pagesFromCache: 0,
     });
     const json = JSON.stringify(s);
     const back = VisualDiffSummary.parse(JSON.parse(json));
     expect(back.pagesChecked).toBe(0);
+    expect(back.parityOk).toBe(true);
+    expect(back.pagesFromCache).toBe(0);
   });
 });
 

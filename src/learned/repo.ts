@@ -17,6 +17,29 @@ export const SelectorKey = z.enum([
   "quantityIncrement",
   "quantityInput",
   "minicartCount",
+  // Search flow
+  "searchTrigger",
+  "searchInput",
+  "searchSuggestions",
+  // Cart interactions flow
+  "cartItemRow",
+  "cartQuantityIncrement",
+  "cartQuantityDecrement",
+  "cartRemoveItem",
+  "cartCouponInput",
+  "cartCouponSubmit",
+  "cartTotalPrice",
+  // PDP gallery + related
+  "pdpGalleryThumbnail",
+  "pdpGalleryMain",
+  "pdpRelatedShelf",
+  // Login flow
+  "loginTrigger",
+  "loginEmailInput",
+  "loginPasswordInput",
+  "loginSubmit",
+  "loginErrorMessage",
+  "accountMenuTrigger",
 ]);
 export type SelectorKey = z.infer<typeof SelectorKey>;
 

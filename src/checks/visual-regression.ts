@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { snapshotDom } from "../diff/dom.ts";
 import { diffScreenshots } from "../diff/visual.ts";
 import { isLlmAvailable } from "../llm/client.ts";
-import { visualSemanticDiff } from "../llm/visual-semantic-diff.ts";
+import { LLM_PROMPT_VERSION, visualSemanticDiff } from "../llm/visual-semantic-diff.ts";
 import type {
   CheckResult,
   Issue,
@@ -12,14 +12,46 @@ import type {
   VisualDifference,
 } from "../types/schema.ts";
 import type { CheckContext } from "./index.ts";
-import { pairCaptures } from "./lib/pairing.ts";
+import { pairCaptures, type PagePair } from "./lib/pairing.ts";
+import {
+  getCacheEntry,
+  hashScreenshotPair,
+  readCache,
+  setCacheEntry,
+  writeCache,
+  type ParityCache,
+} from "./lib/parity-cache.ts";
 
 /** Pixelmatch threshold — pixels that differ by this much are flagged. */
 const PIXEL_THRESHOLD = 0.1;
-/** Hard cap on LLM visual-diff calls per run to keep cost bounded. */
-const MAX_LLM_CALLS_PER_RUN = 12;
+/**
+ * Hard cap on LLM visual-diff calls per run. Override via the
+ * `PARITY_MAX_LLM_CALLS` env var when you need a deeper sweep — the cache
+ * means re-runs typically stay well under the cap anyway.
+ */
+const DEFAULT_MAX_LLM_CALLS_PER_RUN = 24;
 /** Pages below this pct diff get verdict "pass" (skip LLM call to save budget). */
 const PASS_PCT_THRESHOLD = 0.005;
+/**
+ * When the LLM is skipped (budget exhausted) AND pctDiff is at or above this
+ * threshold, mark the page as "diffs" instead of falling through to "pass".
+ *
+ * Set at 15% as a deliberate compromise: real storefronts routinely show
+ * 30–60% pctDiff from anti-aliasing, font loading, image compression, and
+ * carousel/banner rotation, so any threshold smaller than ~15% would flood
+ * the report with false positives when the LLM is skipped. Picking 15%
+ * means: if it's THIS much different and we couldn't get a semantic read,
+ * surface it for human review rather than silently labeling it OK.
+ */
+const SUSPICIOUS_PCT_DIFF_WHEN_LLM_SKIPPED = 0.15;
+
+function getMaxLlmCalls(): number {
+  const env = process.env.PARITY_MAX_LLM_CALLS;
+  if (env === undefined || env === "") return DEFAULT_MAX_LLM_CALLS_PER_RUN;
+  const n = Number.parseInt(env, 10);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_MAX_LLM_CALLS_PER_RUN;
+  return n; // 0 explicitly disables LLM calls (cap honored as-is)
+}
 
 /**
  * Classify pageKey like `/::mobile` into a human label.
@@ -96,6 +128,51 @@ function downgradeCarouselFramingDiffs(
   });
 }
 
+/**
+ * Per-pair intermediate state computed in pass 1 (pixelmatch + DOM extraction
+ * + cache lookup) and consumed in pass 2 (priorized LLM calls).
+ */
+interface PreparedPair {
+  pair: PagePair;
+  heatmapPath: string;
+  heatmapWritten: boolean;
+  pctDiff: number;
+  prodSections: string[];
+  candSections: string[];
+  sectionsOnlyInProd: string[];
+  sectionsOnlyInCand: string[];
+  bothHaveCarousel: boolean;
+  hash?: string;
+  cacheHit?: {
+    differences: VisualDifference[];
+    cachedAt: string;
+    verdict: VisualDiffPage["verdict"];
+  };
+  preflightIssues: Issue[];
+}
+
+function decideVerdict(args: {
+  llmError?: string;
+  llmCalled: boolean;
+  differences: VisualDifference[];
+  sectionsOnlyInProd: string[];
+  pctDiff: number;
+}): VisualDiffPage["verdict"] {
+  const hasCritical = args.differences.some(
+    (d) => d.severity === "critical" || d.severity === "high",
+  );
+  const hasAnyDiff = args.differences.length > 0 || args.sectionsOnlyInProd.length > 0;
+  if (args.llmError) return "failed";
+  if (hasCritical) return "diffs";
+  if (hasAnyDiff) return "diffs";
+  // Fix for the silent-OK bug: when the LLM didn't run, we don't have a
+  // semantic read on the page. If pctDiff is meaningfully large we can't
+  // claim "pass" with a straight face — fall through to "diffs" so the
+  // page surfaces in the report for human inspection.
+  if (!args.llmCalled && args.pctDiff >= SUSPICIOUS_PCT_DIFF_WHEN_LLM_SKIPPED) return "diffs";
+  return "pass";
+}
+
 export async function visualRegressionKeyframes(ctx: CheckContext): Promise<CheckResult> {
   const start = Date.now();
   const { pairs } = pairCaptures(ctx.prodPages, ctx.candPages);
@@ -104,8 +181,12 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
   if (!existsSync(diffDir)) mkdirSync(diffDir, { recursive: true });
 
   const useLlm = isLlmAvailable();
+  const maxLlmCalls = getMaxLlmCalls();
   let llmCallsUsed = 0;
-  const results: VisualDiffPage[] = [];
+
+  // ─── Pass 1 ── pixelmatch + DOM + cache lookup, no LLM yet ────────────
+  const cache: ParityCache = ctx.cacheDir && !ctx.noCache ? readCache(ctx.cacheDir) : {};
+  const prepared: PreparedPair[] = [];
 
   for (const pair of pairs) {
     if (!existsSync(pair.prod.screenshotPath) || !existsSync(pair.cand.screenshotPath)) {
@@ -113,6 +194,7 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
     }
     const heatmapName = `diff-${pair.viewport}-${basename(pair.key.replace(/[/:]/g, "_"))}.png`;
     const heatmapPath = join(diffDir, heatmapName);
+    const preflightIssues: Issue[] = [];
 
     let pctDiff = 0;
     let heatmapWritten = false;
@@ -124,7 +206,7 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
       pctDiff = r.pctDiff;
       heatmapWritten = true;
     } catch (err) {
-      issues.push({
+      preflightIssues.push({
         id: `visual:error:${pair.key}`,
         severity: "low",
         category: "visual",
@@ -134,7 +216,6 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
       });
     }
 
-    // Extract sections from both sides via DOM snapshot
     const prodSnapshot = pair.prod.html ? snapshotDom(pair.prod.html) : null;
     const candSnapshot = pair.cand.html ? snapshotDom(pair.cand.html) : null;
     const prodSections = prodSnapshot?.decoSectionsRendered ?? [];
@@ -144,33 +225,98 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
     const sectionsOnlyInProd = prodSections.filter((s) => !candSet.has(s));
     const sectionsOnlyInCand = candSections.filter((s) => !prodSet.has(s));
 
-    // #22: if both sides have a carousel/slider section, slide-frame
-    // mismatches in the hero are timing noise, not regressions. The signal
-    // is forwarded to the LLM (so it ideally doesn't flag them) and used to
-    // post-process diffs (so we enforce the rule even if the LLM disobeys).
     const bothHaveCarousel =
       hasCarouselSection(prodSections) && hasCarouselSection(candSections);
 
-    // Always call LLM (if available) — pixelmatch is no longer the gate.
-    // Skip only if pctDiff is extremely small AND no section mismatch (likely identical).
-    const trivial = pctDiff < PASS_PCT_THRESHOLD && sectionsOnlyInProd.length === 0;
+    let hash: string | undefined;
+    let cacheHit: PreparedPair["cacheHit"];
+    if (ctx.cacheDir && !ctx.noCache) {
+      try {
+        hash = hashScreenshotPair(
+          pair.prod.screenshotPath,
+          pair.cand.screenshotPath,
+          LLM_PROMPT_VERSION,
+        );
+        const entry = getCacheEntry(cache, hash, LLM_PROMPT_VERSION);
+        if (entry) {
+          cacheHit = {
+            differences: entry.differences,
+            cachedAt: entry.cachedAt,
+            verdict: entry.verdict,
+          };
+        }
+      } catch {
+        // Hashing failed (e.g. file disappeared mid-run) — proceed without cache.
+      }
+    }
+
+    prepared.push({
+      pair,
+      heatmapPath,
+      heatmapWritten,
+      pctDiff,
+      prodSections,
+      candSections,
+      sectionsOnlyInProd,
+      sectionsOnlyInCand,
+      bothHaveCarousel,
+      hash,
+      cacheHit,
+      preflightIssues,
+    });
+  }
+
+  // ─── Pass 2 ── pick which prepared pairs need a (fresh) LLM call ──────
+  // Order: pages with section drift first, then by descending pctDiff. We
+  // spend the LLM budget on the pages most likely to surface real diffs,
+  // not just the first N entries of the crawl order.
+  const llmCandidates = prepared
+    .filter((p) => !p.cacheHit) // cache hit already has a verdict, no LLM needed
+    .filter((p) => {
+      const trivial =
+        p.pctDiff < PASS_PCT_THRESHOLD && p.sectionsOnlyInProd.length === 0;
+      return !trivial;
+    })
+    .sort((a, b) => {
+      const aMissing = a.sectionsOnlyInProd.length > 0 ? 1 : 0;
+      const bMissing = b.sectionsOnlyInProd.length > 0 ? 1 : 0;
+      if (aMissing !== bMissing) return bMissing - aMissing;
+      return b.pctDiff - a.pctDiff;
+    });
+
+  const llmTargets = new Set(useLlm ? llmCandidates.slice(0, maxLlmCalls) : []);
+
+  // ─── Pass 3 ── execute LLM calls + finalize each result ──────────────
+  const results: VisualDiffPage[] = [];
+  let pagesFromCache = 0;
+
+  for (const p of prepared) {
+    issues.push(...p.preflightIssues);
+
     let differences: VisualDifference[] = [];
     let llmCalled = false;
     let llmError: string | undefined;
+    let cachedAt: string | undefined;
 
-    if (useLlm && !trivial && llmCallsUsed < MAX_LLM_CALLS_PER_RUN) {
+    if (p.cacheHit) {
+      differences = p.cacheHit.differences;
+      cachedAt = p.cacheHit.cachedAt;
+      pagesFromCache++;
+    } else if (llmTargets.has(p)) {
       llmCallsUsed++;
       llmCalled = true;
       try {
         const diffs = await visualSemanticDiff({
-          prodPath: pair.prod.screenshotPath,
-          candPath: pair.cand.screenshotPath,
-          pageContext: pair.key,
-          viewport: pair.viewport,
-          prodSections,
-          candSections,
-          sectionsOnlyInProd,
-          bothHaveCarousel,
+          prodPath: p.pair.prod.screenshotPath,
+          candPath: p.pair.cand.screenshotPath,
+          heatmapPath: p.heatmapWritten ? p.heatmapPath : undefined,
+          pctDiff: p.pctDiff,
+          pageContext: p.pair.key,
+          viewport: p.pair.viewport,
+          prodSections: p.prodSections,
+          candSections: p.candSections,
+          sectionsOnlyInProd: p.sectionsOnlyInProd,
+          bothHaveCarousel: p.bothHaveCarousel,
         });
         differences = diffs ?? [];
       } catch (err) {
@@ -179,90 +325,126 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
     }
 
     if (differences.length > 0) {
-      differences = downgradeCarouselFramingDiffs(differences, bothHaveCarousel);
+      differences = downgradeCarouselFramingDiffs(differences, p.bothHaveCarousel);
     }
 
-    // Decide verdict
-    let verdict: VisualDiffPage["verdict"];
-    const hasCritical = differences.some((d) => d.severity === "critical" || d.severity === "high");
-    const hasAnyDiff = differences.length > 0 || sectionsOnlyInProd.length > 0;
-    if (llmError) verdict = "failed";
-    else if (hasCritical) verdict = "diffs";
-    else if (hasAnyDiff) verdict = "diffs";
-    else verdict = "pass";
+    const verdict = decideVerdict({
+      llmError,
+      llmCalled: llmCalled || Boolean(p.cacheHit),
+      differences,
+      sectionsOnlyInProd: p.sectionsOnlyInProd,
+      pctDiff: p.pctDiff,
+    });
+
+    // Store fresh verdicts in the cache. We skip "failed" (LLM error) so a
+    // transient outage doesn't pin a bad verdict, and we also skip pages we
+    // didn't actually evaluate (no cache hit and no LLM call) since their
+    // verdict is purely heuristic from pctDiff alone.
+    if (ctx.cacheDir && !ctx.noCache && !p.cacheHit && p.hash && llmCalled && !llmError) {
+      setCacheEntry(cache, p.hash, {
+        verdict,
+        differences,
+        sectionsOnlyInProd: p.sectionsOnlyInProd,
+        sectionsOnlyInCand: p.sectionsOnlyInCand,
+        pctDiff: p.pctDiff,
+        llmPromptVersion: LLM_PROMPT_VERSION,
+        cachedAt: new Date().toISOString(),
+      });
+    }
 
     results.push({
-      pageKey: pair.key,
-      pagePath: pathFromKey(pair.key),
-      pageLabel: labelForKey(pair.key),
-      viewport: pair.viewport,
-      prodUrl: pair.prod.finalUrl || pair.prod.url,
-      candUrl: pair.cand.finalUrl || pair.cand.url,
-      prodScreenshotPath: pair.prod.screenshotPath,
-      candScreenshotPath: pair.cand.screenshotPath,
-      heatmapPath: heatmapWritten ? heatmapPath : undefined,
-      pctDiff,
+      pageKey: p.pair.key,
+      pagePath: pathFromKey(p.pair.key),
+      pageLabel: labelForKey(p.pair.key),
+      viewport: p.pair.viewport,
+      prodUrl: p.pair.prod.finalUrl || p.pair.prod.url,
+      candUrl: p.pair.cand.finalUrl || p.pair.cand.url,
+      prodScreenshotPath: p.pair.prod.screenshotPath,
+      candScreenshotPath: p.pair.cand.screenshotPath,
+      heatmapPath: p.heatmapWritten ? p.heatmapPath : undefined,
+      pctDiff: p.pctDiff,
       verdict,
-      prodSections,
-      candSections,
-      sectionsOnlyInProd,
-      sectionsOnlyInCand,
+      prodSections: p.prodSections,
+      candSections: p.candSections,
+      sectionsOnlyInProd: p.sectionsOnlyInProd,
+      sectionsOnlyInCand: p.sectionsOnlyInCand,
       differences,
       llmCalled,
       llmError,
+      cachedAt,
     });
 
-    // Emit Issues for backwards compat with the Issues tab + aggregation
-    if (sectionsOnlyInProd.length > 0) {
+    if (p.sectionsOnlyInProd.length > 0) {
       issues.push({
-        id: `visual:sections:${pair.key}`,
+        id: `visual:sections:${p.pair.key}`,
         severity: "high",
         category: "visual",
-        page: pair.key,
+        page: p.pair.key,
         check: "visual-regression-keyframes",
-        summary: `${sectionsOnlyInProd.length} section(s) ausente(s) em cand: ${sectionsOnlyInProd.join(", ")}`,
-        details: `Sections detectadas no DOM de prod via data-section, mas ausentes em cand:\n${sectionsOnlyInProd.map((s) => `- ${s}`).join("\n")}\n\nProvavelmente faltam em registerSections() em src/setup.ts, ou o CMS não está resolvendo essas keys em cand.`,
+        summary: `${p.sectionsOnlyInProd.length} section(s) ausente(s) em cand: ${p.sectionsOnlyInProd.join(", ")}`,
+        details: `Sections detectadas no DOM de prod via data-section, mas ausentes em cand:\n${p.sectionsOnlyInProd.map((s) => `- ${s}`).join("\n")}\n\nProvavelmente faltam em registerSections() em src/setup.ts, ou o CMS não está resolvendo essas keys em cand.`,
         evidence: [
-          { kind: "screenshot", path: pair.prod.screenshotPath, label: "prod" },
-          { kind: "screenshot", path: pair.cand.screenshotPath, label: "cand" },
-          ...(heatmapWritten ? [{ kind: "screenshot" as const, path: heatmapPath, label: "heatmap" }] : []),
+          { kind: "screenshot", path: p.pair.prod.screenshotPath, label: "prod" },
+          { kind: "screenshot", path: p.pair.cand.screenshotPath, label: "cand" },
+          ...(p.heatmapWritten
+            ? [{ kind: "screenshot" as const, path: p.heatmapPath, label: "heatmap" }]
+            : []),
         ],
       });
     }
     for (const [i, d] of differences.entries()) {
       issues.push({
-        id: `visual:semantic:${pair.key}:${i}`,
+        id: `visual:semantic:${p.pair.key}:${i}`,
         severity: severityForDiff(d),
         category: "visual",
-        page: pair.key,
+        page: p.pair.key,
         check: "visual-regression-keyframes",
         summary: `[${d.region}] ${d.description}`,
         details: `Tipo: ${d.type}\nRegião: ${d.region}\nSeveridade: ${d.severity}`,
         evidence: [
-          { kind: "screenshot", path: pair.prod.screenshotPath, label: "prod" },
-          { kind: "screenshot", path: pair.cand.screenshotPath, label: "cand" },
-          ...(heatmapWritten ? [{ kind: "screenshot" as const, path: heatmapPath, label: "heatmap" }] : []),
+          { kind: "screenshot", path: p.pair.prod.screenshotPath, label: "prod" },
+          { kind: "screenshot", path: p.pair.cand.screenshotPath, label: "cand" },
+          ...(p.heatmapWritten
+            ? [{ kind: "screenshot" as const, path: p.heatmapPath, label: "heatmap" }]
+            : []),
         ],
       });
     }
   }
 
+  // Persist the (possibly updated) cache. Best-effort — a write failure
+  // shouldn't fail the run, just disable caching for next time.
+  if (ctx.cacheDir && !ctx.noCache) {
+    try {
+      writeCache(ctx.cacheDir, cache);
+    } catch (err) {
+      console.error(`[parity-cache] write failed: ${(err as Error).message}`);
+    }
+  }
+
+  const pagesWithDiffs = results.filter((r) => r.verdict === "diffs").length;
+  const pagesFailed = results.filter((r) => r.verdict === "failed").length;
+  const pagesPassed = results.filter((r) => r.verdict === "pass").length;
+
   const summary: VisualDiffSummary = {
     results,
     pagesChecked: results.length,
-    pagesWithDiffs: results.filter((r) => r.verdict === "diffs").length,
-    pagesPassed: results.filter((r) => r.verdict === "pass").length,
-    pagesFailed: results.filter((r) => r.verdict === "failed").length,
+    pagesWithDiffs,
+    pagesPassed,
+    pagesFailed,
     llmCallsUsed,
+    parityOk: pagesWithDiffs === 0 && pagesFailed === 0,
+    pagesFromCache,
   };
 
+  const cacheNote = pagesFromCache > 0 ? `, ${pagesFromCache} via cache` : "";
   const summaryText = useLlm
-    ? `${results.length} par(es) comparado(s), ${summary.pagesWithDiffs} com diffs, ${summary.pagesPassed} OK, ${llmCallsUsed} análise(s) via LLM`
-    : `${results.length} par(es) comparado(s), ${summary.pagesWithDiffs} com diffs · LLM desabilitado (set ANTHROPIC_API_KEY pra análise semântica)`;
+    ? `${results.length} par(es) comparado(s), ${pagesWithDiffs} com diffs, ${pagesPassed} OK, ${llmCallsUsed} análise(s) via LLM${cacheNote}`
+    : `${results.length} par(es) comparado(s), ${pagesWithDiffs} com diffs · LLM desabilitado (set ANTHROPIC_API_KEY pra análise semântica)`;
 
   return {
     name: "visual-regression-keyframes",
-    status: summary.pagesWithDiffs > 0
+    status: pagesWithDiffs > 0
       ? issues.some((i) => i.severity === "critical" || i.severity === "high")
         ? "fail"
         : "warn"

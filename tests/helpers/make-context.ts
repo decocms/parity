@@ -30,6 +30,8 @@ export function makeContext(over: {
   ignore?: Partial<ParityIgnore>;
   viewports?: Viewport[];
   outDir?: string;
+  cacheDir?: string;
+  noCache?: boolean;
 } = {}): CheckContext {
   return {
     prodPages: over.prodPages ?? [],
@@ -39,6 +41,8 @@ export function makeContext(over: {
     rc: { ...DEFAULT_RC, ...over.rc, selectors: { ...DEFAULT_RC.selectors, ...over.rc?.selectors } },
     ignore: { ...DEFAULT_IGNORE, ...over.ignore },
     outDir: over.outDir ?? "/tmp/parity-test",
+    cacheDir: over.cacheDir,
+    noCache: over.noCache,
     viewports: over.viewports ?? ["mobile"],
   };
 }
