@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.10.1](https://github.com/decocms/parity/compare/v0.10.0...v0.10.1) (2026-05-30)
+
+### Fixed
+
+* **Adaptive `scrollFullPage` — actually reaches the bottom on long pages.** Previous fixed-step loop with a 10s outer race only covered ~15000px before bailing, so 25000-40000px e-commerce homepages were captured with half the content still as skeletons. New loop re-measures `scrollHeight` every tick, waits inline for in-view skeleton placeholders to clear (up to 1.5s per step), and exits once page height has been stable for 3 consecutive checks. On miess home: 15 steps, 8862px reached, **0 skeletons at screenshot time** (was 7+ before). Race timeout bumped 10s → 45s, `capturePage` visual-diff `timeoutMs` 45s → 90s to fit the new scroll budget.
+
+* **Silent `ReferenceError: __name is not defined` inside `page.evaluate`.** Took two debug rounds to isolate — `tsx`/esbuild injects a `__name` helper to preserve `.name` on arrow-function declarations (`const foo = () => ...`), but that helper doesn't exist in the page's browser context. The function threw immediately and `.catch(() => undefined)` swallowed it, making it look like a legitimate timeout. Fix: inlined the helper Promises inside `scrollFullPage`'s `page.evaluate`, and replaced silent `.catch` with one that logs the actual error message.
+
+* **`SKELETON_DOWNGRADE_PCT_DIFF_CEILING = 0.25`.** The skeleton-vs-loaded downgrade was masking structural failures: any diff where the LLM mentioned "skeleton"/"placeholder" was forced to `low`, even when prod had a half-empty page (34%+ pctDiff). Now the downgrade only fires when pctDiff is under 25% — above that, the imbalance is treated as a real regression, not timing noise.
+
+### Changed
+
+* `waitForSkeletonsToResolve` budget reduced 10s → 5s. The new adaptive scroll does inter-step skeleton waits, so the global safety net is a last-resort for off-screen skeletons rather than the primary defense.
+
+* New `pre-screenshot skeletons=N` diagnostic log (via `DEBUG_PARITY=1`) so anyone investigating "is the page actually ready when we capture it?" can answer in one run.
+
 ## [0.10.0](https://github.com/decocms/parity/compare/v0.9.0...v0.10.0) (2026-05-29)
 
 ### Added

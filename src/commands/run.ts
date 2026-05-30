@@ -538,13 +538,16 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
                   viewport: task.viewport,
                   screenshotPath,
                   // These screenshots are the source of truth for the LLM
-                  // visual-diff verdict — short settle time made the LLM
-                  // see half-rendered prod pages and report phantom
-                  // "missing-component" diffs. 4s settle + the post-scroll
-                  // networkidle wait inside capturePage produces stable
-                  // captures on VTEX/Shopify storefronts with lazy shelves.
+                  // visual-diff verdict, so we trade a longer capture for
+                  // correctness. The adaptive `scrollFullPage` now does
+                  // inter-step skeleton waits AND keeps scrolling until
+                  // page height is stable, so heavy pages routinely take
+                  // 25-50s here. 90s timeoutMs gives the scroll its full
+                  // 45s budget plus headroom for nav + settle + carousel
+                  // stabilize + post-scroll skeleton safety net + the
+                  // screenshot itself.
                   settleMs: 4_000,
-                  timeoutMs: 45_000,
+                  timeoutMs: 90_000,
                   scrollToLoad: true,
                 });
                 allPageCaptures.push(cap);
@@ -805,8 +808,15 @@ async function preflightCheck(
       errors.push(`${label}: URL inválida (${url})`);
       return;
     }
+    // 30s — covers cold-start serverless workers (Cloudflare, Vercel, Deno
+    // Deploy). Observed miess-tanstack.deco-cx.workers.dev returning 144ms
+    // on a warm hit but 8-15s on the very next cold request, which makes
+    // a 10s pre-flight cap flaky. Pre-flight is a one-shot probe so the
+    // extra budget only costs us when a URL is genuinely dead — and a
+    // dead URL fails fast anyway via ENOTFOUND / ECONNREFUSED.
+    const PREFLIGHT_TIMEOUT_MS = 30_000;
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 10_000);
+    const t = setTimeout(() => controller.abort(), PREFLIGHT_TIMEOUT_MS);
     try {
       const res = await fetch(url, {
         method: "GET",
@@ -820,7 +830,7 @@ async function preflightCheck(
       else if (res.status >= 400) errors.push(`${label}: HTTP ${res.status} ${res.statusText} (${url})`);
     } catch (err) {
       const e = err as Error;
-      const msg = e.name === "AbortError" ? "timeout (10s)" : e.message;
+      const msg = e.name === "AbortError" ? `timeout (${PREFLIGHT_TIMEOUT_MS / 1000}s)` : e.message;
       errors.push(`${label}: ${msg} (${url})`);
     } finally {
       clearTimeout(t);

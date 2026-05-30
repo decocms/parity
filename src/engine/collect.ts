@@ -307,47 +307,111 @@ async function waitForSkeletonsToResolve(page: Page, maxMs = 10_000): Promise<vo
   }
 }
 
-async function scrollFullPage(page: Page): Promise<void> {
-  // Scrolling exists to trigger IntersectionObserver-gated lazy sections
-  // (VTEX intelligent search shelves, Shopify collection grids, deferred
-  // hero banners). Three tuning calls that the obvious version got wrong:
-  //
-  //  - **Step pause (400ms, was 220ms).** 220ms is below the typical fetch
-  //    latency from a VTEX shelf API hit (300-700ms). The viewport passed
-  //    over the section before the products arrived, so the IO never saw
-  //    "loaded" and downstream screenshots captured skeletons. 400ms lets
-  //    each shelf get a fetch dispatched while the viewport sits on it.
-  //
-  //  - **Bottom dwell (1500ms, was 400ms).** Footer and "you might also
-  //    like" carousels typically only fetch when the bottom of the page
-  //    enters the viewport. A 400ms dwell isn't enough for the resulting
-  //    requests to land and render — bumped to 1500.
-  //
-  //  - **Return-to-top settle (700ms).** Some lazy frameworks fire IO
-  //    "leave" callbacks when we snap back to 0 and re-skeletonize the
-  //    sections that just rendered. The extra dwell at top lets those
-  //    re-renders complete (if they happen) before the screenshot fires.
-  await page.evaluate(async () => {
-    await new Promise<void>((resolve) => {
-      const step = Math.max(window.innerHeight * 0.8, 600);
-      let y = 0;
-      const max = document.documentElement.scrollHeight;
-      const tick = () => {
-        window.scrollTo(0, y);
-        y += step;
-        if (y < max) {
-          setTimeout(tick, 400);
+/**
+ * Result returned by `scrollFullPage` so the caller can log diagnostics
+ * (final scroll height, step count, whether budget was exhausted).
+ */
+export interface ScrollFullPageResult {
+  steps: number;
+  finalHeight: number;
+  stableAtEnd: boolean;
+  durationMs: number;
+}
+
+/**
+ * Scroll the page top-to-bottom triggering IntersectionObserver-gated lazy
+ * sections (VTEX intelligent search shelves, Shopify collection grids,
+ * deferred hero banners), then return to top. Returns when the page stops
+ * growing in height (stable for `STABLE_THRESHOLD` consecutive checks) or
+ * the time budget is exhausted.
+ *
+ * **Why adaptive instead of fixed-step:** earlier versions of this function
+ * scrolled N fixed steps and bailed on a timer. Two failure modes that
+ * users hit on real storefronts:
+ *
+ *  - **Fixed-step too short on growing pages.** The old code read
+ *    `scrollHeight` once at the start. As lazy sections hydrated, the page
+ *    grew past that value, but the loop had already exited — screenshots
+ *    captured `header + half the page + dead space`.
+ *  - **Fixed budget too short for slow APIs.** A 10s wrapping race left
+ *    only 25 ticks × 600px = 15000px reachable; real e-commerce homes
+ *    routinely render 25000–40000px, so we never reached the bottom.
+ *
+ * The adaptive version:
+ *  - Re-measures `scrollHeight` every tick (catches growth)
+ *  - Waits inline for in-view skeleton placeholders to clear per step
+ *    (lets each shelf land its fetch before scrolling past)
+ *  - Exits cleanly once the page is stable AND we've reached the bottom
+ *  - Bounded by `budgetMs` so a misbehaved infinite-feed page can't hang
+ */
+async function scrollFullPage(page: Page, budgetMs = 45_000): Promise<ScrollFullPageResult> {
+  const start = Date.now();
+  // ⚠️ Everything inside `page.evaluate` runs in the BROWSER's JS context —
+  // Playwright sends the function as a string. tsx/esbuild inject a `__name`
+  // helper when you declare named arrow functions (`const foo = () => ...`)
+  // to preserve `.name` for stack traces. That helper doesn't exist in the
+  // page, so the function fails with `ReferenceError: __name is not defined`
+  // and `.catch` eats it silently. Bug history shows this exact failure
+  // pattern took two debug rounds to isolate — avoid named arrow consts
+  // here and inline the work directly.
+  const result = await page.evaluate(async (budget: number) => {
+    // SKELETON_SELECTOR_INLINE — keep in sync with module-level SKELETON_SELECTOR
+    const SK = "[aria-busy='true'],[data-skeleton],[data-loading='true'],.skeleton,[class*='skeleton' i],[class*='Skeleton'],[class*='shimmer' i],.animate-pulse,.placeholder-shimmer,.react-loading-skeleton";
+    const innerStart = Date.now();
+
+    let y = 0;
+    let prevHeight = 0;
+    let stableTicks = 0;
+    let steps = 0;
+    const STABLE_THRESHOLD = 3;
+
+    while (budget - (Date.now() - innerStart) > 2000) {
+      window.scrollTo(0, y);
+      steps++;
+      await new Promise<void>((r) => setTimeout(r, 400));
+
+      // Inter-step skeleton wait — give this section's lazy fetch a chance
+      // to land BEFORE we scroll past. Cap per step at 1500ms.
+      const stepWaitStart = Date.now();
+      while (
+        document.querySelectorAll(SK).length > 0 &&
+        Date.now() - stepWaitStart < 1500 &&
+        budget - (Date.now() - innerStart) > 1000
+      ) {
+        await new Promise<void>((r) => setTimeout(r, 200));
+      }
+
+      const height = document.documentElement.scrollHeight;
+      const viewport = window.innerHeight;
+      if (y + viewport >= height - 50) {
+        if (height === prevHeight) {
+          stableTicks++;
+          if (stableTicks >= STABLE_THRESHOLD) break;
         } else {
-          window.scrollTo(0, max);
-          setTimeout(() => {
-            window.scrollTo(0, 0);
-            setTimeout(resolve, 700);
-          }, 1500);
+          stableTicks = 0;
+          prevHeight = height;
         }
-      };
-      tick();
-    });
-  });
+        await new Promise<void>((r) => setTimeout(r, 500));
+      } else {
+        y = Math.min(y + Math.max(viewport * 0.8, 600), height);
+      }
+    }
+
+    const finalHeight = document.documentElement.scrollHeight;
+    window.scrollTo(0, finalHeight);
+    await new Promise<void>((r) => setTimeout(r, 1500));
+    window.scrollTo(0, 0);
+    await new Promise<void>((r) => setTimeout(r, 700));
+
+    return { steps, finalHeight, stableAtEnd: stableTicks >= STABLE_THRESHOLD };
+  }, budgetMs);
+
+  return {
+    steps: result.steps,
+    finalHeight: result.finalHeight,
+    stableAtEnd: result.stableAtEnd,
+    durationMs: Date.now() - start,
+  };
 }
 
 function isFromHttpCache(resp: Response): boolean {
@@ -454,19 +518,35 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
 
         // Auto-scroll to trigger lazy-loaded content (images, sections, analytics)
         if (opts.scrollToLoad !== false && remaining() > 3_000) {
-          dlog(opts.side, opts.viewport, `    capturePage: scrollFullPage start (remaining=${remaining()}ms)`);
-          await Promise.race([
-            scrollFullPage(page).catch(() => undefined),
-            new Promise<void>((resolve) => setTimeout(resolve, Math.min(10_000, remaining()))),
+          // Budget for the scroll itself: 45s OR remaining, whichever is
+          // smaller. The new adaptive `scrollFullPage` stops as soon as the
+          // page height stabilizes, so on fast pages it exits in 5-10s.
+          // We pass the budget INTO the page.evaluate so the inner loop is
+          // self-bounded, and ALSO race it externally as a hard safety cap.
+          const scrollBudget = Math.min(45_000, remaining());
+          dlog(opts.side, opts.viewport, `    capturePage: scrollFullPage start (budget=${scrollBudget}ms, remaining=${remaining()}ms)`);
+          const scrollResult = await Promise.race([
+            scrollFullPage(page, scrollBudget).catch((err) => {
+              // Don't swallow — a syntax/reference error inside the browser-
+              // side evaluate would otherwise look indistinguishable from a
+              // legitimate timeout, and that exact bug bit us once already.
+              dlog(opts.side, opts.viewport, `    capturePage: scrollFullPage threw: ${(err as Error).message}`);
+              return undefined;
+            }),
+            new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), scrollBudget + 2_000)),
           ]);
-          dlog(opts.side, opts.viewport, `    capturePage: scrollFullPage done (remaining=${remaining()}ms)`);
-          // Scrolling to the bottom kicks off a wave of lazy fetches (product
-          // shelves, hero images, footer widgets). Before the screenshot
-          // fires, give those a real chance to land — otherwise we capture
-          // a forest of skeleton placeholders and the LLM downstream thinks
-          // half the page is "missing-component". Bumped from a flat 600ms
-          // to (networkidle race up to 3s) + 800ms after observing prod
-          // screenshots of miess home rendering ~30% skeletons.
+          if (scrollResult) {
+            dlog(
+              opts.side,
+              opts.viewport,
+              `    capturePage: scrollFullPage done steps=${scrollResult.steps} finalHeight=${scrollResult.finalHeight} stable=${scrollResult.stableAtEnd} duration=${scrollResult.durationMs}ms (remaining=${remaining()}ms)`,
+            );
+          } else {
+            dlog(opts.side, opts.viewport, `    capturePage: scrollFullPage timed out at outer race (remaining=${remaining()}ms)`);
+          }
+          // Post-scroll settle. With the new adaptive scroll already doing
+          // inter-step skeleton waits, this is just a small grace period
+          // for late analytics pings and trailing image decodes.
           if (remaining() > 2_000) {
             dlog(opts.side, opts.viewport, `    capturePage: post-scroll networkidle (cap=${Math.min(3_000, remaining())}ms)`);
             await page
@@ -506,20 +586,29 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
         stabilizeCarousels(page).catch(() => undefined),
         new Promise<void>((resolve) => setTimeout(resolve, Math.min(3_000, remaining()))),
       ]);
-      // Wait for skeleton placeholders (shelf-cards, lazy sections, busy
-      // panels) to resolve before the screenshot fires. Without this we'd
-      // capture half the page as shimmer loaders, and the visual-diff LLM
-      // would report phantom "missing-component" diffs because one side
-      // happened to finish first. 6s cap is enough for VTEX intelligent
-      // search to populate a shelf; pages without skeletons short-circuit
-      // on the first poll.
-      const skeletonBudget = Math.min(10_000, remaining());
+      // Final safety net: wait for any lingering skeleton placeholders to
+      // resolve before the screenshot fires. Budget reduced from 10s to 5s
+      // since the adaptive scrollFullPage already does inter-step skeleton
+      // waits — by the time we reach this point most pages have already
+      // settled. We keep it as a last-resort for sites with skeletons that
+      // never enter the viewport (off-screen lazy renders).
+      const skeletonBudget = Math.min(5_000, remaining());
       if (skeletonBudget > 500) {
         dlog(opts.side, opts.viewport, `    capturePage: waitForSkeletons (cap=${skeletonBudget}ms)`);
         await Promise.race([
           waitForSkeletonsToResolve(page, skeletonBudget).catch(() => undefined),
           new Promise<void>((resolve) => setTimeout(resolve, skeletonBudget)),
         ]);
+      }
+      // Log the final skeleton count right before the screenshot so we can
+      // diagnose "page wasn't ready" issues without having to re-run.
+      try {
+        const skeletonsAtCapture = await page
+          .evaluate((sel) => document.querySelectorAll(sel).length, SKELETON_SELECTOR)
+          .catch(() => -1);
+        dlog(opts.side, opts.viewport, `    capturePage: pre-screenshot skeletons=${skeletonsAtCapture}`);
+      } catch {
+        /* tolerated */
       }
       dlog(opts.side, opts.viewport, `    capturePage: screenshot start (cap=${Math.min(15_000, remaining())}ms)`);
       await Promise.race([

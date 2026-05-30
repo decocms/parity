@@ -30,6 +30,38 @@ function makePng(path: string, w: number, h: number, fill: [number, number, numb
   writeFileSync(path, PNG.sync.write(png));
 }
 
+/**
+ * Same as makePng but flips a `differingRows`-tall strip at the top to white
+ * so pixelmatch sees a non-zero but small pctDiff. Use this when a test
+ * needs the LLM to be invoked (pctDiff above the trivial 0.5% threshold)
+ * without producing the 100% pctDiff that solid-color contrast yields.
+ */
+function makePngWithDiff(
+  path: string,
+  w: number,
+  h: number,
+  fill: [number, number, number],
+  differingRows: number,
+): void {
+  const png = new PNG({ width: w, height: h });
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (w * y + x) << 2;
+      if (y < differingRows) {
+        png.data[idx] = 255;
+        png.data[idx + 1] = 255;
+        png.data[idx + 2] = 255;
+      } else {
+        png.data[idx] = fill[0];
+        png.data[idx + 1] = fill[1];
+        png.data[idx + 2] = fill[2];
+      }
+      png.data[idx + 3] = 255;
+    }
+  }
+  writeFileSync(path, PNG.sync.write(png));
+}
+
 describe("visualRegressionKeyframes", () => {
   let dir: { path: string; cleanup: () => void };
 
@@ -494,7 +526,7 @@ describe("visualRegressionKeyframes", () => {
     delete process.env.ANTHROPIC_API_KEY;
   });
 
-  it("downgrades skeleton-vs-loaded diffs to 'low' when one side has many skeletons and LLM flagged them as missing/different", async () => {
+  it("downgrades skeleton-vs-loaded diffs to 'low' when low pctDiff + LLM flagged them as missing/different", async () => {
     process.env.ANTHROPIC_API_KEY = "sk-test";
     mockCreate.mockResolvedValue({
       content: [
@@ -522,8 +554,10 @@ describe("visualRegressionKeyframes", () => {
     });
     const prodPath = join(dir.path, "p.png");
     const candPath = join(dir.path, "c.png");
-    makePng(prodPath, 50, 50, [0, 0, 0]);
-    makePng(candPath, 50, 50, [255, 255, 255]);
+    // Low pctDiff (~1%) — under the 25% structural ceiling — so the downgrade
+    // is allowed to fire for the skeleton-flavored diff.
+    makePng(prodPath, 50, 50, [100, 100, 100]);
+    makePngWithDiff(candPath, 50, 50, [100, 100, 100], 1);
     // Imbalanced skeletons: cand has 8 skeletons, prod has none
     const prodHtml = "<html><body><div data-section='Shelf'><div class='product'>real product</div></div></body></html>";
     const candHtml = `<html><body><div data-section='Shelf'>${"<div class='skeleton'></div>".repeat(8)}</div></body></html>`;
@@ -543,6 +577,48 @@ describe("visualRegressionKeyframes", () => {
     // footer diff is unrelated → keeps original severity
     expect(footerIssue?.severity).toBe("high");
     expect(footerIssue?.summary).not.toMatch(/downgraded/);
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  it("does NOT downgrade skeleton diffs when pctDiff is high (structural failure, not timing)", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: "tool_use",
+          name: "report_visual_differences",
+          input: {
+            differences: [
+              {
+                type: "missing-component",
+                region: "main",
+                severity: "critical",
+                description: "Half the page is filled with skeleton placeholder cards — prod failed to load the product shelves",
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const prodPath = join(dir.path, "p.png");
+    const candPath = join(dir.path, "c.png");
+    // Large color delta produces ~100% pctDiff — above the structural ceiling.
+    makePng(prodPath, 50, 50, [0, 0, 0]);
+    makePng(candPath, 50, 50, [255, 255, 255]);
+    // Same skeleton imbalance as the downgrade test, but pctDiff makes it structural.
+    const prodHtml = `<html><body>${"<div class='skeleton'></div>".repeat(8)}</body></html>`;
+    const candHtml = "<html><body><div class='product'>loaded</div></body></html>";
+    const r = await visualRegressionKeyframes(
+      makeContext({
+        outDir: dir.path,
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath, html: prodHtml })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath, html: candHtml })],
+      }),
+    );
+    const issue = r.issues.find((i) => i.id.includes("visual:semantic") && i.summary.includes("[main]"));
+    // High pctDiff bypasses the skeleton downgrade — severity stays critical
+    expect(issue?.severity).toBe("critical");
+    expect(issue?.summary).not.toMatch(/downgraded/);
     delete process.env.ANTHROPIC_API_KEY;
   });
 
