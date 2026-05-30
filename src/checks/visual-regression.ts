@@ -138,6 +138,18 @@ const SKELETON_DESCRIPTION_RE =
   /skeleton|placeholder|shimmer|loading|carregando|esqueleto|esquemático|cinza|gray box|gray card|empty card|empty placeholder|loader/i;
 
 /**
+ * Above this pctDiff, a skeleton imbalance is treated as a STRUCTURAL
+ * failure (one side completely failed to render half the page) instead of
+ * timing noise. Without this guard, a prod home page rendering only its
+ * header + skeletons all the way down would still get downgraded to `low`
+ * just because the LLM mentioned "skeleton" — masking what is clearly a
+ * critical regression. 25% is high enough that font anti-aliasing + small
+ * skeleton race conditions stay below it, but a half-empty page is well
+ * above.
+ */
+const SKELETON_DOWNGRADE_PCT_DIFF_CEILING = 0.25;
+
+/**
  * Safety net for skeleton-vs-loaded diffs the LLM emits as critical/high
  * despite the prompt rule. When the two sides have an imbalanced skeleton
  * count AND the description hints at a loading state, downgrade to `low`.
@@ -147,13 +159,22 @@ const SKELETON_DESCRIPTION_RE =
  * "missing-component" diffs (whole section truly absent) don't match this
  * pattern because the LLM describes them with concrete component names,
  * not "skeleton" / "placeholder".
+ *
+ * **Bailout above SKELETON_DOWNGRADE_PCT_DIFF_CEILING**: if the pixel diff
+ * is large enough that the imbalance is clearly structural (a whole page
+ * region didn't render), we keep the LLM's original severity. The downgrade
+ * is for *a few shelves not loaded yet*, not for *half the page is empty*.
  */
 function downgradeSkeletonImbalanceDiffs(
   diffs: VisualDifference[],
   prodSkeletonCount: number,
   candSkeletonCount: number,
+  pctDiff: number,
 ): VisualDifference[] {
   if (Math.abs(prodSkeletonCount - candSkeletonCount) < SKELETON_IMBALANCE_THRESHOLD) {
+    return diffs;
+  }
+  if (pctDiff > SKELETON_DOWNGRADE_PCT_DIFF_CEILING) {
     return diffs;
   }
   const heavier = prodSkeletonCount > candSkeletonCount ? "prod" : "cand";
@@ -396,6 +417,7 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
         differences,
         p.prodSkeletonCount,
         p.candSkeletonCount,
+        p.pctDiff,
       );
     }
 
