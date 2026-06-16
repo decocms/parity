@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import chalk from "chalk";
 import * as cheerio from "cheerio";
@@ -250,6 +251,10 @@ async function gatherSide(
     // `locator.screenshot()` (or even fullPage + crop) of a section above
     // the fold can grab a frame where the cand still shows the SSR drawer
     // open and Tailwind utility classes haven't been computed.
+    //
+    // Budget: ~37s worst-case per side (30s scroll + 5s skeleton + 2s
+    // race margin). Because `gatherSide` runs prod and cand in parallel,
+    // wall-clock impact on the `parity section` command is ~37s, not 74s.
     if (opts.wantScreenshot) {
       const scrollBudget = 30_000;
       await Promise.race([
@@ -328,17 +333,22 @@ async function captureSectionScreenshot(
       return `seletor '${selector}' não casou nenhum elemento`;
     }
     await loc.scrollIntoViewIfNeeded({ timeout: 3_000 }).catch(() => undefined);
-    const box = await loc.boundingBox({ timeout: 3_000 });
-    if (!box || box.width <= 0 || box.height <= 0) {
-      return `seletor '${selector}' não tem boundingBox visível`;
-    }
+    // Order matters: `page.screenshot({ fullPage: true })` may resize the
+    // viewport to the full document height, which can shift sticky headers
+    // and vh-based sizing. We measure `boundingBox()` *after* the screenshot
+    // so the crop coordinates match the rendered PNG. Review feedback on
+    // PR #57.
     const fullPng = await page.screenshot({
       fullPage: true,
       animations: "disabled",
       timeout: 15_000,
     });
+    const box = await loc.boundingBox({ timeout: 3_000 });
+    if (!box || box.width <= 0 || box.height <= 0) {
+      return `seletor '${selector}' não tem boundingBox visível`;
+    }
     const cropped = cropPngBuffer(fullPng, box);
-    writeFileSync(outPath, cropped);
+    await writeFile(outPath, cropped);
     return null;
   } catch (err) {
     return `falha no screenshot: ${(err as Error).message}`;
