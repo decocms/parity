@@ -98,10 +98,16 @@ export function cartRevealModeDivergence(ctx: CheckContext): CheckResult {
   if (viewportsInconclusive > 0)
     summaryParts.push(`${viewportsInconclusive} inconclusivo(s) (prod=unknown ou cand=unknown)`);
 
+  // Top-level severity reflects the worst issue actually emitted. On
+  // pass/skipped (no issues), use "low" — carrying "critical" here was
+  // misleading per cubic review feedback.
+  const topSeverity: CheckResult["severity"] =
+    viewportsDivergent > 0 ? "critical" : viewportsInconclusive > 0 ? "medium" : "low";
+
   return {
     name: "cart-reveal-mode-divergence",
     status,
-    severity: viewportsDivergent > 0 ? "critical" : viewportsInconclusive > 0 ? "medium" : "critical",
+    severity: topSeverity,
     durationMs: Date.now() - start,
     summary:
       viewportsChecked === 0
