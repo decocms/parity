@@ -856,7 +856,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     // consumers reading `report.json.timings` see all phases. The HTML
     // was already rendered above without it (acceptable trade-off).
     runTimings.phases.push({ phase: "report", durationMs: reportDurationMs });
-    runTimings.totalMs = Math.max(runTimings.totalMs, runTimings.totalMs + reportDurationMs);
+    runTimings.totalMs += reportDurationMs;
     run.timings = runTimings;
     writeRunReportJson(paths.runDir, run);
 
