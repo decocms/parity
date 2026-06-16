@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import chalk from "chalk";
 import * as cheerio from "cheerio";
@@ -7,6 +7,8 @@ import prettier from "prettier";
 import type { BrowserContext, Page } from "playwright";
 import { stabilizeCarousels } from "../engine/carousel-stabilizer.ts";
 import { launchBrowser, newContext } from "../engine/browser.ts";
+import { cropPngBuffer } from "../engine/capture-utils.ts";
+import { scrollFullPage, waitForSkeletonsToResolve } from "../engine/collect.ts";
 import {
   type ComputedStylesNotFound,
   type ComputedStylesResult,
@@ -54,9 +56,12 @@ export interface SectionOptions {
  *   --output-html      Prettier-formatted HTML diff between prod and cand
  *                      (uses jsdiff createPatch + chalk like `parity html`).
  *
- *   --screenshot       page.locator(selector).screenshot() on each side,
- *                      AFTER stabilizeCarousels() pins frames so the
- *                      shots are comparable. Writes to <outDir>/<hash>-{prod,cand}.png.
+ *   --screenshot       Full-page screenshot on each side, cropped to the
+ *                      selector's boundingBox AFTER stabilizeCarousels +
+ *                      scrollFullPage + waitForSkeletonsToResolve. Preserves
+ *                      Tailwind / @media / global CSS context that an
+ *                      isolated `locator.screenshot()` would lose (issue #51).
+ *                      Writes to <outDir>/<hash>-{prod,cand}.png.
  *
  *   --computed-styles  Reads SECTION_STYLE_KEYS via readComputedStyles()
  *                      on each side; prints a key-by-key diff with
@@ -240,6 +245,23 @@ async function gatherSide(
       new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
     ]);
 
+    // Issue #51: lazy-loaded content + Tailwind JIT classes only resolve
+    // after the page has scrolled and skeletons have settled. Without this,
+    // `locator.screenshot()` (or even fullPage + crop) of a section above
+    // the fold can grab a frame where the cand still shows the SSR drawer
+    // open and Tailwind utility classes haven't been computed.
+    if (opts.wantScreenshot) {
+      const scrollBudget = 30_000;
+      await Promise.race([
+        scrollFullPage(page, scrollBudget).catch(() => undefined),
+        new Promise<void>((resolve) => setTimeout(resolve, scrollBudget + 2_000)),
+      ]);
+      await Promise.race([
+        waitForSkeletonsToResolve(page, 5_000).catch(() => undefined),
+        new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
+      ]);
+    }
+
     if (opts.wantHtml) {
       try {
         const fullHtml = await page.content();
@@ -292,13 +314,31 @@ async function captureSectionScreenshot(
   selector: string,
   outPath: string,
 ): Promise<string | null> {
+  // Issue #51: v0.10.x switched to `locator.screenshot()` which renders the
+  // element in isolation — Tailwind JIT classes and page-level CSS cascade
+  // (@media, layers, global resets) don't apply, producing screenshots that
+  // diverge from the live rendering by 80%+. We restore the v0.8.x approach:
+  // full-page screenshot WITH the page's CSS context, then crop to the
+  // section's bounding box. The `gatherSide` caller runs `scrollFullPage` +
+  // `waitForSkeletonsToResolve` before this, mirroring the visual-diff path
+  // in `capturePage`.
   try {
     const loc = page.locator(selector).first();
     if ((await loc.count()) === 0) {
       return `seletor '${selector}' não casou nenhum elemento`;
     }
     await loc.scrollIntoViewIfNeeded({ timeout: 3_000 }).catch(() => undefined);
-    await loc.screenshot({ path: outPath, timeout: 8_000 });
+    const box = await loc.boundingBox({ timeout: 3_000 });
+    if (!box || box.width <= 0 || box.height <= 0) {
+      return `seletor '${selector}' não tem boundingBox visível`;
+    }
+    const fullPng = await page.screenshot({
+      fullPage: true,
+      animations: "disabled",
+      timeout: 15_000,
+    });
+    const cropped = cropPngBuffer(fullPng, box);
+    writeFileSync(outPath, cropped);
     return null;
   } catch (err) {
     return `falha no screenshot: ${(err as Error).message}`;
