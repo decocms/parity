@@ -296,7 +296,7 @@ export const SKELETON_SELECTOR =
  * loop is bounded by `maxMs` and runs at most ~12 iterations so the
  * overhead is negligible compared to a 30s+ page capture.
  */
-async function waitForSkeletonsToResolve(page: Page, maxMs = 10_000): Promise<void> {
+export async function waitForSkeletonsToResolve(page: Page, maxMs = 10_000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < maxMs) {
     const count = await page
@@ -344,7 +344,7 @@ export interface ScrollFullPageResult {
  *  - Exits cleanly once the page is stable AND we've reached the bottom
  *  - Bounded by `budgetMs` so a misbehaved infinite-feed page can't hang
  */
-async function scrollFullPage(page: Page, budgetMs = 45_000): Promise<ScrollFullPageResult> {
+export async function scrollFullPage(page: Page, budgetMs = 45_000): Promise<ScrollFullPageResult> {
   const start = Date.now();
   // ⚠️ Everything inside `page.evaluate` runs in the BROWSER's JS context —
   // Playwright sends the function as a string. tsx/esbuild inject a `__name`
