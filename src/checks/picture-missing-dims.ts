@@ -93,9 +93,7 @@ export function scanForPictureMissingDims(page: PageCapture): string[] {
       .find("img")
       .each((_imgIdx, img) => {
         const $img = $(img);
-        const hasWidth = $img.attr("width") !== undefined;
-        const hasHeight = $img.attr("height") !== undefined;
-        if (hasWidth && hasHeight) return;
+        if (hasReservedSpace($img)) return;
         const src = $img.attr("src") ?? $img.attr("data-src") ?? "(no src)";
         const cls = $img.attr("class");
         const desc = cls ? `<img class="${cls.slice(0, 40)}"… src="${src.slice(0, 80)}">` : `<img src="${src.slice(0, 80)}">`;
@@ -103,4 +101,32 @@ export function scanForPictureMissingDims(page: PageCapture): string[] {
       });
   });
   return offenders;
+}
+
+/**
+ * True when the `<img>` has *any* form of layout-reservation hint that
+ * the browser can use to avoid CLS. We accept four signals (review
+ * feedback on PR #65):
+ *
+ *  1. `width` AND `height` HTML attributes (classic, explicit).
+ *  2. Inline `style="aspect-ratio: …"` (modern CSS path that the
+ *     suggestedFix even recommends — flagging this would be ironic).
+ *  3. Inline `style="width:…; height:…"` (functionally equivalent to (1)).
+ *  4. `style="aspect-ratio: …"` with whitespace variants.
+ *
+ * Empty-string attrs (e.g. `width=""`) are treated as MISSING — they
+ * don't reserve space either.
+ */
+type CheerioImg = ReturnType<cheerio.CheerioAPI>;
+function hasReservedSpace($img: CheerioImg): boolean {
+  const w = $img.attr("width");
+  const h = $img.attr("height");
+  if (w && h) return true;
+  const style = $img.attr("style") ?? "";
+  if (/aspect-ratio\s*:/i.test(style)) return true;
+  // both width and height in style
+  const styleHasWidth = /(^|;)\s*width\s*:/i.test(style);
+  const styleHasHeight = /(^|;)\s*height\s*:/i.test(style);
+  if (styleHasWidth && styleHasHeight) return true;
+  return false;
 }

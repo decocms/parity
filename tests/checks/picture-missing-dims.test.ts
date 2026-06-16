@@ -66,6 +66,43 @@ describe("scanForPictureMissingDims (issue #54 Tier 0: CLS from Picture without 
     expect(scanForPictureMissingDims(page)).toEqual([]);
   });
 
+  describe("review feedback: aspect-ratio + inline style hints reserve space", () => {
+    it("NÃO flagga quando style tem aspect-ratio", () => {
+      const page = makePageCapture({
+        html: `<picture><img src="x.jpg" style="aspect-ratio: 16/9" /></picture>`,
+      });
+      expect(scanForPictureMissingDims(page)).toEqual([]);
+    });
+
+    it("NÃO flagga quando style tem width + height", () => {
+      const page = makePageCapture({
+        html: `<picture><img src="x.jpg" style="width: 100px; height: 50px" /></picture>`,
+      });
+      expect(scanForPictureMissingDims(page)).toEqual([]);
+    });
+
+    it("flagga quando style só tem width (sem height nem aspect-ratio)", () => {
+      const page = makePageCapture({
+        html: `<picture><img src="x.jpg" style="width: 100%" /></picture>`,
+      });
+      expect(scanForPictureMissingDims(page)).toHaveLength(1);
+    });
+
+    it("aceita aspect-ratio com case-insensitive matching", () => {
+      const page = makePageCapture({
+        html: `<picture><img src="x.jpg" style="ASPECT-RATIO:16/9" /></picture>`,
+      });
+      expect(scanForPictureMissingDims(page)).toEqual([]);
+    });
+
+    it("trata width='' como ausente (não reserva espaço)", () => {
+      const page = makePageCapture({
+        html: `<picture><img src="x.jpg" width="" height="" /></picture>`,
+      });
+      expect(scanForPictureMissingDims(page)).toHaveLength(1);
+    });
+  });
+
   it("requer AMBOS width e height (só um não basta)", () => {
     const widthOnly = makePageCapture({
       html: `<picture><img src="x.jpg" width="100" /></picture>`,
