@@ -1,8 +1,20 @@
 /**
  * Per-phase timing instrumentation for `parity run`. Persists how long
- * each phase (launch, collect, vitals-pages, visual-diff, checks,
- * llm-aggregate, report) takes so the user can see where the wall-clock
- * went and optimize from data, not guesses.
+ * each phase takes so the user can see where the wall-clock went and
+ * optimize from data, not guesses.
+ *
+ * Phases currently stamped by `runCommand`:
+ *   - `collect`        — browser launch + warmup + all flow captures
+ *   - `vitals-pages`   — extra sitemap-discovered page captures
+ *   - `visual-diff`    — visual-diff page captures
+ *   - `checks`         — sequential check pipeline
+ *   - `llm-aggregate`  — LLM issue aggregation (or offline fallback)
+ *   - `report`         — JSON + HTML report writes (patched into the
+ *                         JSON post-render; the HTML bar excludes it)
+ *
+ * NOTE: there's no separate `launch` phase — `collect` includes browser
+ * launch, warmup, and the flow loop. Separating them was deemed not
+ * worth the cross-cutting churn for what's typically <2s overhead.
  *
  * Builds on PR-3 (issue #56): `currentPhase` already labels phases for
  * the shutdown banner; this PR records their durations.
