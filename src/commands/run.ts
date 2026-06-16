@@ -26,6 +26,7 @@ import { renderHtmlReport } from "../report/render.ts";
 import { serveRunAndBlock } from "./serve.ts";
 import { attachSpinnerHeartbeat } from "../util/heartbeat.ts";
 import { JsonlWriter, checkToJsonl } from "../storage/jsonl.ts";
+import { TimingRegistry, formatTimingsSummary } from "../util/timing.ts";
 import { compareToBaseline, loadBaseline } from "../storage/baselines.ts";
 import {
   createRunDir,
@@ -345,6 +346,16 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   const allFlowCaptures: FlowCapture[] = [];
   const allPageCaptures: PageCapture[] = [];
 
+  // Per-phase timing accumulator. Each phase boundary pushes its duration
+  // so the report header + console summary can show where the wall-clock
+  // actually went (observability follow-up to #56's `currentPhase`).
+  const timings = new TimingRegistry();
+  let phaseStart = performance.now();
+  const stampPhase = (label: string): void => {
+    timings.push(label, performance.now() - phaseStart);
+    phaseStart = performance.now();
+  };
+
   // Issue #56: install SIGINT/SIGTERM + global timeout so a Ctrl-C or a
   // wedged phase doesn't leave the user with no report. The shutdown
   // helper is idempotent (a 2nd signal hard-exits 130).
@@ -361,6 +372,12 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     spinner.stop();
     process.stderr.write(`\n  ⚠ run interrompido (${reason}) durante "${currentPhase}" — escrevendo report parcial…\n`);
     try {
+      // Stamp the current in-flight phase so the user sees how long the
+      // wedged phase lasted before the interrupt. Snapshot timings now
+      // so the partial report carries the "where the time went so far"
+      // data — the PR's motivating use case (review feedback on PR #60).
+      stampPhase(currentPhase);
+      const partialTimings = timings.finalize();
       const partial = buildPartialRun({
         runId,
         timestamp,
@@ -373,11 +390,15 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         flowCaptures: allFlowCaptures,
         checks: partialChecks,
         partialReason: `${reason} during ${currentPhase}`,
+        timings: partialTimings,
       });
       writeRunReportJson(paths.runDir, partial);
       const html = renderHtmlReport(partial, paths.runDir);
       writeRunReportHtml(paths.runDir, html);
       process.stderr.write(`  report parcial em ${paths.reportHtml}\n`);
+      // Print the timing summary to stderr too so the shutdown path
+      // surfaces it (success path prints to stdout).
+      process.stderr.write(`\n${formatTimingsSummary(partialTimings)}\n`);
     } catch (err) {
       process.stderr.write(`  falha escrevendo report parcial: ${(err as Error).message}\n`);
     }
@@ -475,6 +496,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         await ctx.close();
       }
     }
+    stampPhase("collect");
     spinner.succeed("Coleta concluída");
 
     // LLM PDP cross-site matcher: confirm prod and cand opened the same product
@@ -506,6 +528,10 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       const vitalsHb = attachSpinnerHeartbeat(extraSpinner, {
         baseText: "Coletando vitals em páginas extras…",
       });
+      // try/finally ensures stampPhase runs even if an uncaught error
+      // bubbles past the inner catch. Without this, phaseStart never
+      // advances and the next phase silently absorbs the vitals time.
+      // Review feedback on PR #60.
       try {
         const allUrls = await resolveSitemapUrls(opts.prod);
         const visitedPaths = new Set<string>();
@@ -600,6 +626,8 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       } catch (err) {
         vitalsHb.stop();
         extraSpinner.warn(`vitals extras pulado: ${(err as Error).message}`);
+      } finally {
+        stampPhase("vitals-pages");
       }
     }
 
@@ -695,6 +723,8 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       } catch (err) {
         visualHb.stop();
         visualSpinner.warn(`Visual diff descoberta pulada: ${(err as Error).message}`);
+      } finally {
+        stampPhase("visual-diff");
       }
     }
 
@@ -720,6 +750,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     // back is unnecessary.
     const checks = await runAllChecks(checkCtx, partialChecks);
     checksHb.stop();
+    stampPhase("checks");
     spinner.succeed(`Checks concluídos (${checks.length})`);
 
     // Emit each completed check as a JSONL line for agents/scripts (#53).
@@ -751,6 +782,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       timeoutMs: llmTimeoutSec * 1000,
     });
     llmHb.stop();
+    stampPhase("llm-aggregate");
     spinner.succeed(`${topIssues.length} issue(s) priorizada(s)`);
     currentPhase = "report";
 
@@ -786,6 +818,14 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     const seoCheck = checks.find((c) => c.name === "seo-deep-audit");
     const seo = (seoCheck?.data?.seo as SeoSummary | undefined);
 
+    // Finalize timings BEFORE rendering the HTML so the report can show
+    // the breakdown. The "report" phase itself (writes + render) is timed
+    // separately below and patched into the JSON afterwards — the HTML
+    // bar chart will list every phase except `report`, which is fine
+    // since the report rendering is typically <100ms and not the user's
+    // bottleneck. Review feedback on PR #60.
+    const runTimings = timings.finalize();
+
     const run: Run = {
       schemaVersion: "0.1",
       id: runId,
@@ -804,11 +844,21 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       visualDiff,
       seo,
       baseline: baselineSection,
+      timings: runTimings,
     };
 
+    const reportStart = performance.now();
     writeRunReportJson(paths.runDir, run);
     const html = renderHtmlReport(run, paths.runDir);
     writeRunReportHtml(paths.runDir, html);
+    const reportDurationMs = performance.now() - reportStart;
+    // Patch the JSON with the actual `report` phase duration so
+    // consumers reading `report.json.timings` see all phases. The HTML
+    // was already rendered above without it (acceptable trade-off).
+    runTimings.phases.push({ phase: "report", durationMs: reportDurationMs });
+    runTimings.totalMs += reportDurationMs;
+    run.timings = runTimings;
+    writeRunReportJson(paths.runDir, run);
 
     // Final JSONL record so consumers know the stream ended cleanly (#53).
     jsonl?.write({
@@ -821,6 +871,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     });
 
     printSummary(run, paths.reportHtml, { promotedCount, deprecatedCount, platform });
+    console.log(`\n${formatTimingsSummary(runTimings)}`);
 
     if (opts.ci) {
       const blocking = allIssues.filter((i) => failOn.includes(i.severity));
@@ -883,6 +934,8 @@ function buildPartialRun(args: {
   flowCaptures: FlowCapture[];
   checks: CheckResult[];
   partialReason: string;
+  /** Snapshot of phase timings captured at shutdown. Review feedback on PR #60. */
+  timings?: Run["timings"];
 }): Run {
   const allIssues = args.checks.flatMap((c) => c.issues);
   const verdict = computeVerdict(args.checks, allIssues);
@@ -903,6 +956,7 @@ function buildPartialRun(args: {
     flowCaptures: args.flowCaptures,
     partial: true,
     partialReason: args.partialReason,
+    timings: args.timings,
   };
 }
 
