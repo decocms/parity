@@ -1152,6 +1152,7 @@ export function renderHtmlReport(run: Run, runDir: string): string {
         <button class="action-btn" id="help-btn">? Atalhos</button>
       </div>
     </header>
+    ${run.partial ? `<div style="background:#7c2d12;color:#fed7aa;padding:12px 24px;border-bottom:2px solid #ea580c;font-weight:600">⚠ Partial run — interrompido${run.partialReason ? ` (${esc(run.partialReason)})` : ""}. Verdict, top-issues e algumas seções podem estar incompletos.</div>` : ""}
     <main class="app-main">
       <section class="panel" data-panel="summary">
         ${renderDashboard(run)}

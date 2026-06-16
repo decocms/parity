@@ -24,6 +24,7 @@ import { discoverSelectorsFromUrl } from "../llm/discover-selectors.ts";
 import { fingerprintPdp, matchPdps } from "../llm/match-pdp.ts";
 import { renderHtmlReport } from "../report/render.ts";
 import { serveRunAndBlock } from "./serve.ts";
+import { attachSpinnerHeartbeat } from "../util/heartbeat.ts";
 import { compareToBaseline, loadBaseline } from "../storage/baselines.ts";
 import {
   createRunDir,
@@ -113,6 +114,11 @@ export interface RunOptions {
    * Issue #52.
    */
   llmTimeout?: number;
+  /**
+   * Wall-clock cap for the whole run (minutes). On expiry, parity writes
+   * a partial report and exits 130. Default: 30. Issue #56.
+   */
+  timeout?: number;
 }
 
 type PresetDefaults = Partial<Pick<RunOptions,
@@ -313,6 +319,61 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   const allFlowCaptures: FlowCapture[] = [];
   const allPageCaptures: PageCapture[] = [];
 
+  // Issue #56: install SIGINT/SIGTERM + global timeout so a Ctrl-C or a
+  // wedged phase doesn't leave the user with no report. The shutdown
+  // helper is idempotent (a 2nd signal hard-exits 130).
+  let currentPhase = "launch";
+  let shuttingDown = false;
+  let partialChecks: CheckResult[] = [];
+  const shutdown = (reason: string) => {
+    if (shuttingDown) {
+      // 2nd signal: hard exit. The 1st already kicked off cleanup.
+      process.stderr.write("\n  segunda interrupção — forçando saída.\n");
+      process.exit(130);
+    }
+    shuttingDown = true;
+    spinner.stop();
+    process.stderr.write(`\n  ⚠ run interrompido (${reason}) durante "${currentPhase}" — escrevendo report parcial…\n`);
+    try {
+      const partial = buildPartialRun({
+        runId,
+        timestamp,
+        prodUrl: opts.prod,
+        candUrl: opts.cand,
+        flows,
+        viewports,
+        cep: rc.cep,
+        startedAt,
+        flowCaptures: allFlowCaptures,
+        checks: partialChecks,
+        partialReason: `${reason} during ${currentPhase}`,
+      });
+      writeRunReportJson(paths.runDir, partial);
+      const html = renderHtmlReport(partial, paths.runDir);
+      writeRunReportHtml(paths.runDir, html);
+      process.stderr.write(`  report parcial em ${paths.reportHtml}\n`);
+    } catch (err) {
+      process.stderr.write(`  falha escrevendo report parcial: ${(err as Error).message}\n`);
+    }
+    // Best-effort browser close.
+    if (browser) {
+      browser.close().catch(() => undefined);
+    }
+    process.exit(130);
+  };
+  const onSignal = (sig: NodeJS.Signals) => {
+    shutdown(`signal ${sig}`);
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+
+  const timeoutMinutes = Math.max(1, Math.floor(opts.timeout ?? 30));
+  const globalTimeoutTimer = setTimeout(() => {
+    shutdown(`timeout ${timeoutMinutes}min`);
+  }, timeoutMinutes * 60_000);
+  // Don't block process exit on the timer.
+  globalTimeoutTimer.unref?.();
+
   try {
     browser = await launchBrowser({ headless: true });
 
@@ -414,7 +475,11 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     // Extra vitals coverage: crawl additional pages from sitemap to enrich the Vitals tab
     const vitalsPagesLimit = opts.vitalsPages ?? 10;
     if (browser && vitalsPagesLimit > 0) {
+      currentPhase = "vitals-pages";
       const extraSpinner = ora("Coletando vitals em páginas extras…").start();
+      const vitalsHb = attachSpinnerHeartbeat(extraSpinner, {
+        baseText: "Coletando vitals em páginas extras…",
+      });
       try {
         const allUrls = await resolveSitemapUrls(opts.prod);
         const visitedPaths = new Set<string>();
@@ -496,14 +561,18 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
               /* tolerated */
             } finally {
               done++;
+              vitalsHb.bump();
               extraSpinner.text = `[vitals extras] ${done}/${tasks.length} (último: ${task.path})`;
             }
           });
+          vitalsHb.stop();
           extraSpinner.succeed(`+${extraPaths.length} página(s) com vitals`);
         } else {
+          vitalsHb.stop();
           extraSpinner.warn("Nenhuma página extra encontrada no sitemap");
         }
       } catch (err) {
+        vitalsHb.stop();
         extraSpinner.warn(`vitals extras pulado: ${(err as Error).message}`);
       }
     }
@@ -516,11 +585,14 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         ? explicitPaths.length
         : (opts.visualPages ?? 5);
     if (browser && visualPagesLimit > 0) {
-      const visualSpinner = ora(
-        explicitPaths
-          ? `Visual diff: ${explicitPaths.length} página(s) explícita(s) via --pages/--pages-file…`
-          : "Descobrindo páginas pra visual diff…",
-      ).start();
+      currentPhase = "visual-diff";
+      const visualSpinnerBaseText = explicitPaths
+        ? `Visual diff: ${explicitPaths.length} página(s) explícita(s) via --pages/--pages-file…`
+        : "Descobrindo páginas pra visual diff…";
+      const visualSpinner = ora(visualSpinnerBaseText).start();
+      const visualHb = attachSpinnerHeartbeat(visualSpinner, {
+        baseText: visualSpinnerBaseText,
+      });
       try {
         const visualPaths = explicitPaths
           ?? (await discoverPagesFromSitemap(opts.prod, { sampleSize: visualPagesLimit })).all.map((p) => p.path);
@@ -545,6 +617,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         }
 
         if (tasks.length === 0) {
+          visualHb.stop();
           visualSpinner.succeed(`Visual diff: páginas já capturadas em flows (${visualPaths.length} alvos)`);
         } else {
           visualSpinner.text = `Visual diff: capturando ${tasks.length} screenshot(s) (${visualPaths.length} páginas × ${viewports.length} viewport(s) × 2 sides)…`;
@@ -586,17 +659,22 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
               /* tolerated */
             } finally {
               done++;
+              visualHb.bump();
               visualSpinner.text = `[visual] ${done}/${tasks.length} (último: ${task.path})`;
             }
           });
+          visualHb.stop();
           visualSpinner.succeed(`Visual diff: ${tasks.length} screenshot(s) capturado(s)`);
         }
       } catch (err) {
+        visualHb.stop();
         visualSpinner.warn(`Visual diff descoberta pulada: ${(err as Error).message}`);
       }
     }
 
+    currentPhase = "checks";
     spinner.start("Rodando checks…");
+    const checksHb = attachSpinnerHeartbeat(spinner, { baseText: "Rodando checks…" });
     const cacheDir = join(opts.output, "cache");
     const checkCtx: CheckContext = {
       prodPages: allPageCaptures.filter((p) => p.side === "prod"),
@@ -611,15 +689,21 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       viewports,
     };
     const checks = await runAllChecks(checkCtx);
+    partialChecks = checks; // ensure shutdown writes whatever we have
+    checksHb.stop();
     spinner.succeed(`Checks concluídos (${checks.length})`);
 
     const allIssues = checks.flatMap((c) => c.issues);
 
+    currentPhase = "llm-aggregate";
     spinner.start(
       isLlmAvailable()
         ? `Agregando issues via LLM (${providerLabel()}, timeout=${llmTimeoutSec}s)…`
         : "Agregando issues (modo offline — sem LLM keys)…",
     );
+    const llmHb = attachSpinnerHeartbeat(spinner, {
+      baseText: isLlmAvailable() ? "Agregando issues via LLM (Sonnet 4.6)…" : "Agregando issues (modo offline)…",
+    });
     const topIssues = await aggregateIssues({
       runId,
       prodUrl: opts.prod,
@@ -629,7 +713,9 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       checks,
       timeoutMs: llmTimeoutSec * 1000,
     });
+    llmHb.stop();
     spinner.succeed(`${topIssues.length} issue(s) priorizada(s)`);
+    currentPhase = "report";
 
     const verdict = computeVerdict(checks, allIssues);
     let baselineSection: Run["baseline"] | undefined;
@@ -715,8 +801,52 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     console.error(err);
     return 2;
   } finally {
+    clearTimeout(globalTimeoutTimer);
+    process.removeListener("SIGINT", onSignal);
+    process.removeListener("SIGTERM", onSignal);
     if (browser) await browser.close().catch(() => undefined);
   }
+}
+
+/**
+ * Build a partial Run object from whatever was collected so far. Issue #56:
+ * used by SIGINT/SIGTERM/--timeout shutdown path so the user always gets a
+ * report.html even after an interruption. Renderers should check `partial`
+ * before showing pass/fail verdicts as authoritative.
+ */
+function buildPartialRun(args: {
+  runId: string;
+  timestamp: string;
+  prodUrl: string;
+  candUrl: string;
+  flows: FlowName[];
+  viewports: Viewport[];
+  cep: string;
+  startedAt: number;
+  flowCaptures: FlowCapture[];
+  checks: CheckResult[];
+  partialReason: string;
+}): Run {
+  const allIssues = args.checks.flatMap((c) => c.issues);
+  const verdict = computeVerdict(args.checks, allIssues);
+  return {
+    schemaVersion: "0.1",
+    id: args.runId,
+    timestamp: args.timestamp,
+    prodUrl: args.prodUrl,
+    candUrl: args.candUrl,
+    flows: args.flows,
+    viewports: args.viewports,
+    cep: args.cep,
+    durationMs: Date.now() - args.startedAt,
+    verdict,
+    topIssues: [], // LLM aggregation didn't run
+    issues: allIssues,
+    checks: args.checks,
+    flowCaptures: args.flowCaptures,
+    partial: true,
+    partialReason: args.partialReason,
+  };
 }
 
 function computeVerdict(checks: CheckResult[], issues: Issue[]): Verdict {
