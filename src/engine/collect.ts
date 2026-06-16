@@ -441,6 +441,13 @@ export interface CaptureOptions {
   skipScreenshot?: boolean;
   /** Skip the heavy waitForLoadState('load'). Default false. Set true for vitals-only / cache-only captures. */
   fast?: boolean;
+  /**
+   * Skip every `waitForLoadState("networkidle")` inside the capture pipeline.
+   * Use this when targeting Vite/Webpack dev servers — their HMR / SSE
+   * channels never let networkidle fire, hanging the capture indefinitely.
+   * Issue #55. The Promise.race outer deadline still applies as a safety net.
+   */
+  noNetworkIdle?: boolean;
 }
 
 export async function capturePage(page: Page, opts: CaptureOptions): Promise<PageCapture> {
@@ -503,16 +510,22 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
         xRobotsTag = headers["x-robots-tag"] ?? null;
       }
       if (opts.fast) {
-        // Fast path: just settle a bit after DOM is ready, no full load wait, no scroll
-        await page
-          .waitForLoadState("networkidle", { timeout: Math.min(4_000, remaining()) })
-          .catch(() => undefined);
+        // Fast path: just settle a bit after DOM is ready, no full load wait, no scroll.
+        // Issue #55: skip networkidle entirely for dev servers (HMR/SSE keep the
+        // network busy forever).
+        if (!opts.noNetworkIdle) {
+          await page
+            .waitForLoadState("networkidle", { timeout: Math.min(4_000, remaining()) })
+            .catch(() => undefined);
+        }
         await page.waitForTimeout(Math.min(opts.settleMs ?? 1_200, remaining()));
       } else {
         dlog(opts.side, opts.viewport, `    capturePage: waitForLoadState('load') (cap=${Math.min(12_000, remaining())}ms)`);
         await page.waitForLoadState("load", { timeout: Math.min(12_000, remaining()) }).catch(() => undefined);
-        dlog(opts.side, opts.viewport, `    capturePage: waitForLoadState('networkidle') (cap=${Math.min(6_000, remaining())}ms)`);
-        await page.waitForLoadState("networkidle", { timeout: Math.min(6_000, remaining()) }).catch(() => undefined);
+        if (!opts.noNetworkIdle) {
+          dlog(opts.side, opts.viewport, `    capturePage: waitForLoadState('networkidle') (cap=${Math.min(6_000, remaining())}ms)`);
+          await page.waitForLoadState("networkidle", { timeout: Math.min(6_000, remaining()) }).catch(() => undefined);
+        }
         dlog(opts.side, opts.viewport, `    capturePage: settle (cap=${Math.min(opts.settleMs ?? 2_000, remaining())}ms)`);
         await page.waitForTimeout(Math.min(opts.settleMs ?? 2_000, remaining()));
 
@@ -547,7 +560,7 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
           // Post-scroll settle. With the new adaptive scroll already doing
           // inter-step skeleton waits, this is just a small grace period
           // for late analytics pings and trailing image decodes.
-          if (remaining() > 2_000) {
+          if (!opts.noNetworkIdle && remaining() > 2_000) {
             dlog(opts.side, opts.viewport, `    capturePage: post-scroll networkidle (cap=${Math.min(3_000, remaining())}ms)`);
             await page
               .waitForLoadState("networkidle", { timeout: Math.min(3_000, remaining()) })
