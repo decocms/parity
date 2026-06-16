@@ -200,6 +200,14 @@ export const Issue = z.object({
   evidence: z.array(EvidenceRef).optional(),
   reproduction: z.string().optional(),
   suggestedFix: z.string().optional(),
+  /**
+   * Marks issues where the check could not produce a confident verdict —
+   * e.g. one side's heuristic classifier fell back to "unknown" so we
+   * can't tell if the divergence is real or just an unclassified prod
+   * markup. Renderers should de-emphasize these (badge "inconclusive")
+   * and CI gates should treat them as informational. Issue #47.
+   */
+  inconclusive: z.boolean().optional(),
 });
 export type Issue = z.infer<typeof Issue>;
 

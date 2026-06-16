@@ -20,9 +20,15 @@ import type { CheckContext } from "./index.ts";
  *   `detectCartRevealMode` during step 7) and emits `critical` issues
  *   whenever prod and cand disagree per viewport.
  *
- * Severity is always `critical` (decisão explícita do usuário no plano
- *   da issue): divergência de modo sempre quebra o journey de inspeção
- *   do cart — não há cenário benigno.
+ * Severity:
+ *   - `critical` when BOTH sides were classified and the modes disagree
+ *     (the regression is real and structural).
+ *   - `medium` + `inconclusive: true` when one side is `unknown`
+ *     (issue #47): the heuristic classifier failed on one markup, so we
+ *     can't tell if the user-visible UX actually diverges. Surfacing
+ *     this as critical is a false positive — see issue #47 for the
+ *     miess case where UX was identical but prod-side classification
+ *     fell into the default bucket.
  */
 
 export function cartRevealModeDivergence(ctx: CheckContext): CheckResult {
@@ -30,6 +36,7 @@ export function cartRevealModeDivergence(ctx: CheckContext): CheckResult {
   const issues: Issue[] = [];
   let viewportsChecked = 0;
   let viewportsDivergent = 0;
+  let viewportsInconclusive = 0;
 
   for (const viewport of ctx.viewports) {
     const prodMode = readMode(ctx.prodFlows, viewport);
@@ -48,6 +55,24 @@ export function cartRevealModeDivergence(ctx: CheckContext): CheckResult {
     }
     if (prodMode === candMode) continue;
 
+    // Issue #47: when one side classifies as "unknown" we can't confidently
+    // call the divergence real. Downgrade severity + mark inconclusive so
+    // the report and CI gates can de-emphasize it.
+    const isInconclusive = prodMode === "unknown" || candMode === "unknown";
+    if (isInconclusive) {
+      viewportsInconclusive++;
+      issues.push({
+        id: `cart-reveal-mode:${viewport}:inconclusive`,
+        severity: "medium",
+        category: "functional",
+        check: "cart-reveal-mode-divergence",
+        inconclusive: true,
+        summary: `[${viewport}] classificação cart reveal inconclusa: prod=${prodMode}, cand=${candMode} — heurística falhou em um dos lados`,
+        details: inconclusiveDetail(prodMode, candMode, viewport),
+      });
+      continue;
+    }
+
     viewportsDivergent++;
     issues.push({
       id: `cart-reveal-mode:${viewport}:divergent`,
@@ -60,20 +85,59 @@ export function cartRevealModeDivergence(ctx: CheckContext): CheckResult {
   }
 
   const status: CheckResult["status"] =
-    viewportsDivergent > 0 ? "fail" : viewportsChecked > 0 ? "pass" : "skipped";
+    viewportsDivergent > 0
+      ? "fail"
+      : viewportsInconclusive > 0
+        ? "warn"
+        : viewportsChecked > 0
+          ? "pass"
+          : "skipped";
+
+  const summaryParts: string[] = [`${viewportsChecked} viewport(s) checados`];
+  if (viewportsDivergent > 0) summaryParts.push(`${viewportsDivergent} com markup divergente`);
+  if (viewportsInconclusive > 0)
+    summaryParts.push(`${viewportsInconclusive} inconclusivo(s) (prod=unknown ou cand=unknown)`);
+
+  // Top-level severity reflects the worst issue actually emitted. On
+  // pass/skipped (no issues), use "low" — carrying "critical" here was
+  // misleading per cubic review feedback.
+  const topSeverity: CheckResult["severity"] =
+    viewportsDivergent > 0 ? "critical" : viewportsInconclusive > 0 ? "medium" : "low";
 
   return {
     name: "cart-reveal-mode-divergence",
     status,
-    severity: "critical",
+    severity: topSeverity,
     durationMs: Date.now() - start,
     summary:
       viewportsChecked === 0
         ? "purchase-journey não rodou ou step 7 não classificou cart reveal mode"
-        : `${viewportsChecked} viewport(s) checados, ${viewportsDivergent} com markup divergente`,
+        : summaryParts.join(", "),
     issues,
-    data: { viewportsChecked, viewportsDivergent },
+    data: { viewportsChecked, viewportsDivergent, viewportsInconclusive },
   };
+}
+
+function inconclusiveDetail(
+  prod: NonNullable<StepCapture["cartRevealMode"]>,
+  cand: NonNullable<StepCapture["cartRevealMode"]>,
+  viewport: Viewport,
+): string {
+  const unknownSide = prod === "unknown" ? "prod" : "cand";
+  return [
+    `Viewport: ${viewport}`,
+    `Prod cart reveal mode: ${prod}`,
+    `Cand cart reveal mode: ${cand}`,
+    "",
+    `O classificador heurístico não conseguiu identificar o reveal mode no lado ${unknownSide}.`,
+    "Isso NÃO significa que existe divergência real — apenas que a heurística não cobre o markup específico.",
+    "",
+    "Para confirmar se há regressão de UX:",
+    "  1. Abra os screenshots pj-6 e pj-7 lado a lado em ambos viewports.",
+    "  2. Verifique se o drawer abre da mesma forma após add-to-cart.",
+    "  3. Se idêntico → false positive (relatar pra parity ajustar heurística).",
+    "  4. Se diferente → ensine o classificador via learned-selectors.json.",
+  ].join("\n");
 }
 
 function readMode(
