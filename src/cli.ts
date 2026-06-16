@@ -19,13 +19,14 @@ import { reportCommand } from "./commands/report.ts";
 import { runCommand } from "./commands/run.ts";
 import { sectionCommand } from "./commands/section.ts";
 import { serveCommand } from "./commands/serve.ts";
+import { getPackageVersion } from "./util/version.ts";
 
 const program = new Command();
 
 program
   .name("parity")
   .description("E2E parity validator for Fresh -> TanStack site migrations")
-  .version("0.0.0");
+  .version(getPackageVersion());
 
 program
   .command("run")
@@ -86,6 +87,12 @@ program
     "--accept-prod-quirks",
     "Demote prod-side cart-empty journey failures (VTEX session quirk) from failed to skipped. The cart-reveal-mode-divergence check still emits critical if prod/cand markup intents differ, so this flag never masks a real regression. See issue #12.",
     false,
+  )
+  .option(
+    "--llm-timeout <seconds>",
+    "Hard timeout for the LLM aggregation call (seconds). The run completes in offline mode if the LLM hangs past this. Default: 60.",
+    (v) => Number(v),
+    60,
   )
   .action(async (opts) => {
     const code = await runCommand(opts);

@@ -9,6 +9,12 @@ export interface AggregateInput {
   viewports: string[];
   flows: string[];
   checks: CheckResult[];
+  /**
+   * Hard timeout in ms for the LLM call. Default: client default (60s).
+   * Falls back to deterministic aggregation if the LLM doesn't return in
+   * time. Issue #52.
+   */
+  timeoutMs?: number;
 }
 
 const REPORT_ISSUES_TOOL = {
@@ -89,6 +95,7 @@ export async function aggregateIssues(input: AggregateInput): Promise<Issue[]> {
     systemPrompt: ISSUE_AGGREGATOR_SYSTEM_PROMPT,
     userText: `Analise os resultados abaixo e produza issues priorizadas via report_issues.\n\n${userContent}`,
     maxTokens: 4096,
+    timeoutMs: input.timeoutMs,
     tool: {
       name: REPORT_ISSUES_TOOL.name,
       description: REPORT_ISSUES_TOOL.description,
