@@ -324,7 +324,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   // helper is idempotent (a 2nd signal hard-exits 130).
   let currentPhase = "launch";
   let shuttingDown = false;
-  let partialChecks: CheckResult[] = [];
+  const partialChecks: CheckResult[] = [];
   const shutdown = (reason: string) => {
     if (shuttingDown) {
       // 2nd signal: hard exit. The 1st already kicked off cleanup.
@@ -688,8 +688,11 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       noCache: opts.cache === false,
       viewports,
     };
-    const checks = await runAllChecks(checkCtx);
-    partialChecks = checks; // ensure shutdown writes whatever we have
+    // Pass partialChecks as the out-array so a SIGINT mid-runAllChecks
+    // captures whatever already completed (review feedback on PR #59).
+    // The returned `checks` is the SAME array reference, so assigning
+    // back is unnecessary.
+    const checks = await runAllChecks(checkCtx, partialChecks);
     checksHb.stop();
     spinner.succeed(`Checks concluídos (${checks.length})`);
 

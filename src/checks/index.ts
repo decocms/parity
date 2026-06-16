@@ -157,8 +157,21 @@ export function getCheckByName(name: string): Check | undefined {
   return ALL_CHECKS_BY_NAME[name];
 }
 
-export async function runAllChecks(ctx: CheckContext): Promise<CheckResult[]> {
-  const results: CheckResult[] = [];
+/**
+ * Run every check sequentially and return the results array.
+ *
+ * `outResults`, if provided, is the SAME array that gets populated as
+ * each check completes — callers (e.g. `runCommand`'s shutdown path)
+ * hold a reference to it so a SIGINT/timeout mid-pipeline still has
+ * access to whatever checks finished before the interrupt. Without
+ * this, the partial report's `checks: []` would always be empty on the
+ * "Rodando checks…" phase. Review feedback on PR #59.
+ */
+export async function runAllChecks(
+  ctx: CheckContext,
+  outResults?: CheckResult[],
+): Promise<CheckResult[]> {
+  const results: CheckResult[] = outResults ?? [];
   for (const check of ALL_CHECKS) {
     const start = Date.now();
     try {
