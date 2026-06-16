@@ -19,7 +19,7 @@ import {
   saveLearned,
 } from "../learned/repo.ts";
 import { aggregateIssues } from "../llm/aggregate-issues.ts";
-import { isLlmAvailable } from "../llm/client.ts";
+import { isLlmAvailable, providerLabel } from "../llm/client.ts";
 import { discoverSelectorsFromUrl } from "../llm/discover-selectors.ts";
 import { fingerprintPdp, matchPdps } from "../llm/match-pdp.ts";
 import { renderHtmlReport } from "../report/render.ts";
@@ -107,6 +107,12 @@ export interface RunOptions {
    * a real regression. Issue #12.
    */
   acceptProdQuirks?: boolean;
+  /**
+   * Hard timeout in seconds for the LLM aggregation call. The run
+   * completes in offline mode if the LLM hangs past this. Default: 60.
+   * Issue #52.
+   */
+  llmTimeout?: number;
 }
 
 type PresetDefaults = Partial<Pick<RunOptions,
@@ -208,6 +214,16 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         console.log(chalk.yellow(`  cache wipe falhou: ${(err as Error).message}`));
       }
     }
+  }
+
+  // Print LLM mode banner so the user knows what the aggregation phase will
+  // attempt before it starts (issue #52). Online mode shows the provider +
+  // timeout so a hang past the budget is auditable from the log alone.
+  const llmTimeoutSec = Math.max(5, Math.floor(opts.llmTimeout ?? 60));
+  if (isLlmAvailable()) {
+    console.log(chalk.dim(`  llm: ${providerLabel()} (timeout=${llmTimeoutSec}s)`));
+  } else {
+    console.log(chalk.dim("  llm: offline (LLM keys ausentes — agregação heurística)"));
   }
 
   // Pre-flight: confirm both URLs respond before spending 10 minutes on a
@@ -589,7 +605,9 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     const allIssues = checks.flatMap((c) => c.issues);
 
     spinner.start(
-      isLlmAvailable() ? "Agregando issues via LLM (Sonnet 4.6)…" : "Agregando issues (modo offline)…",
+      isLlmAvailable()
+        ? `Agregando issues via LLM (${providerLabel()}, timeout=${llmTimeoutSec}s)…`
+        : "Agregando issues (modo offline — sem LLM keys)…",
     );
     const topIssues = await aggregateIssues({
       runId,
@@ -598,6 +616,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       viewports,
       flows,
       checks,
+      timeoutMs: llmTimeoutSec * 1000,
     });
     spinner.succeed(`${topIssues.length} issue(s) priorizada(s)`);
 
