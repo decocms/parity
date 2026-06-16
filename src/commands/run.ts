@@ -622,9 +622,12 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
                     skipScreenshot: true,
                     noNetworkIdle: targetIsDevServer,
                   }),
-                  new Promise<null>((resolve) =>
-                    setTimeout(() => resolve(null), PER_TASK_WALLCLOCK_MS),
-                  ),
+                  new Promise<null>((resolve) => {
+                    // .unref() so the timer never holds the event loop
+                    // open past the parent run's natural completion.
+                    const t = setTimeout(() => resolve(null), PER_TASK_WALLCLOCK_MS);
+                    t.unref?.();
+                  }),
                 ]);
                 if (!cap) {
                   // Wall-clock fired before capture returned. Skip; the next
