@@ -1153,6 +1153,7 @@ export function renderHtmlReport(run: Run, runDir: string): string {
       </div>
     </header>
     ${run.partial ? `<div style="background:#7c2d12;color:#fed7aa;padding:12px 24px;border-bottom:2px solid #ea580c;font-weight:600">⚠ Partial run — interrompido${run.partialReason ? ` (${esc(run.partialReason)})` : ""}. Verdict, top-issues e algumas seções podem estar incompletos.</div>` : ""}
+    ${renderTimingsBar(run)}
     <main class="app-main">
       <section class="panel" data-panel="summary">
         ${renderDashboard(run)}
@@ -1213,4 +1214,41 @@ export function renderHtmlReport(run: Run, runDir: string): string {
   <script>${REPORT_JS}</script>
 </body>
 </html>`;
+}
+
+/**
+ * Compact bar chart showing where the wall-clock went per phase. Sits
+ * under the header so it's the first thing the user sees — "the run took
+ * 6m12s, and 4 of those were the checks phase" beats opening the JSON.
+ */
+function renderTimingsBar(run: Run): string {
+  if (!run.timings || run.timings.phases.length === 0) return "";
+  const total = run.timings.totalMs;
+  const max = Math.max(...run.timings.phases.map((p) => p.durationMs));
+  const fmtMs = (ms: number): string => {
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    return `${Math.floor(s / 60)}m${(s % 60).toString().padStart(2, "0")}s`;
+  };
+  const rows = run.timings.phases
+    .map((p) => {
+      const pctOfMax = max > 0 ? (p.durationMs / max) * 100 : 0;
+      const pctOfTotal = total > 0 ? Math.round((p.durationMs / total) * 100) : 0;
+      return `<div style="display:flex;align-items:center;gap:8px;font-size:12px">
+        <span style="width:120px;color:#94a3b8">${esc(p.phase)}</span>
+        <span style="width:55px;text-align:right;font-variant-numeric:tabular-nums">${fmtMs(p.durationMs)}</span>
+        <span style="flex:1;background:#1e293b;border-radius:2px;height:8px;overflow:hidden">
+          <span style="display:block;height:100%;width:${pctOfMax.toFixed(1)}%;background:#3b82f6"></span>
+        </span>
+        <span style="width:32px;text-align:right;color:#64748b">${pctOfTotal}%</span>
+      </div>`;
+    })
+    .join("");
+  return `<div style="background:#0f172a;border-bottom:1px solid #1e293b;padding:12px 24px">
+    <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:8px">
+      <span style="font-weight:600;color:#e2e8f0">⏱ Run took ${fmtMs(total)}</span>
+      <span style="color:#64748b;font-size:12px">per-phase breakdown</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px">${rows}</div>
+  </div>`;
 }

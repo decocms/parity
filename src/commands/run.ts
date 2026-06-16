@@ -26,6 +26,7 @@ import { renderHtmlReport } from "../report/render.ts";
 import { serveRunAndBlock } from "./serve.ts";
 import { attachSpinnerHeartbeat } from "../util/heartbeat.ts";
 import { JsonlWriter, checkToJsonl } from "../storage/jsonl.ts";
+import { TimingRegistry, formatTimingsSummary } from "../util/timing.ts";
 import { compareToBaseline, loadBaseline } from "../storage/baselines.ts";
 import {
   createRunDir,
@@ -345,6 +346,16 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   const allFlowCaptures: FlowCapture[] = [];
   const allPageCaptures: PageCapture[] = [];
 
+  // Per-phase timing accumulator. Each phase boundary pushes its duration
+  // so the report header + console summary can show where the wall-clock
+  // actually went (observability follow-up to #56's `currentPhase`).
+  const timings = new TimingRegistry();
+  let phaseStart = performance.now();
+  const stampPhase = (label: string): void => {
+    timings.push(label, performance.now() - phaseStart);
+    phaseStart = performance.now();
+  };
+
   // Issue #56: install SIGINT/SIGTERM + global timeout so a Ctrl-C or a
   // wedged phase doesn't leave the user with no report. The shutdown
   // helper is idempotent (a 2nd signal hard-exits 130).
@@ -475,6 +486,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         await ctx.close();
       }
     }
+    stampPhase("collect");
     spinner.succeed("Coleta concluída");
 
     // LLM PDP cross-site matcher: confirm prod and cand opened the same product
@@ -601,6 +613,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         vitalsHb.stop();
         extraSpinner.warn(`vitals extras pulado: ${(err as Error).message}`);
       }
+      stampPhase("vitals-pages");
     }
 
     // Visual diff capture pass: home + sampled PLPs/PDPs from sitemap, with full-page screenshots
@@ -696,6 +709,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         visualHb.stop();
         visualSpinner.warn(`Visual diff descoberta pulada: ${(err as Error).message}`);
       }
+      stampPhase("visual-diff");
     }
 
     currentPhase = "checks";
@@ -720,6 +734,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     // back is unnecessary.
     const checks = await runAllChecks(checkCtx, partialChecks);
     checksHb.stop();
+    stampPhase("checks");
     spinner.succeed(`Checks concluídos (${checks.length})`);
 
     // Emit each completed check as a JSONL line for agents/scripts (#53).
@@ -751,6 +766,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       timeoutMs: llmTimeoutSec * 1000,
     });
     llmHb.stop();
+    stampPhase("llm-aggregate");
     spinner.succeed(`${topIssues.length} issue(s) priorizada(s)`);
     currentPhase = "report";
 
@@ -786,6 +802,9 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     const seoCheck = checks.find((c) => c.name === "seo-deep-audit");
     const seo = (seoCheck?.data?.seo as SeoSummary | undefined);
 
+    stampPhase("report");
+    const runTimings = timings.finalize();
+
     const run: Run = {
       schemaVersion: "0.1",
       id: runId,
@@ -804,6 +823,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       visualDiff,
       seo,
       baseline: baselineSection,
+      timings: runTimings,
     };
 
     writeRunReportJson(paths.runDir, run);
@@ -821,6 +841,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     });
 
     printSummary(run, paths.reportHtml, { promotedCount, deprecatedCount, platform });
+    console.log(`\n${formatTimingsSummary(runTimings)}`);
 
     if (opts.ci) {
       const blocking = allIssues.filter((i) => failOn.includes(i.severity));

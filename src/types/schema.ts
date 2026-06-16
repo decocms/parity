@@ -407,6 +407,18 @@ export const Run = z.object({
   partial: z.boolean().optional(),
   /** Phase where partial=true was set. Useful for triage. */
   partialReason: z.string().optional(),
+  /**
+   * Per-phase wall-clock timing for the run. Lets users see where the
+   * time actually went (e.g. checks took 60% of the run vs LLM 20%) so
+   * optimization is data-driven. Surfaced in the report header + CLI
+   * summary at end-of-run.
+   */
+  timings: z
+    .object({
+      totalMs: z.number(),
+      phases: z.array(z.object({ phase: z.string(), durationMs: z.number() })),
+    })
+    .optional(),
 });
 export type Run = z.infer<typeof Run>;
 
