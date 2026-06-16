@@ -100,26 +100,62 @@ interface EagerDetectArgs {
 }
 
 /**
- * "cand made zero lazy requests AND has at least as many <section> tags as
- * prod (or an explicit marker)" → eager-by-design. Conservative: returns
- * false unless both signals agree, so a genuine regression where cand
- * lost a section silently still fires `high`.
+ * Detect "intentional eager rendering" (`setAsyncRenderingConfig({
+ * respectCmsLazy: false })`). Review feedback on PR #63 surfaced that an
+ * earlier raw-`<section>`-count heuristic had two false-negative paths:
+ *
+ *  1. A regression that inlined the WRONG sections (stale build,
+ *     fallback layout, generic error page with header/footer/sidebar
+ *     wrappers) would still satisfy a tag-count threshold.
+ *  2. Sites with lazy-heavy prod have very few inline `<section>`
+ *     tags as baseline, collapsing the threshold to "any 4+ sections
+ *     passes" — trivially met by generic templates.
+ *
+ * Now we count nodes carrying deco-specific markers ONLY:
+ *  - `data-manifest-key` (the inline marker emitted by deco SSR)
+ *  - `data-deco-section` (alt marker)
+ *  - `data-deco` (broader marker; used as fallback signal)
+ *
+ * The explicit `data-deco-async-rendering="eager"` marker still wins
+ * as a 1-line opt-in for sites that want to skip the heuristic.
+ *
+ * Conservative bias: if NEITHER the explicit marker nor a meaningful
+ * count of deco markers is present, fall through to the normal `high`
+ * path so genuine regressions still surface.
  */
 function detectIntentionalEager(args: EagerDetectArgs): boolean {
   if (args.candSections.size > 0) return false; // cand IS doing lazy → not eager-by-design
   if (EAGER_RENDERING_MARKER.test(args.candHtml)) return true;
-  const candSectionCount = countSections(args.candHtml);
-  const prodSectionCount = countSections(args.prodHtml);
-  // Allow cand to be slightly under prod (e.g. prod has 1 extra lazy shelf)
-  // but the bulk of sections must be present inline.
-  return candSectionCount >= Math.floor(prodSectionCount * 0.8) && candSectionCount > 3;
+  const candDecoCount = countDecoMarkers(args.candHtml);
+  const prodDecoCount = countDecoMarkers(args.prodHtml);
+  // Require cand to have at least as many deco-marked nodes as prod's
+  // inline count. If prod's inline markers are too few to be useful as a
+  // baseline (e.g. prod is mostly lazy), demand at least 4 cand markers
+  // — that's enough to rule out a generic fallback layout.
+  const meaningfulProdBaseline = prodDecoCount >= 3;
+  if (meaningfulProdBaseline) {
+    return candDecoCount >= prodDecoCount;
+  }
+  return candDecoCount >= 4;
 }
 
-function countSections(html: string): number {
+/**
+ * Count nodes carrying deco-specific section markers. Prefers
+ * `data-manifest-key` (canonical for deco SSR). Falls through to
+ * `data-deco-section` and `data-deco` as alt forms emitted by some
+ * apps. Raw `<section>` tags are NOT counted — they include footers,
+ * accordions, etc. and would trivially inflate the count.
+ */
+function countDecoMarkers(html: string): number {
   if (!html) return 0;
-  // Count opening <section> tags. Cheap, no parser — good enough for an order-of-magnitude check.
-  const matches = html.match(/<section\b/gi);
-  return matches?.length ?? 0;
+  const manifestKey = (html.match(/data-manifest-key\s*=/gi) ?? []).length;
+  if (manifestKey > 0) return manifestKey;
+  const decoSection = (html.match(/data-deco-section\s*=/gi) ?? []).length;
+  if (decoSection > 0) return decoSection;
+  // Last-resort: `data-deco="..."` markers. Lower precision (catches
+  // analytics markers) but better than nothing on sites that don't
+  // emit manifest-key in SSR.
+  return (html.match(/data-deco\s*=/gi) ?? []).length;
 }
 
 function extractSectionIds(entries: NetworkEntry[]): Set<string> {
