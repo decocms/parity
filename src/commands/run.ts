@@ -27,6 +27,7 @@ import { serveRunAndBlock } from "./serve.ts";
 import { attachSpinnerHeartbeat } from "../util/heartbeat.ts";
 import { JsonlWriter, checkToJsonl } from "../storage/jsonl.ts";
 import { TimingRegistry, formatTimingsSummary } from "../util/timing.ts";
+import { isLocalhost } from "../util/localhost.ts";
 import { compareToBaseline, loadBaseline } from "../storage/baselines.ts";
 import {
   createRunDir,
@@ -520,8 +521,21 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       saveLearned(learned);
     }
 
-    // Extra vitals coverage: crawl additional pages from sitemap to enrich the Vitals tab
-    const vitalsPagesLimit = opts.vitalsPages ?? 10;
+    // Extra vitals coverage: crawl additional pages from sitemap to enrich the Vitals tab.
+    // Issue #55: a Vite/Webpack dev server (cand=localhost) never reaches
+    // networkidle because HMR/SSE keep the network busy. We auto-detect and
+    // (a) cap vitalsPages at 3 unless the user opted into more, (b) tell
+    // capturePage to skip networkidle entirely.
+    const candIsDevServer = isLocalhost(opts.cand);
+    const vitalsPagesDefault = candIsDevServer ? 3 : 10;
+    const vitalsPagesLimit = opts.vitalsPages ?? vitalsPagesDefault;
+    if (candIsDevServer && vitalsPagesLimit > 0) {
+      console.log(
+        chalk.dim(
+          `  cand=localhost detectado — vitals-pages=${vitalsPagesLimit}, networkidle desabilitado (issue #55)`,
+        ),
+      );
+    }
     if (browser && vitalsPagesLimit > 0) {
       currentPhase = "vitals-pages";
       const extraSpinner = ora("Coletando vitals em páginas extras…").start();
@@ -580,22 +594,44 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
           await runWithConcurrency(tasks, 4, async (task) => {
             const baseUrl = task.side === "prod" ? opts.prod : opts.cand;
             const fullUrl = new URL(task.path, baseUrl).toString();
+            // Issue #55: skip networkidle when targeting a dev server (the side
+            // that's localhost) — HMR / SSE keep network active indefinitely.
+            const targetIsDevServer = isLocalhost(baseUrl);
+            // Hard wall-clock per task so one wedged page can't stall the whole
+            // worker. capturePage already has its own outer Promise.race (60s
+            // outer deadline for non-fast captures, 35s for fast), but this
+            // belt-and-suspenders bound here ensures even a totally pathological
+            // case (browser hang BEFORE Promise.race installs) doesn't poison
+            // the spinner. Issue #55.
+            const PER_TASK_WALLCLOCK_MS = 35_000;
             try {
               const ctx = await newContext(browser!, { viewport: task.viewport, cohortCookieValue: "control", noCache: opts.bypassCache });
               await installVitalsCollector(ctx);
               const page = await ctx.newPage();
               try {
-                const cap = await capturePage(page, {
-                  url: fullUrl,
-                  side: task.side,
-                  viewport: task.viewport,
-                  screenshotPath: `${paths.screenshotsDir}/extra-${task.path.replace(/[/?&=]+/g, "_")}-${task.viewport}-${task.side}.png`,
-                  settleMs: 1200,
-                  timeoutMs: 20_000,
-                  fast: true,
-                  scrollToLoad: false,
-                  skipScreenshot: true,
-                });
+                const cap = await Promise.race<PageCapture | null>([
+                  capturePage(page, {
+                    url: fullUrl,
+                    side: task.side,
+                    viewport: task.viewport,
+                    screenshotPath: `${paths.screenshotsDir}/extra-${task.path.replace(/[/?&=]+/g, "_")}-${task.viewport}-${task.side}.png`,
+                    settleMs: 1200,
+                    timeoutMs: 20_000,
+                    fast: true,
+                    scrollToLoad: false,
+                    skipScreenshot: true,
+                    noNetworkIdle: targetIsDevServer,
+                  }),
+                  new Promise<null>((resolve) =>
+                    setTimeout(() => resolve(null), PER_TASK_WALLCLOCK_MS),
+                  ),
+                ]);
+                if (!cap) {
+                  // Wall-clock fired before capture returned. Skip; the next
+                  // task continues. Without this guard, a hung page kept the
+                  // worker busy until the outer global timeout fired.
+                  return;
+                }
                 allPageCaptures.push(cap);
                 // Also include in a synthetic FlowCapture so the Vitals tab picks it up
                 allFlowCaptures.push({
