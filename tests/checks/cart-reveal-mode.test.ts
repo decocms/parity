@@ -144,6 +144,76 @@ describe("cartRevealModeDivergence", () => {
     expect(r.status).toBe("skipped");
   });
 
+  describe("issue #47: prod=unknown downgrades to medium + inconclusive", () => {
+    it("emite MEDIUM + inconclusive quando prod=unknown e cand=inline-notification (caso miess)", () => {
+      const r = cartRevealModeDivergence(
+        ctx(
+          [flowWithStep7("prod", "desktop", "unknown")],
+          [flowWithStep7("cand", "desktop", "inline-notification")],
+          ["desktop"],
+        ),
+      );
+      expect(r.status).toBe("warn");
+      expect(r.issues).toHaveLength(1);
+      const issue = r.issues[0]!;
+      expect(issue.severity).toBe("medium");
+      expect(issue.inconclusive).toBe(true);
+      expect(issue.id).toBe("cart-reveal-mode:desktop:inconclusive");
+      expect(issue.summary).toMatch(/classificação cart reveal inconclusa/);
+    });
+
+    it("emite MEDIUM + inconclusive quando cand=unknown (heurística falhou na cand)", () => {
+      const r = cartRevealModeDivergence(
+        ctx(
+          [flowWithStep7("prod", "mobile", "hover-drawer")],
+          [flowWithStep7("cand", "mobile", "unknown")],
+        ),
+      );
+      expect(r.issues[0]!.severity).toBe("medium");
+      expect(r.issues[0]!.inconclusive).toBe(true);
+    });
+
+    it("ainda CRITICAL quando ambos foram classificados e divergem (não regrediu)", () => {
+      const r = cartRevealModeDivergence(
+        ctx(
+          [flowWithStep7("prod", "mobile", "click-drawer")],
+          [flowWithStep7("cand", "mobile", "click-navigate-cart")],
+        ),
+      );
+      expect(r.issues[0]!.severity).toBe("critical");
+      expect(r.issues[0]!.inconclusive).toBeUndefined();
+    });
+
+    it("PASS quando ambos são unknown (igual = igual, sem divergência)", () => {
+      const r = cartRevealModeDivergence(
+        ctx(
+          [flowWithStep7("prod", "mobile", "unknown")],
+          [flowWithStep7("cand", "mobile", "unknown")],
+        ),
+      );
+      expect(r.status).toBe("pass");
+      expect(r.issues).toHaveLength(0);
+    });
+
+    it("data.viewportsInconclusive conta inconclusivos separadamente de divergentes", () => {
+      const r = cartRevealModeDivergence(
+        ctx(
+          [
+            flowWithStep7("prod", "mobile", "unknown"),
+            flowWithStep7("prod", "desktop", "hover-drawer"),
+          ],
+          [
+            flowWithStep7("cand", "mobile", "click-drawer"),
+            flowWithStep7("cand", "desktop", "click-navigate-cart"),
+          ],
+          ["mobile", "desktop"],
+        ),
+      );
+      expect(r.data?.viewportsInconclusive).toBe(1);
+      expect(r.data?.viewportsDivergent).toBe(1);
+    });
+  });
+
   it("ignora step 7 sem cartRevealMode (capturado em run antigo / sem detector)", () => {
     const oldFlow: FlowCapture = {
       flow: "purchase-journey",
