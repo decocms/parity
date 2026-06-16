@@ -16,6 +16,8 @@ import type { CheckResult, Issue } from "../types/schema.ts";
  * non-backwards-compatible additions can be detected by consumers.
  */
 export interface JsonlMetadata {
+  /** Discriminator — lets consumers do a uniform `switch(record.type)`. */
+  type: "metadata";
   schemaVersion: "1.0";
   runId: string;
   prodUrl: string;
@@ -46,7 +48,24 @@ export interface JsonlFinalRecord {
   verdict: { status: "pass" | "warn" | "fail"; score: number };
 }
 
-export type JsonlRecord = JsonlMetadata | JsonlCheckRecord | JsonlFinalRecord;
+/**
+ * Emitted on the error path so consumers can distinguish "stream ended
+ * cleanly" (complete) from "run crashed" (error). The presence of a
+ * terminal record — either `complete` or `error` — is the only reliable
+ * EOF signal short of closing the file. Review feedback on PR #64.
+ */
+export interface JsonlErrorRecord {
+  type: "error";
+  runId: string;
+  message: string;
+  durationMs: number;
+}
+
+export type JsonlRecord =
+  | JsonlMetadata
+  | JsonlCheckRecord
+  | JsonlFinalRecord
+  | JsonlErrorRecord;
 
 export class JsonlWriter {
   private fd: number | null = null;

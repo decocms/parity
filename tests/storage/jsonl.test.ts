@@ -20,6 +20,7 @@ describe("JsonlWriter (issue #53: stream check results to agents)", () => {
     const w = new JsonlWriter(file);
 
     w.write({
+      type: "metadata",
       schemaVersion: "1.0",
       runId: "r1",
       prodUrl: "https://prod.example.com",
@@ -74,7 +75,7 @@ describe("JsonlWriter (issue #53: stream check results to agents)", () => {
     expect(lines).toHaveLength(4);
 
     const parsed = lines.map((l) => JSON.parse(l));
-    expect(parsed[0]).toMatchObject({ schemaVersion: "1.0", runId: "r1" });
+    expect(parsed[0]).toMatchObject({ type: "metadata", schemaVersion: "1.0", runId: "r1" });
     expect(parsed[1]).toMatchObject({ type: "check", check: "console-errors-baseline" });
     expect(parsed[2]).toMatchObject({ type: "check", issueCount: 1 });
     expect(parsed[3]).toMatchObject({ type: "complete", totalChecks: 2 });
@@ -84,6 +85,7 @@ describe("JsonlWriter (issue #53: stream check results to agents)", () => {
     const file = join(dir, "newlines.jsonl");
     const w = new JsonlWriter(file);
     w.write({
+      type: "metadata",
       schemaVersion: "1.0",
       runId: "r1",
       prodUrl: "p",
@@ -94,6 +96,20 @@ describe("JsonlWriter (issue #53: stream check results to agents)", () => {
     });
     w.close();
     expect(readFileSync(file, "utf8").endsWith("\n")).toBe(true);
+  });
+
+  it("emite type:'error' como terminal record alternativo a complete", () => {
+    const file = join(dir, "error.jsonl");
+    const w = new JsonlWriter(file);
+    w.write({
+      type: "error",
+      runId: "r1",
+      message: "boom",
+      durationMs: 1234,
+    });
+    w.close();
+    const parsed = JSON.parse(readFileSync(file, "utf8").trim());
+    expect(parsed).toMatchObject({ type: "error", message: "boom" });
   });
 
   it("close() é idempotente", () => {

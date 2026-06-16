@@ -325,6 +325,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   // metadata line lands before any check noise; closed in `finally`.
   const jsonl = opts.json ? new JsonlWriter(opts.json) : null;
   jsonl?.write({
+    type: "metadata",
     schemaVersion: "1.0",
     runId,
     prodUrl: opts.prod,
@@ -845,6 +846,15 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   } catch (err) {
     spinner.fail(`Erro: ${(err as Error).message}`);
     console.error(err);
+    // Emit a terminal error record so JSONL consumers can distinguish
+    // "stream still going" from "crashed" without parsing exit codes
+    // out-of-band. Review feedback on PR #64.
+    jsonl?.write({
+      type: "error",
+      runId,
+      message: (err as Error).message,
+      durationMs: Date.now() - startedAt,
+    });
     return 2;
   } finally {
     clearTimeout(globalTimeoutTimer);
