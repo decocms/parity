@@ -219,7 +219,18 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   // Print LLM mode banner so the user knows what the aggregation phase will
   // attempt before it starts (issue #52). Online mode shows the provider +
   // timeout so a hang past the budget is auditable from the log alone.
-  const llmTimeoutSec = Math.max(5, Math.floor(opts.llmTimeout ?? 60));
+  // Validate --llm-timeout: reject NaN explicitly (commander hands NaN
+  // through unchanged when the user types `--llm-timeout foo`, and
+  // `setTimeout(NaN)` fires immediately, which would silently downgrade
+  // the timeout to ~5s). Review feedback on PR #58.
+  const llmTimeoutRaw = opts.llmTimeout ?? 60;
+  if (!Number.isFinite(llmTimeoutRaw)) {
+    console.error(
+      chalk.red(`  --llm-timeout inválido: "${opts.llmTimeout}" não é um número`),
+    );
+    return 2;
+  }
+  const llmTimeoutSec = Math.max(5, Math.floor(llmTimeoutRaw));
   if (isLlmAvailable()) {
     console.log(chalk.dim(`  llm: ${providerLabel()} (timeout=${llmTimeoutSec}s)`));
   } else {
