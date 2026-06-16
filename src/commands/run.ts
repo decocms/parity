@@ -25,6 +25,7 @@ import { fingerprintPdp, matchPdps } from "../llm/match-pdp.ts";
 import { renderHtmlReport } from "../report/render.ts";
 import { serveRunAndBlock } from "./serve.ts";
 import { attachSpinnerHeartbeat } from "../util/heartbeat.ts";
+import { JsonlWriter, checkToJsonl } from "../storage/jsonl.ts";
 import { compareToBaseline, loadBaseline } from "../storage/baselines.ts";
 import {
   createRunDir,
@@ -119,6 +120,17 @@ export interface RunOptions {
    * a partial report and exits 130. Default: 30. Issue #56.
    */
   timeout?: number;
+  /**
+   * Alias for `flows` when only one flow is being run. CLI sugar that
+   * commander maps before `runCommand` is invoked. Issue #53.
+   */
+  flow?: string;
+  /**
+   * Stream check results as JSON-Lines to a file path or `-` for stdout.
+   * Lets agents/scripts consume each check as it completes, instead of
+   * scraping the HTML report. Issue #53.
+   */
+  json?: string;
 }
 
 type PresetDefaults = Partial<Pick<RunOptions,
@@ -308,6 +320,20 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   const paths = createRunDir(opts.output, runId);
   const startedAt = Date.now();
   const timestamp = new Date().toISOString();
+
+  // Issue #53: JSON-Lines streaming for agents/scripts. Opened now so the
+  // metadata line lands before any check noise; closed in `finally`.
+  const jsonl = opts.json ? new JsonlWriter(opts.json) : null;
+  jsonl?.write({
+    type: "metadata",
+    schemaVersion: "1.0",
+    runId,
+    prodUrl: opts.prod,
+    candUrl: opts.cand,
+    flows: flows as string[],
+    viewports: viewports as string[],
+    timestamp,
+  });
 
   console.log(chalk.bold(`\n  parity run ${runId}`));
   console.log(chalk.dim(`  prod: ${opts.prod}`));
@@ -696,6 +722,14 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     checksHb.stop();
     spinner.succeed(`Checks concluídos (${checks.length})`);
 
+    // Emit each completed check as a JSONL line for agents/scripts (#53).
+    // Done in a batch here (vs streaming during runAllChecks) to keep this
+    // PR minimally invasive — the writer is buffered + flushed per line so
+    // consumers still see them in order.
+    if (jsonl) {
+      for (const c of checks) jsonl.write(checkToJsonl(runId, c));
+    }
+
     const allIssues = checks.flatMap((c) => c.issues);
 
     currentPhase = "llm-aggregate";
@@ -776,6 +810,16 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     const html = renderHtmlReport(run, paths.runDir);
     writeRunReportHtml(paths.runDir, html);
 
+    // Final JSONL record so consumers know the stream ended cleanly (#53).
+    jsonl?.write({
+      type: "complete",
+      runId,
+      totalDurationMs: Date.now() - startedAt,
+      totalChecks: checks.length,
+      totalIssues: allIssues.length,
+      verdict: { status: verdict.status, score: verdict.score },
+    });
+
     printSummary(run, paths.reportHtml, { promotedCount, deprecatedCount, platform });
 
     if (opts.ci) {
@@ -802,12 +846,22 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   } catch (err) {
     spinner.fail(`Erro: ${(err as Error).message}`);
     console.error(err);
+    // Emit a terminal error record so JSONL consumers can distinguish
+    // "stream still going" from "crashed" without parsing exit codes
+    // out-of-band. Review feedback on PR #64.
+    jsonl?.write({
+      type: "error",
+      runId,
+      message: (err as Error).message,
+      durationMs: Date.now() - startedAt,
+    });
     return 2;
   } finally {
     clearTimeout(globalTimeoutTimer);
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onSignal);
     if (browser) await browser.close().catch(() => undefined);
+    jsonl?.close();
   }
 }
 
