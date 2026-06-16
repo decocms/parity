@@ -100,7 +100,19 @@ program
     (v) => Number(v),
     30,
   )
+  .option(
+    "--flow <name>",
+    "Alias for --flows when running a single flow (e.g. --flow cart). Issue #53.",
+  )
+  .option(
+    "--json <path|->",
+    "Emit JSON-Lines (one line per check) to the given file path, or '-' for stdout. Schema versioned via leading metadata line. Issue #53.",
+  )
   .action(async (opts) => {
+    // --flow is just sugar for --flows with a single value
+    if (opts.flow) {
+      opts.flows = opts.flow;
+    }
     const code = await runCommand(opts);
     process.exit(code);
   });
