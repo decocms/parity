@@ -96,4 +96,169 @@ describe("lazySectionPresence", () => {
     );
     expect(r.status).toBe("pass");
   });
+
+  describe("issue #46: intentional eager rendering (respectCmsLazy:false)", () => {
+    const prodLazy = [
+      net({ decoSection: "Hero" }),
+      net({ decoSection: "Shelf" }),
+      net({ decoSection: "Newsletter" }),
+    ];
+    // Cand renders deco sections inline via data-manifest-key (the canonical
+    // deco SSR marker). Review feedback on PR #63 — raw `<section>` count
+    // was too weak; counting deco-marked nodes prevents the false-negative
+    // path where a fallback layout's footer/sidebar would pass.
+    const eagerCandHtml = `<html><body>
+      <div data-manifest-key="site/sections/Hero.tsx">Hero</div>
+      <div data-manifest-key="site/sections/Banner.tsx">Banner</div>
+      <div data-manifest-key="site/sections/Shelf.tsx">Shelf</div>
+      <div data-manifest-key="site/sections/NewArrivals.tsx">NewArrivals</div>
+      <div data-manifest-key="site/sections/Newsletter.tsx">Newsletter</div>
+      <div data-manifest-key="site/sections/Footer.tsx">Footer</div>
+    </body></html>`;
+    const prodHtmlWithSections = `<html><body>
+      <div data-manifest-key="site/sections/Hero.tsx">Hero</div>
+      <div data-manifest-key="site/sections/Shelf.tsx">Shelf</div>
+      <div data-manifest-key="site/sections/Footer.tsx">Footer</div>
+    </body></html>`;
+
+    it("downgrade pra low + intentional-eager-rendering quando cand renderiza tudo inline", () => {
+      const r = lazySectionPresence(
+        makeContext({
+          prodPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "prod",
+              network: prodLazy,
+              html: prodHtmlWithSections,
+            }),
+          ],
+          candPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "cand",
+              network: [], // zero lazy requests
+              html: eagerCandHtml,
+            }),
+          ],
+        }),
+      );
+      expect(r.status).toBe("warn"); // não fail
+      const eagerIssue = r.issues.find((i) => i.id.includes("intentional-eager"));
+      expect(eagerIssue).toBeDefined();
+      expect(eagerIssue?.severity).toBe("low");
+      expect(eagerIssue?.summary).toMatch(/intentional-eager-rendering/);
+      // o "lazy:missing" tradicional NÃO deve aparecer junto
+      expect(r.issues.find((i) => i.id.includes("lazy:missing"))).toBeUndefined();
+    });
+
+    it("respeita marker explícito data-deco-async-rendering=eager mesmo com poucas sections", () => {
+      const r = lazySectionPresence(
+        makeContext({
+          prodPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "prod",
+              network: prodLazy,
+              html: prodHtmlWithSections,
+            }),
+          ],
+          candPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "cand",
+              network: [],
+              html: `<html data-deco-async-rendering="eager"><body><section>Only</section></body></html>`,
+            }),
+          ],
+        }),
+      );
+      const eagerIssue = r.issues.find((i) => i.id.includes("intentional-eager"));
+      expect(eagerIssue?.severity).toBe("low");
+    });
+
+    it("NÃO downgrade quando cand inlina <section> genéricos sem markers deco (false-negative guard)", () => {
+      // Cand has 5 generic <section> tags but ZERO data-manifest-key — this
+      // is the regression case the original heuristic missed (PR #63 review).
+      const r = lazySectionPresence(
+        makeContext({
+          prodPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "prod",
+              network: prodLazy,
+              html: prodHtmlWithSections,
+            }),
+          ],
+          candPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "cand",
+              network: [],
+              html: `<html><body>
+                <section>fallback header</section>
+                <section>nav</section>
+                <section>error message</section>
+                <section>sidebar</section>
+                <section>fallback footer</section>
+              </body></html>`,
+            }),
+          ],
+        }),
+      );
+      expect(r.status).toBe("fail");
+      expect(r.issues.find((i) => i.id.includes("lazy:missing"))?.severity).toBe("high");
+      expect(r.issues.find((i) => i.id.includes("intentional-eager"))).toBeUndefined();
+    });
+
+    it("ainda HIGH quando cand não tem sections inline (regressão genuína)", () => {
+      const r = lazySectionPresence(
+        makeContext({
+          prodPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "prod",
+              network: prodLazy,
+              html: prodHtmlWithSections,
+            }),
+          ],
+          candPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "cand",
+              network: [],
+              html: "<html><body><p>nothing here</p></body></html>",
+            }),
+          ],
+        }),
+      );
+      expect(r.status).toBe("fail");
+      expect(r.issues.find((i) => i.id.includes("lazy:missing"))?.severity).toBe("high");
+    });
+
+    it("NÃO downgrade quando cand TAMBÉM fez lazy requests (não é eager-by-design)", () => {
+      const r = lazySectionPresence(
+        makeContext({
+          prodPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "prod",
+              network: prodLazy,
+              html: prodHtmlWithSections,
+            }),
+          ],
+          candPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "cand",
+              network: [net({ decoSection: "Hero" })], // pelo menos 1 lazy
+              html: eagerCandHtml,
+            }),
+          ],
+        }),
+      );
+      expect(r.status).toBe("fail");
+      const missing = r.issues.find((i) => i.id.includes("lazy:missing"));
+      expect(missing?.severity).toBe("high");
+    });
+  });
 });
