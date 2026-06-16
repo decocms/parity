@@ -105,14 +105,14 @@ export function scanForPictureMissingDims(page: PageCapture): string[] {
 
 /**
  * True when the `<img>` has *any* form of layout-reservation hint that
- * the browser can use to avoid CLS. We accept four signals (review
+ * the browser can use to avoid CLS. We accept three signals (review
  * feedback on PR #65):
  *
  *  1. `width` AND `height` HTML attributes (classic, explicit).
- *  2. Inline `style="aspect-ratio: …"` (modern CSS path that the
- *     suggestedFix even recommends — flagging this would be ironic).
+ *  2. Inline `style="aspect-ratio: …"` (modern CSS path; case-
+ *     insensitive match. The check's own `suggestedFix` recommends
+ *     this approach — flagging it would be ironic).
  *  3. Inline `style="width:…; height:…"` (functionally equivalent to (1)).
- *  4. `style="aspect-ratio: …"` with whitespace variants.
  *
  * Empty-string attrs (e.g. `width=""`) are treated as MISSING — they
  * don't reserve space either.
