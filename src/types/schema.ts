@@ -399,6 +399,14 @@ export const Run = z.object({
       }),
     })
     .optional(),
+  /**
+   * True when the run was interrupted (SIGINT, --timeout) and the report
+   * was written before reaching the natural end of the pipeline. Renderers
+   * should show a banner so the user knows the verdict is partial. Issue #56.
+   */
+  partial: z.boolean().optional(),
+  /** Phase where partial=true was set. Useful for triage. */
+  partialReason: z.string().optional(),
 });
 export type Run = z.infer<typeof Run>;
 

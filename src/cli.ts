@@ -94,6 +94,12 @@ program
     (v) => Number(v),
     60,
   )
+  .option(
+    "--timeout <minutes>",
+    "Hard wall-clock cap for the whole run (minutes). On expiry, parity writes a partial report and exits 130. Default: 30. Issue #56.",
+    (v) => Number(v),
+    30,
+  )
   .action(async (opts) => {
     const code = await runCommand(opts);
     process.exit(code);
