@@ -31,6 +31,7 @@ import { cookieCepModalCls } from "./cookie-cep-modal-cls.ts";
 import { pdpGalleryRelated } from "./pdp-gallery-related.ts";
 import { footerLinksHealth } from "./footer-links-health.ts";
 import { loginFlow } from "./login-flow.ts";
+import { pictureMissingDims } from "./picture-missing-dims.ts";
 
 export interface CheckContext {
   /** Page captures from prod side, across all flows/viewports */
@@ -86,6 +87,7 @@ export const ALL_CHECKS: Check[] = [
   pdpGalleryRelated,
   footerLinksHealth,
   loginFlow,
+  pictureMissingDims,
 ];
 
 /**
@@ -122,6 +124,7 @@ export const ALL_CHECKS_BY_NAME: Record<string, Check> = {
   "pdp-gallery-related": pdpGalleryRelated,
   "footer-links-health": footerLinksHealth,
   "login-flow": loginFlow,
+  "picture-missing-dims": pictureMissingDims,
 };
 
 /**
