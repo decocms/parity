@@ -20,6 +20,7 @@ import {
 } from "../learned/repo.ts";
 import { aggregateIssues } from "../llm/aggregate-issues.ts";
 import { disableLlm, isLlmAvailable, providerLabel, setForcedProvider, setLlmLanguage } from "../llm/client.ts";
+import { disableInteractive, isInteractiveMode } from "../engine/interactive-selector-prompt.ts";
 import { applyModelOverrides, parseFeatureOverrides, type ModelTier, type Provider } from "../llm/models.ts";
 import { discoverSelectorsFromUrl } from "../llm/discover-selectors.ts";
 import { fingerprintPdp, matchPdps } from "../llm/match-pdp.ts";
@@ -154,6 +155,11 @@ export interface RunOptions {
   llmTierDefault?: "haiku" | "sonnet" | "opus";
   /** Force every LLM call to use this exact model ID. Issue #66. */
   llmModelDefault?: string;
+  /**
+   * Disable the interactive selector prompt that auto-fires when running
+   * in a TTY without an LLM provider. Set by `--no-interactive`. Issue #72.
+   */
+  interactive?: boolean;
 }
 
 type PresetDefaults = Partial<Pick<RunOptions,
@@ -275,6 +281,9 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     console.log(chalk.dim(`  preset: ${rawOpts.preset}`));
   }
   if (opts.pt) setLlmLanguage("pt");
+  // commander stores --no-interactive as `interactive: false`. We only act
+  // on the explicit false; undefined leaves auto-detect alone. Issue #72.
+  if (opts.interactive === false) disableInteractive();
   const llmCfgErr = applyLlmOptions(opts);
   if (llmCfgErr) {
     console.error(chalk.red(`  ${llmCfgErr}`));
@@ -322,6 +331,13 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     console.log(chalk.dim(`  llm: ${providerLabel()} (timeout=${llmTimeoutSec}s)`));
   } else {
     console.log(chalk.dim("  llm: offline (LLM keys ausentes — agregação heurística)"));
+  }
+  if (isInteractiveMode()) {
+    console.log(
+      chalk.dim(
+        "  interactive: enabled — TTY + no LLM. Missing selectors will pause to prompt (disable with --no-interactive). Issue #72.",
+      ),
+    );
   }
 
   // Pre-flight: confirm both URLs respond before spending 10 minutes on a
