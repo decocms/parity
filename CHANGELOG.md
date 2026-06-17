@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.5](https://github.com/decocms/parity/compare/v0.11.4...v0.11.5) (2026-06-17)
+
+### Fixed
+
+* **Variant clicks now wait for navigation.** Deco TanStack PDPs render size/color pickers as `<a href="<product>/p?skuId=N">` links — clicking navigates to a different SKU URL. The previous `click + waitForTimeout(400)` ran add-to-cart against the pre-nav page where the variant was still "unselected". New `clickAndMaybeWait` helper races the click with `page.waitForNavigation` so the flow runs against the post-navigation page when it happens, and falls through when it doesn't (button-radio case).
+* **`validateAddToCart` now uses `cartOpenedIndicator` selectors.** The new selector key from 0.11.4 (`[aria-label='Fechar notificação']` / `[aria-label='Fechar carrinho']` + generic role fallbacks) is now actually wired into the post-click drawer-open probe, so Deco TanStack notifications correctly mark add-to-cart as `ok` via the `drawer-open` signal.
+
+### Added
+
+* **Landing-page detection before LLM recovery on missing buy button.** When step 6 (add-to-cart) can't find a buy button, the runner now checks whether the page even looks like a PDP (schema:Product JSON-LD, `<form>` with button, price text, variant inputs). If fewer than 2 PDP signals fire, the step is skipped with `PDP appears to be a landing page (...)` instead of burning LLM recovery budget on a page that has nothing to recover. Reasons are surfaced in the skip note so the user immediately knows why.
+
+### Verification (live against bagaggio)
+
+| Version | Steps reached on cand |
+| --- | --- |
+| 0.11.2 and earlier | 3/9 (stops at enter-pdp) |
+| 0.11.3 | 4/9 (stops at select-variant) |
+| 0.11.4 | 6/9 (stops at add-to-cart) |
+| **0.11.5** | **9/9** (reaches go-checkout) |
+
 ## [0.11.4](https://github.com/decocms/parity/compare/v0.11.3...v0.11.4) (2026-06-17)
 
 ### Added
