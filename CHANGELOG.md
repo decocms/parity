@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.11](https://github.com/decocms/parity/compare/v0.11.10...v0.11.11) (2026-06-17)
+
+### Fixed
+
+* **Runtime auto-install was incomplete in 0.11.10.** The 0.11.10 install path ran `npx --yes playwright install chromium` and reported success, but Playwright 1.49+ launches `chromium-headless-shell` for `headless: true` — that's a *separate* binary download. The retry still failed with `Executable doesn't exist at .../chrome-headless-shell` and the user saw the friendly fallback message even though we tried to fix it. Live-reproduced against bagaggio.
+* **Now installs both `chromium` AND `chromium-headless-shell`** so `parity run` works headless without manual intervention.
+* **Uses the bundled Playwright CLI, not `npx --yes playwright`.** `npx --yes` may fetch a *different* Playwright version into its cache, and the binaries it downloads may not match the version `parity` actually launches — so even a successful install can leave the retry failing. We now resolve `playwright/cli.js` via `createRequire` against the local `node_modules` and spawn `node <local-cli> install chromium chromium-headless-shell` — guaranteed version-matched. Falls back to `npx` only if the local resolution fails.
+* **Validated locally end-to-end**: cleared `~/Library/Caches/ms-playwright`, ran `parity audit`, both binaries downloaded (`chromium-1217` + `chromium_headless_shell-1217`), audit completed successfully — no manual `npx playwright install` needed.
+
 ## [0.11.10](https://github.com/decocms/parity/compare/v0.11.9...v0.11.10) (2026-06-17)
 
 ### Fixed

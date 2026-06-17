@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { dirname, resolve as resolvePath } from "node:path";
 import type { Browser, BrowserContext, BrowserContextOptions } from "playwright";
 import { chromium, devices } from "playwright";
 import type { Viewport } from "../types/schema.ts";
@@ -121,11 +123,39 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Browser> 
 }
 
 function installChromiumSync(): number {
-  const result = spawnSync("npx", ["--yes", "playwright", "install", "chromium"], {
+  // Playwright 1.49+ launches `chromium-headless-shell` for `headless: true`
+  // by default — that's a *separate* download from `chromium`. Installing
+  // only `chromium` leaves headless launches failing with
+  // "Executable doesn't exist at .../chrome-headless-shell". Install both.
+  //
+  // We prefer the locally-bundled playwright CLI over `npx --yes playwright`:
+  // `npx` may fetch a *different* playwright version into its cache, and the
+  // binary downloaded there may not match the version parity actually runs
+  // against, so the post-install retry still fails.
+  const localCli = resolveLocalPlaywrightCli();
+  const cmd = localCli
+    ? { command: process.execPath, args: [localCli, "install", "chromium", "chromium-headless-shell"] }
+    : { command: "npx", args: ["--yes", "playwright", "install", "chromium", "chromium-headless-shell"] };
+  const result = spawnSync(cmd.command, cmd.args, {
     stdio: "inherit",
     env: process.env,
   });
   return result.status ?? 1;
+}
+
+function resolveLocalPlaywrightCli(): string | null {
+  try {
+    const req = createRequire(import.meta.url);
+    // `playwright/cli.js` is not in package `exports`, so we resolve via
+    // package.json and join the `bin` path manually.
+    const pkgJsonPath = req.resolve("playwright/package.json");
+    const pkg = req("playwright/package.json") as { bin?: string | Record<string, string> };
+    const binEntry = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.playwright;
+    if (!binEntry) return null;
+    return resolvePath(dirname(pkgJsonPath), binEntry);
+  } catch {
+    return null;
+  }
 }
 
 function missingBrowserError(cause: unknown): Error {
@@ -133,8 +163,8 @@ function missingBrowserError(cause: unknown): Error {
   return new Error(
     [
       "Playwright's Chromium binary is not installed.",
-      "Run: npx playwright install chromium",
-      "Or set PARITY_SKIP_PLAYWRIGHT_INSTALL=0 and rerun `parity` to auto-install.",
+      "Run: npx playwright install chromium chromium-headless-shell",
+      "Or unset PARITY_SKIP_PLAYWRIGHT_INSTALL and rerun `parity` to auto-install.",
       "",
       `Original error: ${original}`,
     ].join("\n"),
