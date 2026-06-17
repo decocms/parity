@@ -294,6 +294,20 @@ export const REPORT_CSS = `
   .card h2 { font-size: 15px; margin: 0 0 12px 0; font-weight: 600; }
   .card .hint { font-size: 12px; color: var(--text-muted); margin-top: -6px; margin-bottom: 12px; }
 
+  /* Tab-help banner — one-line description shown at the top of each tab.
+     Issue #73. Kept low-contrast so it never competes with the actual
+     content. */
+  .tab-help {
+    background: var(--surface-overlay);
+    border-left: 3px solid var(--accent-action);
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
   /* Tables */
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-default); }

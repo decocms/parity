@@ -20,6 +20,36 @@ function renderIssue(issue: Issue, runDir: string): string {
   return renderIssueHtml(issue, { runDir });
 }
 
+/**
+ * One-line description shown at the top of each report tab so a fresh
+ * reader (or an agent) immediately knows what the tab covers — without
+ * having to infer from the data. Issue #73.
+ */
+const TAB_HELP: Record<string, string> = {
+  summary: "Migration health at a glance. Score, blocking issues, and a tile per check category. Click a tile to jump to the corresponding tab.",
+  visualdiff: "Per-page pixel + semantic diff between prod and cand screenshots. Pages that didn't change are auto-skipped via the cross-run cache. LLM Vision interprets the heatmap when ANTHROPIC_API_KEY or a local claude CLI is available.",
+  seo: "Robots.txt, sitemap, and per-page meta-tag parity between prod and cand. Red rows diverge. Catches noindex / canonical / og:* / JSON-LD regressions that silently destroy organic traffic.",
+  sidebyside: "Live mobile iframe of prod vs cand, with synchronized scroll. Requires `parity serve <runId>` to bypass X-Frame-Options. Mobile viewport is forced via the proxy (Issue #70).",
+  issues: "Flat list of every issue surfaced by any check, sorted by severity. The Top issues block on the Dashboard is the LLM-aggregated, deduped version of this list.",
+  vitals: "Web Vitals (LCP / FCP / TTFB / INP / CLS) per page, prod vs cand. Δ green = cand better; Δ red = regression. Mobile is the default measurement viewport.",
+  cache: "Cache hit rate and missed opportunities on cand. Opportunities = static assets with hashed URLs returning MISS — adding a cache rule for them is usually free perf.",
+  checks: "Every check that ran in this run, with pass/fail status, duration, and one-line summary. Useful for narrowing down which check produced a confusing issue.",
+  prompt: "Copy-pasteable Markdown prompt that you can drop into any LLM (Claude, ChatGPT, etc.) to get a prioritized fix list. Includes issue context + migration-specific hints.",
+  pages: "Every URL parity actually captured during the run, with status code and viewport. Use this to confirm coverage when a check reports something unexpected.",
+  console: "JS console errors and network failures that fired on cand but not on prod. New errors are usually hydration mismatches, missing API endpoints, or broken third-party scripts.",
+  network: "Every request captured on cand: type, status, size, cache decision. Sortable + filterable. Use this to spot bundle bloat or unexpected third-party calls.",
+  diff: "Delta of this run vs the saved baseline (resolved / new / regressions). Only visible when `--baseline <name>` is loaded (Issue #68).",
+};
+
+/**
+ * Render the small info-box shown at the top of each tab panel. Kept
+ * minimal so it never competes with the actual content for attention.
+ */
+function tabHelp(text: string | undefined): string {
+  if (!text) return "";
+  return `<div class="tab-help">${esc(text)}</div>`;
+}
+
 function renderDashboard(run: Run): string {
   const v = run.verdict;
   const statusLabel = v.status === "pass" ? "Excellent" : v.status === "warn" ? "Warnings" : "Critical";
@@ -1162,42 +1192,54 @@ export function renderHtmlReport(run: Run, runDir: string): string {
     ${renderTimingsBar(run)}
     <main class="app-main">
       <section class="panel" data-panel="summary">
+        ${tabHelp(TAB_HELP.summary)}
         ${renderDashboard(run)}
       </section>
       <section class="panel" data-panel="visualdiff">
+        ${tabHelp(TAB_HELP.visualdiff)}
         ${renderVisualDiffPanel(run, runDir)}
       </section>
       <section class="panel" data-panel="seo">
+        ${tabHelp(TAB_HELP.seo)}
         ${renderSeoPanel(run, runDir)}
       </section>
       <section class="panel" data-panel="sidebyside">
+        ${tabHelp(TAB_HELP.sidebyside)}
         ${renderSideBySidePanel(run)}
       </section>
       <section class="panel" data-panel="issues">
+        ${tabHelp(TAB_HELP.issues)}
         ${renderIssuesPanel(run, runDir)}
       </section>
       <section class="panel" data-panel="vitals">
+        ${tabHelp(TAB_HELP.vitals)}
         ${renderVitalsPanel(run)}
       </section>
       <section class="panel" data-panel="cache">
+        ${tabHelp(TAB_HELP.cache)}
         ${renderCachePanel(run)}
       </section>
       <section class="panel" data-panel="checks">
+        ${tabHelp(TAB_HELP.checks)}
         ${renderChecksTable(run)}
       </section>
       <section class="panel" data-panel="prompt">
+        ${tabHelp(TAB_HELP.prompt)}
         ${renderPromptPanel(run)}
       </section>
       <section class="panel" data-panel="pages">
+        ${tabHelp(TAB_HELP.pages)}
         ${renderPagesTable(run)}
       </section>
       <section class="panel" data-panel="console">
+        ${tabHelp(TAB_HELP.console)}
         ${renderConsolePanel(run, runDir)}
       </section>
       <section class="panel" data-panel="network">
+        ${tabHelp(TAB_HELP.network)}
         ${renderNetworkPanel(run)}
       </section>
-      ${run.baseline ? `<section class="panel" data-panel="diff">${renderDiffPanel(run, runDir)}</section>` : ""}
+      ${run.baseline ? `<section class="panel" data-panel="diff">${tabHelp(TAB_HELP.diff)}${renderDiffPanel(run, runDir)}</section>` : ""}
     </main>
   </div>
   <div class="help-modal" id="help-modal">
