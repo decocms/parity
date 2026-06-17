@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.6](https://github.com/decocms/parity/compare/v0.11.5...v0.11.6) (2026-06-17)
+
+### Added
+
+* **New `plp-pagination` check.** Tests that `?page=2` and `?page=3` of every captured PLP return 200 AND show different products than page 1. Catches the classic migration regression: the new site silently ignores `?page=N` and returns the first page on every request (or caps pagination). Live tested against bagaggio TanStack — surfaces a real critical bug (`page=2` shows the same 10 products as `page=1`, 100% overlap). Falls back to scraping the home page for a category link when running standalone (`parity check plp-pagination`).
+* **Cross-side count divergence detection.** When prod and cand both serve a paginated PLP but cand's `?page=2` product count differs from prod's by more than 30%, flag as medium-severity (likely sort-order or index pruning regression).
+
 ## [0.11.5](https://github.com/decocms/parity/compare/v0.11.4...v0.11.5) (2026-06-17)
 
 ### Fixed

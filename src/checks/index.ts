@@ -24,6 +24,7 @@ import { networkSummaryDelta } from "./network-summary.ts";
 import { notFoundParity } from "./not-found-parity.ts";
 import { pdpGalleryRelated } from "./pdp-gallery-related.ts";
 import { pictureMissingDims } from "./picture-missing-dims.ts";
+import { plpPagination } from "./plp-pagination.ts";
 import { purchaseJourneyFlow } from "./purchase-journey-flow.ts";
 import { searchAutocomplete } from "./search-autocomplete.ts";
 import { searchNoResults } from "./search-no-results.ts";
@@ -88,6 +89,7 @@ export const ALL_CHECKS: Check[] = [
   footerLinksHealth,
   loginFlow,
   pictureMissingDims,
+  plpPagination,
 ];
 
 /**
@@ -125,6 +127,7 @@ export const ALL_CHECKS_BY_NAME: Record<string, Check> = {
   "footer-links-health": footerLinksHealth,
   "login-flow": loginFlow,
   "picture-missing-dims": pictureMissingDims,
+  "plp-pagination": plpPagination,
 };
 
 /**
