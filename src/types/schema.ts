@@ -455,6 +455,7 @@ export const ParityRc = z.object({
       quantityIncrement: z.string().optional(),
       quantityInput: z.string().optional(),
       minicartCount: z.string().optional(),
+      cartOpenedIndicator: z.string().optional(),
       // Search flow
       searchTrigger: z.string().optional(),
       searchInput: z.string().optional(),

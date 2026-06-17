@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.4](https://github.com/decocms/parity/compare/v0.11.3...v0.11.4) (2026-06-17)
+
+### Added
+
+* **`cartOpenedIndicator` selector key.** Used by the upcoming post-add-to-cart validator — list of selectors that, when matched and visible after clicking buy, confirm the cart actually opened (notification toast, drawer, etc). Default candidates include `[aria-label='Fechar notificação']` / `[aria-label='Fechar carrinho']` patterns from Deco TanStack plus generic role/`[role='dialog']` fallbacks.
+
+### Fixed
+
+* **Deco TanStack selectors covered before the LLM is even called.** Defaults extended for the bagaggio-class storefront — patterns observed live against `bagaggio-tanstack.deco-cx.workers.dev`:
+  - **buyButton:** lowercase `comprar` variants + `button[type='button']:has-text('comprar')` (the CSS renders uppercase via `text-transform`; the markup is lowercase).
+  - **minicartTrigger:** `[aria-label='Sacola']` + lowercase aria substring.
+  - **cepInputPdp:** `input[name='postalCode']`, `#postalCodeInput`, `input[inputMode='numeric'][maxLength='8']`.
+  - **sizeSwatch:** `[aria-label*='Tamanho '][aria-label*='Disponível']` — the " - Disponível" suffix means in-stock; sold-out variants don't carry it.
+* **HTML compaction passed to the LLM is now actually useful.** Both `compactHtmlForSelectors` and `compactHtmlForRecovery` now:
+  - Strip the Tailwind utility-class soup (`class="w-full h-12 flex items-center bg-primary ..."` becomes `class=""`) so the LLM sees semantic anchors (`data-*`, `aria-*`, `role`, semantic class names) instead of drowning in token noise.
+  - Strip URL-encoded JSON in `data-event` / `data-track` / `data-analytics` attrs (Deco sites carry multi-kb analytics blobs there).
+  - Drop inline `style=""`.
+  - Add `data-product-list` and `[aria-label]` to the kept-element whitelist so the Deco TanStack patterns survive the compaction.
+* **LLM prompts know about Deco TanStack now.** `discover-selectors` and `recover-step` system prompts both document the bagaggio-class patterns explicitly (product card via `aria-label='view product'`, lowercase CTA text, `[aria-label='Sacola']` minicart, `[aria-label='Tamanho X - Disponível']` size swatches, `name='postalCode'` CEP input) so when defaults miss the LLM has structured guidance instead of having to re-discover the pattern each time.
+
+### Verification (live against bagaggio)
+
+Before this PR: journey stopped at step 3 (`enter-pdp` — fixed in 0.11.3) and again at step 4 (`select-variant`).
+After this PR: journey completes steps 1-5 (`visit-home`, `navigate-plp`, `enter-pdp`, `select-variant`, `shipping-calc-pdp`). Step 6 (`add-to-cart`) now surfaces a real bug — "Selecione um tamanho" is still visible after the variant click, meaning the variant selector matched a tab/expand element instead of the actual radio. Follow-up tracked separately.
+
 ## [0.11.3](https://github.com/decocms/parity/compare/v0.11.2...v0.11.3) (2026-06-17)
 
 ### Fixed

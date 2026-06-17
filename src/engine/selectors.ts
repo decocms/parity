@@ -35,17 +35,29 @@ export const DEFAULT_SELECTORS = {
     "main a[href*='/p?']",
   ],
   buyButton: [
+    // Data attrs first
+    "[data-buy-button]",
+    "[data-testid='add-to-cart']",
+    // Lowercase variants (Deco TanStack stores like bagaggio render the
+    // CTA as lowercase "comprar"). Playwright's :has-text is a substring
+    // match but in some cases the rendered text differs from the markup
+    // via CSS text-transform — selecting against the literal markup text
+    // is more reliable.
+    "button[type='button']:has-text('comprar')",
+    "button[type='submit']:has-text('comprar')",
     "button:has-text('Comprar')",
+    "button:has-text('comprar')",
     "button:has-text('Adicionar')",
     "button:has-text('Add to cart')",
     "button:has-text('Add to bag')",
-    "[data-buy-button]",
-    "[data-testid='add-to-cart']",
     "button[type='submit']:has-text('Comprar')",
   ],
   minicartTrigger: [
     "[data-minicart-trigger]",
     "[data-testid='minicart-trigger']",
+    // Bagaggio / Deco TanStack: the cart icon button has aria-label="Sacola"
+    "[aria-label='Sacola']",
+    "[aria-label*='sacola' i]",
     "[aria-label*='carrinho' i]",
     "[aria-label*='cart' i]",
     "header button:has([data-cart-icon])",
@@ -55,6 +67,11 @@ export const DEFAULT_SELECTORS = {
     "input[name='shipping-zipcode']",
     "input[name='zipcode']",
     "input[name='cep']",
+    // Bagaggio / Deco TanStack: <input id="postalCodeInput" name="postalCode" inputMode="numeric" maxLength="8">
+    "input[name='postalCode']",
+    "#postalCodeInput",
+    "input[inputMode='numeric'][maxLength='8']",
+    "input[pattern='\\\\d{8}']",
     "input[placeholder*='CEP' i]",
     "input[placeholder*='Postal' i]",
     "[data-shipping-input] input",
@@ -85,6 +102,12 @@ export const DEFAULT_SELECTORS = {
   sizeSwatch: [
     "[data-size]:not([disabled]):not([aria-disabled='true']):not(.unavailable):not(.sold-out)",
     "[data-variant-size]:not([disabled]):not([aria-disabled='true']):not(.unavailable)",
+    // Bagaggio / Deco TanStack: aria-label="Tamanho P - Disponível" / "Tamanho M - Disponível"
+    // The " - Disponível" suffix means the variant is in stock; sold-out
+    // ones carry "Esgotado" or no suffix, so the substring filter dodges them.
+    "[aria-label^='Tamanho ']:has-text('Disponível')",
+    "[aria-label*='Tamanho '][aria-label*='Disponível']",
+    "[aria-label*='Tamanho ']:not([disabled]):not([aria-disabled='true'])",
     "button[aria-label*='tamanho' i]:not([aria-disabled='true']):not([disabled])",
     "button[aria-label*='size' i]:not([aria-disabled='true']):not([disabled])",
     "[data-testid='size-selector'] button:not([disabled]):not(.unavailable)",
@@ -191,6 +214,31 @@ export const DEFAULT_SELECTORS = {
     "[class*='suggestions' i] [class*='item' i]",
   ],
   // ── Cart interactions flow ─────────────────────────────────────────────
+  /**
+   * Selectors that, when MATCHED+VISIBLE after clicking buyButton, confirm
+   * the add-to-cart actually worked — a toast/notification, a cart drawer,
+   * a cart-count badge incrementing, or navigation to /cart. If none of
+   * these fires within a short window after the click, the add-to-cart
+   * silently failed (the most common false-positive in journey runs).
+   */
+  cartOpenedIndicator: [
+    // Notification toast (Bagaggio / Deco TanStack uses aria-label="Fechar notificação")
+    "[aria-label='Fechar notificação']:visible",
+    "[aria-label*='notificação' i]:visible",
+    "[role='status']:visible",
+    "[role='alert']:visible",
+    // Cart drawer open state
+    "[aria-label='Fechar carrinho']:visible",
+    "[aria-label*='fechar carrinho' i]:visible",
+    "[role='dialog']:has([class*='cart' i]):visible",
+    "[role='dialog']:has([class*='minicart' i]):visible",
+    "[data-cart-drawer][aria-expanded='true']",
+    "[data-minicart][aria-expanded='true']",
+    "[data-cart-drawer]:not([hidden]):visible",
+    // Common "product added" copy
+    "[role='dialog']:has-text('adicionado')",
+    "[role='dialog']:has-text('added')",
+  ],
   cartItemRow: [
     "[data-cart-item]",
     "[data-testid='cart-item']",
