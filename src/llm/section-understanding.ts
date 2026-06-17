@@ -95,6 +95,7 @@ export async function invokeUnderstandingSummary(
   }
 
   const result = await callTool<{ summary?: string }>({
+    feature: "section-understanding",
     systemPrompt: SYSTEM_PROMPT,
     userText: markdown,
     userImages: images,

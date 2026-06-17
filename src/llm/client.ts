@@ -1,15 +1,52 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { resolveModel, type Feature, type Provider, snapshotResolved, PROVIDER_MODELS } from "./models.ts";
+import type { ImageInput, MessageCallParams, ToolCallParams } from "./types.ts";
+import { callMessageSdk, callToolSdk, isClaudeAgentSdkAvailable } from "./providers/claude-agent-sdk.ts";
 
-/** Default Claude model identifier when calling via Anthropic SDK directly. */
-export const LLM_MODEL_ANTHROPIC = "claude-sonnet-4-6";
-/** Default OpenRouter model identifier (override via env PARITY_OPENROUTER_MODEL). */
-export const LLM_MODEL_OPENROUTER = process.env.PARITY_OPENROUTER_MODEL ?? "anthropic/claude-sonnet-4.5";
+export type { Feature, Provider } from "./models.ts";
+export type { ImageInput, MessageCallParams, ToolCallParams } from "./types.ts";
 
-export type Provider = "anthropic" | "openrouter";
+/**
+ * @deprecated Use `resolveModel(feature, provider)` instead. Kept for back-compat with
+ * external scripts; defaults to the sonnet tier on the anthropic provider.
+ */
+export const LLM_MODEL_ANTHROPIC = PROVIDER_MODELS.anthropic.sonnet;
+/** @deprecated Use `resolveModel(feature, provider)` instead. */
+export const LLM_MODEL_OPENROUTER = PROVIDER_MODELS.openrouter.sonnet;
 
+let forcedProvider: Provider | null = null;
+let llmDisabled = false;
+
+/**
+ * Force a specific provider (set by `--llm <name>`). Pass `null` to clear and
+ * fall back to auto-detection.
+ */
+export function setForcedProvider(p: Provider | null): void {
+  forcedProvider = p;
+  if (p) llmDisabled = false;
+}
+
+/** Disable LLM entirely (set by `--llm none`). Overrides forced provider. */
+export function disableLlm(): void {
+  llmDisabled = true;
+  forcedProvider = null;
+}
+
+/**
+ * Detect which LLM provider to use. Order:
+ *   1. `--llm none` → disabled
+ *   2. `--llm <name>` (forced) — exact provider, no fallback
+ *   3. `ANTHROPIC_API_KEY` → `anthropic` (direct API, fastest)
+ *   4. `OPENROUTER_API_KEY` → `openrouter`
+ *   5. Local `claude` CLI logged in (~/.claude/ exists) → `claude-agent-sdk`
+ *   6. null — no provider available
+ */
 export function getProvider(): Provider | null {
+  if (llmDisabled) return null;
+  if (forcedProvider) return forcedProvider;
   if (process.env.ANTHROPIC_API_KEY) return "anthropic";
   if (process.env.OPENROUTER_API_KEY) return "openrouter";
+  if (isClaudeAgentSdkAvailable()) return "claude-agent-sdk";
   return null;
 }
 
@@ -19,31 +56,18 @@ export function isLlmAvailable(): boolean {
 
 export function providerLabel(): string {
   const p = getProvider();
-  if (p === "anthropic") return `Anthropic (${LLM_MODEL_ANTHROPIC})`;
-  if (p === "openrouter") return `OpenRouter (${LLM_MODEL_OPENROUTER})`;
-  return "none";
+  if (!p) return "none";
+  const models = snapshotResolved(p);
+  // Show three representative tiers so users see at a glance which model serves which task.
+  return `${p} (selectors=${models["selector-discovery"]}, visual=${models["visual-diff"]}, fix=${models.explain})`;
 }
 
-export interface ImageInput {
-  base64: string;
-  mediaType?: "image/png" | "image/jpeg" | "image/webp";
+/** Short human label without the per-feature model breakdown. */
+export function providerName(): string {
+  const p = getProvider();
+  return p ?? "none";
 }
 
-export interface ToolCallParams {
-  systemPrompt: string;
-  userText: string;
-  userImages?: ImageInput[];
-  tool: {
-    name: string;
-    description: string;
-    inputSchema: Record<string, unknown>;
-  };
-  maxTokens?: number;
-  /** Hard timeout in ms. Default: 120s for image calls, 60s for text-only. */
-  timeoutMs?: number;
-}
-
-/** Default timeout for LLM calls. Vision (with images) gets more time. */
 function defaultTimeout(params: { userImages?: unknown[] }): number {
   return params.userImages && params.userImages.length > 0 ? 120_000 : 60_000;
 }
@@ -55,7 +79,8 @@ function makeTimeoutSignal(ms: number): { signal: AbortSignal; clear: () => void
 }
 
 /**
- * Unified tool-call interface across Anthropic SDK and OpenRouter.
+ * Unified tool-call interface across providers. The `feature` field selects
+ * which model tier we use — see `src/llm/models.ts` for the default map.
  * Returns the parsed tool input object, or null if no provider is configured
  * or the call failed.
  */
@@ -63,12 +88,16 @@ export async function callTool<T = Record<string, unknown>>(
   params: ToolCallParams,
 ): Promise<T | null> {
   const provider = getProvider();
-  if (provider === "anthropic") return callAnthropicTool<T>(params);
-  if (provider === "openrouter") return callOpenRouterTool<T>(params);
+  if (!provider) return null;
+  const model = resolveModel(params.feature, provider);
+  const timeoutMs = params.timeoutMs ?? defaultTimeout(params);
+  if (provider === "anthropic") return callAnthropicTool<T>(params, model, timeoutMs);
+  if (provider === "openrouter") return callOpenRouterTool<T>(params, model, timeoutMs);
+  if (provider === "claude-agent-sdk") return callToolSdk<T>({ ...params, model, timeoutMs });
   return null;
 }
 
-async function callAnthropicTool<T>(params: ToolCallParams): Promise<T | null> {
+async function callAnthropicTool<T>(params: ToolCallParams, model: string, timeoutMs: number): Promise<T | null> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? "" });
   const userContent: Anthropic.ContentBlockParam[] = [{ type: "text", text: params.userText }];
   for (const img of params.userImages ?? []) {
@@ -81,12 +110,11 @@ async function callAnthropicTool<T>(params: ToolCallParams): Promise<T | null> {
       },
     });
   }
-  const timeoutMs = params.timeoutMs ?? defaultTimeout(params);
   const { signal, clear } = makeTimeoutSignal(timeoutMs);
   try {
     const response = await client.messages.create(
       {
-        model: LLM_MODEL_ANTHROPIC,
+        model,
         max_tokens: params.maxTokens ?? 2000,
         system: [
           { type: "text", text: params.systemPrompt, cache_control: { type: "ephemeral" } },
@@ -122,7 +150,7 @@ interface OpenAiContentBlock {
   image_url?: { url: string };
 }
 
-async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> {
+async function callOpenRouterTool<T>(params: ToolCallParams, model: string, timeoutMs: number): Promise<T | null> {
   // Retry transient failures (5xx, 429, network aborts, or truncated tool
   // arguments that `tryRepairJson` can't salvage). The second attempt
   // doubles `maxTokens` so the model has enough room to complete its
@@ -135,17 +163,16 @@ async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> 
   // total latency to 2× the documented cap. We pass the REMAINING budget
   // to each attempt and bail out of the retry if there's <2s left.
   const baseTokens = params.maxTokens ?? 2000;
-  const totalBudget = params.timeoutMs ?? defaultTimeout(params);
+  const totalBudget = timeoutMs;
   const start = Date.now();
   for (let attempt = 1; attempt <= 2; attempt++) {
     const isRetry = attempt > 1;
     const remaining = totalBudget - (Date.now() - start);
     if (remaining <= 2_000 && isRetry) {
-      // Not enough budget left to make a retry meaningful.
       return null;
     }
     const tokens = isRetry ? Math.max(baseTokens * 2, 4000) : baseTokens;
-    const result = await openRouterToolOnce<T>(params, tokens, isRetry, Math.max(remaining, 2_000));
+    const result = await openRouterToolOnce<T>(params, model, tokens, isRetry, Math.max(remaining, 2_000));
     if (result !== undefined) return result;
   }
   return null;
@@ -159,6 +186,7 @@ async function callOpenRouterTool<T>(params: ToolCallParams): Promise<T | null> 
  */
 async function openRouterToolOnce<T>(
   params: ToolCallParams,
+  model: string,
   maxTokens: number,
   isRetry: boolean,
   attemptTimeoutMs: number,
@@ -188,7 +216,7 @@ async function openRouterToolOnce<T>(
         "X-Title": "parity CLI",
       },
       body: JSON.stringify({
-        model: LLM_MODEL_OPENROUTER,
+        model,
         max_tokens: maxTokens,
         messages: [
           { role: "system", content: params.systemPrompt },
@@ -210,7 +238,6 @@ async function openRouterToolOnce<T>(
     if (!response.ok) {
       const txt = await response.text().catch(() => "");
       console.error(`[llm-openrouter] HTTP ${response.status}: ${txt.slice(0, 200)}`);
-      // 5xx and 429 are transient; everything else (auth, schema) is permanent.
       if (response.status >= 500 || response.status === 429) return undefined;
       return null;
     }
@@ -230,11 +257,6 @@ async function openRouterToolOnce<T>(
       try {
         return JSON.parse(raw) as T;
       } catch {
-        // Some models truncate or emit slightly malformed JSON when the
-        // schema is large or `maxTokens` clips the response mid-object.
-        // Try a couple of cheap recovery passes before giving up:
-        //   1. close any obvious dangling brace/bracket
-        //   2. unwrap a ```json``` fence the model snuck in
         const repaired = tryRepairJson(raw);
         if (repaired) {
           try {
@@ -252,10 +274,9 @@ async function openRouterToolOnce<T>(
         console.error(
           `[llm-openrouter] parse error, retrying with more tokens (raw len=${raw.length}, head=${JSON.stringify(raw.slice(0, 80))})`,
         );
-        return undefined; // signal retry
+        return undefined;
       }
     }
-    // Some models return tool intent inside content as JSON when tool_choice is enforced loosely
     const content = json.choices?.[0]?.message?.content;
     if (typeof content === "string" && content.trim().startsWith("{")) {
       try {
@@ -268,7 +289,6 @@ async function openRouterToolOnce<T>(
   } catch (err) {
     const msg = (err as Error).message;
     console.error(`[llm-openrouter] failed: ${msg}`);
-    // Network errors / aborts are worth a retry.
     if (!isRetry && (msg.includes("ECONN") || msg.includes("aborted") || msg.includes("fetch"))) {
       return undefined;
     }
@@ -278,20 +298,12 @@ async function openRouterToolOnce<T>(
   }
 }
 
-/**
- * Best-effort JSON repair for slightly malformed tool-call arguments
- * returned by some OpenRouter-backed models (truncated responses,
- * ```json``` fences, missing closing braces). Returns null if it can't
- * produce something parseable in a couple of cheap passes.
- */
 function tryRepairJson(raw: string): string | null {
   let s = raw.trim();
   if (!s) return null;
-  // Unwrap ```json ... ``` fences.
   const fence = s.match(/^```(?:json)?\s*([\s\S]*?)\s*```\s*$/);
   if (fence?.[1]) s = fence[1].trim();
   if (!s.startsWith("{") && !s.startsWith("[")) return null;
-  // Balance braces/brackets: count opens, append matching closers.
   let depthObj = 0;
   let depthArr = 0;
   let inString = false;
@@ -328,31 +340,27 @@ function tryRepairJson(raw: string): string | null {
   return s;
 }
 
-export interface MessageCallParams {
-  systemPrompt: string;
-  userText: string;
-  maxTokens?: number;
-  /** Hard timeout in ms. Default: 60s. */
-  timeoutMs?: number;
-}
-
 /**
  * Free-form text response (no tool-use). Used by `parity explain`.
  */
 export async function callMessage(params: MessageCallParams): Promise<string | null> {
   const provider = getProvider();
-  if (provider === "anthropic") return callAnthropicMessage(params);
-  if (provider === "openrouter") return callOpenRouterMessage(params);
+  if (!provider) return null;
+  const model = resolveModel(params.feature, provider);
+  const timeoutMs = params.timeoutMs ?? 60_000;
+  if (provider === "anthropic") return callAnthropicMessage(params, model, timeoutMs);
+  if (provider === "openrouter") return callOpenRouterMessage(params, model, timeoutMs);
+  if (provider === "claude-agent-sdk") return callMessageSdk({ ...params, model, timeoutMs });
   return null;
 }
 
-async function callAnthropicMessage(params: MessageCallParams): Promise<string | null> {
+async function callAnthropicMessage(params: MessageCallParams, model: string, timeoutMs: number): Promise<string | null> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? "" });
-  const { signal, clear } = makeTimeoutSignal(params.timeoutMs ?? 60_000);
+  const { signal, clear } = makeTimeoutSignal(timeoutMs);
   try {
     const response = await client.messages.create(
       {
-        model: LLM_MODEL_ANTHROPIC,
+        model,
         max_tokens: params.maxTokens ?? 1500,
         system: [
           { type: "text", text: params.systemPrompt, cache_control: { type: "ephemeral" } },
@@ -374,10 +382,10 @@ async function callAnthropicMessage(params: MessageCallParams): Promise<string |
   }
 }
 
-async function callOpenRouterMessage(params: MessageCallParams): Promise<string | null> {
+async function callOpenRouterMessage(params: MessageCallParams, model: string, timeoutMs: number): Promise<string | null> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return null;
-  const { signal, clear } = makeTimeoutSignal(params.timeoutMs ?? 60_000);
+  const { signal, clear } = makeTimeoutSignal(timeoutMs);
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -389,7 +397,7 @@ async function callOpenRouterMessage(params: MessageCallParams): Promise<string 
         "X-Title": "parity CLI",
       },
       body: JSON.stringify({
-        model: LLM_MODEL_OPENROUTER,
+        model,
         max_tokens: params.maxTokens ?? 1500,
         messages: [
           { role: "system", content: params.systemPrompt },
@@ -408,4 +416,3 @@ async function callOpenRouterMessage(params: MessageCallParams): Promise<string 
     clear();
   }
 }
-

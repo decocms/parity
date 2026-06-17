@@ -86,6 +86,7 @@ async function suggestTermViaLlm(
   if (!isLlmAvailable()) return null;
   const compacted = compactHtmlForSelectors(html, 18_000);
   const input = await callTool<{ term?: string }>({
+    feature: "search-terms",
     systemPrompt: SYSTEM_PROMPT,
     userText: `URL: ${url}\n\nHTML compactado da home:\n\`\`\`html\n${compacted}\n\`\`\``,
     maxTokens: 200,

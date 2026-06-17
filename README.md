@@ -208,12 +208,40 @@ Both files are gitignored by default — they're per-user, not per-repo.
 
 ## LLM (optional)
 
-Set **one** environment variable to unlock LLM-driven features:
+Parity supports **three providers**, auto-detected in this order — set **none** if you already have the `claude` CLI logged in locally:
 
-- `ANTHROPIC_API_KEY` — direct Anthropic API (Claude Sonnet 4.6 with prompt caching). Preferred.
-- `OPENROUTER_API_KEY` — OpenRouter (default model `anthropic/claude-sonnet-4.5`; override with `PARITY_OPENROUTER_MODEL`).
+1. `ANTHROPIC_API_KEY` — direct Anthropic API (fastest, billed to your API account).
+2. `OPENROUTER_API_KEY` — OpenRouter (default Sonnet slug; override with `PARITY_OPENROUTER_MODEL`).
+3. **Local `claude` CLI** — uses [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) and goes through your existing Claude plan. No env vars needed. Higher latency than the direct API.
 
-What LLM enables:
+Force a provider with `--llm <anthropic|openrouter|claude-code|none|auto>`.
+
+### Per-feature model routing (issue #66)
+
+Different tasks need different models. Defaults are picked to bias toward the cheapest model that does the job well:
+
+| Feature              | Default tier  | Why                            |
+| -------------------- | ------------- | ------------------------------ |
+| selector-discovery   | haiku-4.5     | fast/cheap, simple HTML→JSON   |
+| step-recovery        | haiku-4.5     | short, small context           |
+| search-terms         | haiku-4.5     | short                          |
+| plp-matching         | haiku-4.5     | short classification           |
+| pdp-matching         | haiku-4.5     | short classification           |
+| section-understanding| sonnet-4.6    | needs vision                   |
+| visual-diff          | sonnet-4.6    | needs vision                   |
+| issue-aggregation    | sonnet-4.6    | ranking + dedup                |
+| explain              | opus-4.7      | long reasoning + diagnosis     |
+
+Override per feature with `--llm-model <feat>=<model>,...`:
+
+```bash
+parity run --prod ... --cand ... \
+  --llm-model visual-diff=claude-opus-4-7,explain=claude-opus-4-7
+```
+
+Or flatten the whole map with `--llm-tier-default <haiku|sonnet|opus>`, or `--llm-model-default <model>` to pin one exact model for every call.
+
+### What LLM unlocks
 
 - **Issue aggregation** — flat raw issues become ranked, deduplicated top issues
 - **Selector discovery** — infers `categoryLink` / `productCard` / `buyButton` etc. from HTML
@@ -222,9 +250,9 @@ What LLM enables:
 - **PLP picker / PDP matcher** — cross-site disambiguation
 - **`parity explain <issue>`** — root-cause analysis on demand
 
-Without any key, the CLI still runs and outputs raw check results — only the smart bits are skipped. Deterministic fallbacks always apply.
+Without any provider, the CLI still runs and outputs raw check results — only the smart bits are skipped. Deterministic fallbacks always apply.
 
-**Cost** — A `--preset full` run with visual diff uses ~6-12 Claude calls (each with 2 screenshots). Roughly $0.05–$0.20 per run on Sonnet 4.6 with prompt caching.
+**Cost** — A `--preset full` run with visual diff uses ~6-12 Claude calls (each with 2 screenshots). With per-feature routing the cheap calls (selectors, recovery, classification) hit Haiku and only the heavy ones (visual diff, aggregation, explain) hit Sonnet/Opus — roughly $0.02–$0.10 per run on the direct API.
 
 ## CI usage
 
