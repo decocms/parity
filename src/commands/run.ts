@@ -50,7 +50,7 @@ import type {
 } from "../types/schema.ts";
 import { attachSpinnerHeartbeat } from "../util/heartbeat.ts";
 import { isLocalhost } from "../util/localhost.ts";
-import { TimingRegistry, formatTimingsSummary } from "../util/timing.ts";
+import { TimingRegistry, buildFlowBreakdown, formatTimingsSummary } from "../util/timing.ts";
 import { serveRunAndBlock } from "./serve.ts";
 
 export interface RunOptions {
@@ -474,6 +474,29 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   const allFlowCaptures: FlowCapture[] = [];
   const allPageCaptures: PageCapture[] = [];
 
+  // Always-visible elapsed counter. From the moment "Launching browser…"
+  // appears the user sees `⏱ 04:32 · <whatever the current label is>`
+  // refreshed every second — no more silent terminals for minutes. The
+  // `setSpinnerLabel` wrapper is used in place of `spinner.text = …`
+  // anywhere that wants to set what's *happening now*; the ticker
+  // re-renders the prefix every second from the stored label so the
+  // elapsed time always advances even if no new step events arrive.
+  let currentSpinnerLabel = "Launching browser…";
+  const renderSpinner = (): void => {
+    const elapsedSec = Math.floor((Date.now() - startedAt) / 1000);
+    const min = Math.floor(elapsedSec / 60);
+    const sec = elapsedSec % 60;
+    const mmss = `${min.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
+    spinner.text = `${chalk.dim(`⏱ ${mmss} ·`)} ${currentSpinnerLabel}`;
+  };
+  const setSpinnerLabel = (label: string): void => {
+    currentSpinnerLabel = label;
+    renderSpinner();
+  };
+  setSpinnerLabel("Launching browser…");
+  const elapsedTicker = setInterval(renderSpinner, 1000);
+  elapsedTicker.unref?.();
+
   // Per-phase timing accumulator. Each phase boundary pushes its duration
   // so the report header + console summary can show where the wall-clock
   // actually went (observability follow-up to #56's `currentPhase`).
@@ -528,7 +551,9 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       process.stderr.write(`  report parcial em ${paths.reportHtml}\n`);
       // Print the timing summary to stderr too so the shutdown path
       // surfaces it (success path prints to stdout).
-      process.stderr.write(`\n${formatTimingsSummary(partialTimings)}\n`);
+      process.stderr.write(
+        `\n${formatTimingsSummary(partialTimings, buildFlowBreakdown(allFlowCaptures))}\n`,
+      );
     } catch (err) {
       process.stderr.write(`  falha escrevendo report parcial: ${(err as Error).message}\n`);
     }
@@ -581,32 +606,37 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       }
     }
 
-    for (const viewport of viewports) {
-      for (const side of ["prod", "cand"] as Side[]) {
-        const baseUrl = side === "prod" ? opts.prod : opts.cand;
-        spinner.text = `[${viewport}/${side}] preparing context…`;
-        const harPath = join(paths.harDir, `${viewport}-${side}.har`);
-        const tracePath = join(paths.tracesDir, `${viewport}-${side}.zip`);
-        const ctx = await newContext(browser, {
-          viewport,
-          harPath,
-          tracesDir: paths.tracesDir,
-          cohortCookieValue: "control",
-          noCache: opts.bypassCache,
-        });
-        await installVitalsCollector(ctx);
-
+    // Per-side runner. Sides for a given viewport are independent (each
+    // creates its own BrowserContext, writes to its own HAR/trace path)
+    // so prod and cand can — and now do — run in parallel. The function
+    // returns its captures + promotion deltas instead of mutating the
+    // outer accumulators directly; the caller merges after Promise.all
+    // resolves so `learned`, `allFlowCaptures`, etc. never see partial
+    // writes from the racing side.
+    const runOneSide = async (
+      viewport: Viewport,
+      side: Side,
+    ): Promise<{ captures: FlowCapture[]; pages: PageCapture[] }> => {
+      const baseUrl = side === "prod" ? opts.prod : opts.cand;
+      const harPath = join(paths.harDir, `${viewport}-${side}.har`);
+      const tracePath = join(paths.tracesDir, `${viewport}-${side}.zip`);
+      const ctx = await newContext(browser!, {
+        viewport,
+        harPath,
+        tracesDir: paths.tracesDir,
+        cohortCookieValue: "control",
+        noCache: opts.bypassCache,
+      });
+      await installVitalsCollector(ctx);
+      const captures: FlowCapture[] = [];
+      const pages: PageCapture[] = [];
+      try {
         for (const flow of flows) {
           const flowStart = Date.now();
-          // Per-step live progress: rewrite the spinner text every time a
-          // step starts so the user sees e.g. "[mobile/prod] purchase-journey
-          // 5/9 add-to-cart…" instead of a silent "running flow" for minutes.
-          // Print a one-line summary when the flow finishes so the user can
-          // see exactly where each side stopped (e.g. cand 5/9 add-to-cart).
           let lastStepTotal = 0;
           const sideTag = side === "prod" ? chalk.cyan("prod") : chalk.magenta("cand");
           const prefix = `${chalk.dim(`[${viewport}/`)}${sideTag}${chalk.dim("]")}`;
-          spinner.text = `${prefix} ${flow}: starting…`;
+          setSpinnerLabel(`${prefix} ${flow}: starting…`);
           const cap = await runFlow(flow, {
             baseUrl,
             side,
@@ -622,23 +652,22 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
             onStep: (event) => {
               if (event.phase === "start") {
                 lastStepTotal = event.total;
-                spinner.text = `${prefix} ${flow} ${chalk.dim(`${event.index}/${event.total}`)} ${event.name}…`;
+                setSpinnerLabel(
+                  `${prefix} ${flow} ${chalk.dim(`${event.index}/${event.total}`)} ${event.name}…`,
+                );
               }
             },
           });
           // Per-flow summary line: prints permanently above the live
           // spinner so the user can see exactly where each side ended.
-          // `target` is the flow's declared total (e.g. 9 for
-          // purchase-journey) — falls back to recorded step count for
-          // flows that don't emit onStep total. Showing `2/9 stopped at
-          // open-minicart` is more useful than `2/3` because it makes the
-          // ratio meaningful across sides ("desk got further than mobile").
+          // Showing `2/9 stopped at open-minicart` makes the ratio
+          // meaningful across sides ("desk got further than mobile").
           const okSteps = cap.steps?.filter((s) => s.status === "ok").length ?? 0;
           const recorded = cap.steps?.length ?? 0;
           const target = lastStepTotal || recorded;
           const failed = cap.steps?.find((s) => s.status === "failed");
           const lastStep = cap.steps?.[cap.steps.length - 1];
-          const elapsed = chalk.dim(`${((Date.now() - flowStart) / 1000).toFixed(1)}s`);
+          const elapsedDim = chalk.dim(`${((Date.now() - flowStart) / 1000).toFixed(1)}s`);
           const counts = target > 0 ? chalk.dim(`${okSteps}/${target}`) : "";
           let glyph: string;
           let detail: string;
@@ -646,33 +675,50 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
             glyph = chalk.red("✗");
             detail = `stopped at ${chalk.yellow(failed.name)}`;
           } else if (target > 0 && okSteps < target) {
-            // Early exit without explicit failure (e.g. PDP not found so
-            // the journey gave up at step 3) — surface it so the user
-            // doesn't think this side ran to completion.
             glyph = chalk.yellow("▴");
             detail = lastStep ? `ended at ${chalk.dim(lastStep.name)}` : "incomplete";
           } else {
             glyph = chalk.green("✓");
             detail = "";
           }
-          const summary = `${glyph} ${prefix} ${flow} ${counts} ${detail} ${elapsed}`
+          const summary = `${glyph} ${prefix} ${flow} ${counts} ${detail} ${elapsedDim}`
             .replace(/\s+/g, " ")
             .trim();
           spinner.stopAndPersist({ symbol: "", text: summary });
-          spinner.start(`${prefix} ${flow} done — next…`);
-          allFlowCaptures.push(cap);
-          for (const p of cap.pages) allPageCaptures.push(p);
+          setSpinnerLabel(`${prefix} ${flow} done — next…`);
+          spinner.start();
+          captures.push(cap);
+          for (const p of cap.pages) pages.push(p);
+        }
+      } finally {
+        await stopTracing(ctx, tracePath).catch(() => undefined);
+        await ctx.close();
+      }
+      return { captures, pages };
+    };
 
-          // Promotion loop: update learned-selectors from this flow's outcomes
+    for (const viewport of viewports) {
+      // Run prod + cand in parallel. Cuts ~50% off this viewport's
+      // wall-clock contribution — independently verified against the
+      // same pattern used in src/commands/journey.ts.
+      const [prodResult, candResult] = await Promise.all([
+        runOneSide(viewport, "prod"),
+        runOneSide(viewport, "cand"),
+      ]);
+      for (const r of [prodResult, candResult]) {
+        for (const cap of r.captures) {
+          allFlowCaptures.push(cap);
+          // Promotion runs sequentially after Promise.all so the
+          // learned-selectors object is never mutated from two sides at
+          // once. The promotion logic itself is deterministic given the
+          // captures so deferring it changes no semantics.
           if (opts.learn !== false) {
             const result = promoteStepsFromFlow(learned, platform, prodHost, cap);
             promotedCount += result.promoted;
             deprecatedCount += result.deprecated;
           }
         }
-
-        await stopTracing(ctx, tracePath).catch(() => undefined);
-        await ctx.close();
+        for (const p of r.pages) allPageCaptures.push(p);
       }
     }
     stampPhase("collect");
@@ -962,7 +1008,8 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     }
 
     currentPhase = "checks";
-    spinner.start("Rodando checks…");
+    setSpinnerLabel("Rodando checks…");
+    spinner.start();
     const checksHb = attachSpinnerHeartbeat(spinner, { baseText: "Rodando checks…" });
     const cacheDir = join(opts.output, "cache");
     const checkCtx: CheckContext = {
@@ -997,11 +1044,12 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     const allIssues = checks.flatMap((c) => c.issues);
 
     currentPhase = "llm-aggregate";
-    spinner.start(
+    setSpinnerLabel(
       isLlmAvailable()
         ? `Agregando issues via LLM (${providerLabel()}, timeout=${llmTimeoutSec}s)…`
         : "Agregando issues (modo offline — sem LLM keys)…",
     );
+    spinner.start();
     const llmHb = attachSpinnerHeartbeat(spinner, {
       baseText: isLlmAvailable()
         ? "Agregando issues via LLM (Sonnet 4.6)…"
@@ -1106,7 +1154,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     });
 
     printSummary(run, paths.reportHtml, { promotedCount, deprecatedCount, platform });
-    console.log(`\n${formatTimingsSummary(runTimings)}`);
+    console.log(`\n${formatTimingsSummary(runTimings, buildFlowBreakdown(allFlowCaptures))}`);
 
     if (opts.ci) {
       const blocking = allIssues.filter((i) => failOn.includes(i.severity));
@@ -1145,6 +1193,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     });
     return 2;
   } finally {
+    clearInterval(elapsedTicker);
     clearTimeout(globalTimeoutTimer);
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onSignal);
