@@ -56,7 +56,7 @@ export type SelectorEntry = z.infer<typeof SelectorEntry>;
 
 export const LearnedSelectors = z.object({
   schemaVersion: z.literal("0.1"),
-  platforms: z.record(z.string(), z.record(SelectorKey, z.array(SelectorEntry))),
+  platforms: z.record(z.string(), z.partialRecord(SelectorKey, z.array(SelectorEntry))),
 });
 export type LearnedSelectors = z.infer<typeof LearnedSelectors>;
 

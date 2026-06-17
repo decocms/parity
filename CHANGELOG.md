@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.13](https://github.com/decocms/parity/compare/v0.11.12...v0.11.13) (2026-06-17)
+
+### Fixed
+
+* **`parity run` no longer crashes when a flow's `newPage()` errors.** A single rejected inner-flow promise (most commonly `browserContext.newPage: Target page, context or browser has been closed` raised from `flowSearch` when a prior flow corrupted the context) was bubbling through `Promise.race` in `runFlow` and aborting the entire run, throwing away 25+ minutes of work. The `.catch(() => undefined)` on the inner promise only silenced the unhandled-rejection warning — it didn't stop `Promise.race` from seeing the rejection. Wrapped the inner switch in a try/catch that returns a `flow-error` `FlowCapture` instead of throwing, so the surviving viewports/sides finish and the report still renders.
+
+### Added
+
+* **Live per-step progress in `parity run`.** Previously the terminal went silent for tens of minutes after "Launching browser…" with no feedback until the run ended or crashed — devs were stuck guessing whether the tool was making progress. Now the spinner updates on every step (`[mobile/prod] purchase-journey 5/9 add-to-cart…`) and prints a permanent per-flow summary line as each side finishes:
+  ```
+  ✓ [mobile/prod]  purchase-journey 9/9                       58.2s
+  ✓ [mobile/cand]  purchase-journey 9/9                       62.4s
+  ✗ [desk/prod]    purchase-journey 6/9 stopped at open-minicart  118s
+  ▴ [desk/cand]    purchase-journey 3/9 ended at enter-pdp        45s
+  ```
+  Glyphs: `✓` reached target, `✗` explicit failure at a step, `▴` early exit (e.g. PDP not found so journey never started checkout). Wires the existing `onStep` callback from `runFlow` (already used by `parity journey`) into `run.ts`.
+
+## [0.11.12](https://github.com/decocms/parity/compare/v0.11.11...v0.11.12) (2026-06-17)
+
+### Fixed
+
+* **Zero warnings on `npm install -g @decocms/parity`.** Verified end-to-end: a clean global install produces no `ERESOLVE` peer-dep warning and no `deprecated` notices. From 161 packages down to 137.
+* **Migrated to zod 4** to eliminate the `ERESOLVE overriding peer dependency` warning. `@anthropic-ai/claude-agent-sdk@0.3.x` peer-deps `zod@^4.0.0` and we were pinned to `zod@^3.24.1`. Both sibling deps (`@anthropic-ai/sdk@^0.100.1` and `@modelcontextprotocol/sdk`) already accept `^3.25.0 || ^4.0.0`, so zod 4 was the safe direction. Migration touched two files (`src/types/schema.ts`, `src/learned/repo.ts`): `z.record(value)` → `z.record(z.string(), value)` (zod 4 requires explicit key type), and `z.record(enum, value)` → `z.partialRecord(enum, value)` (zod 4 made enum-keyed records require all enum members by default). All 701 tests still pass.
+* **Bundled cheerio inline to drop the deprecated `whatwg-encoding@3.1.1` warning.** `npm overrides` only applies to the consumer's root project, so even with `overrides: { "encoding-sniffer": "^1.0.0" }` end users still saw `npm warn deprecated whatwg-encoding@3.1.1`. The fix: switched the build from `--packages=external` (everything external) to an explicit `--external` list that excludes cheerio. cheerio + its transitives (`parse5`, `htmlparser2`, `domutils`, `domhandler`, `encoding-sniffer`, etc.) are now bundled inline in `dist/cli.js`, and cheerio moved from `dependencies` to `devDependencies`. Net cost: `dist/cli.js` grew from 0.76 MB → 2.16 MB. Net benefit: end users no longer install cheerio or any of its transitives, eliminating the deprecation warning at its source. Live-validated.
+
 ## [0.11.11](https://github.com/decocms/parity/compare/v0.11.10...v0.11.11) (2026-06-17)
 
 ### Fixed
