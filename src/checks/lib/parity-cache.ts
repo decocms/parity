@@ -94,10 +94,6 @@ export function getCacheEntry(
   return entry;
 }
 
-export function setCacheEntry(
-  cache: ParityCache,
-  hash: string,
-  entry: ParityCacheEntry,
-): void {
+export function setCacheEntry(cache: ParityCache, hash: string, entry: ParityCacheEntry): void {
   cache[hash] = entry;
 }

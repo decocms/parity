@@ -59,5 +59,6 @@ export function imageLoadingHealth(ctx: CheckContext): CheckResult {
 }
 
 function countFailedImageRequests(entries: NetworkEntry[]): number {
-  return entries.filter((e) => e.resourceType === "image" && (e.status === 0 || e.status >= 400)).length;
+  return entries.filter((e) => e.resourceType === "image" && (e.status === 0 || e.status >= 400))
+    .length;
 }

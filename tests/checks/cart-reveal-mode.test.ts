@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cartRevealModeDivergence } from "../../src/checks/cart-reveal-mode.ts";
+import type { CheckContext } from "../../src/checks/index.ts";
 import type {
   FlowCapture,
   ParityIgnore,
@@ -7,7 +8,6 @@ import type {
   StepCapture,
   Viewport,
 } from "../../src/types/schema.ts";
-import type { CheckContext } from "../../src/checks/index.ts";
 
 function step7(
   side: "prod" | "cand",
@@ -72,7 +72,10 @@ function ctx(
 describe("cartRevealModeDivergence", () => {
   it("pass quando modos coincidem entre prod e cand", () => {
     const r = cartRevealModeDivergence(
-      ctx([flowWithStep7("prod", "mobile", "hover-drawer")], [flowWithStep7("cand", "mobile", "hover-drawer")]),
+      ctx(
+        [flowWithStep7("prod", "mobile", "hover-drawer")],
+        [flowWithStep7("cand", "mobile", "hover-drawer")],
+      ),
     );
     expect(r.status).toBe("pass");
     expect(r.issues).toHaveLength(0);
@@ -133,9 +136,7 @@ describe("cartRevealModeDivergence", () => {
   });
 
   it("não fire quando só um lado executou step 7 (purchase-journey-flow já cobre isso)", () => {
-    const r = cartRevealModeDivergence(
-      ctx([flowWithStep7("prod", "mobile", "hover-drawer")], []),
-    );
+    const r = cartRevealModeDivergence(ctx([flowWithStep7("prod", "mobile", "hover-drawer")], []));
     expect(r.issues).toHaveLength(0);
   });
 

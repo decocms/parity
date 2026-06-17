@@ -48,9 +48,7 @@ describe("isKnownAsyncTrackingUrl", () => {
   });
   it("matches Google Analytics beacons", () => {
     expect(
-      isKnownAsyncTrackingUrl(
-        "https://www.google-analytics.com/g/collect?v=2&tid=G-XXX&_p=1",
-      ),
+      isKnownAsyncTrackingUrl("https://www.google-analytics.com/g/collect?v=2&tid=G-XXX&_p=1"),
     ).toBe(true);
   });
   it("matches Facebook pixel", () => {
@@ -91,7 +89,10 @@ function makeMockPage(): EventEmitter & { on: EventEmitter["on"] } {
   return e as EventEmitter & { on: EventEmitter["on"] };
 }
 
-function makeFailedRequest(url: string, errorText: string): {
+function makeFailedRequest(
+  url: string,
+  errorText: string,
+): {
   url: () => string;
   failure: () => { errorText: string };
 } {
@@ -157,10 +158,7 @@ describe("attachCollectors — requestfailed filtering (issue #40)", () => {
     const state = attachCollectors(page as any);
     page.emit(
       "requestfailed",
-      makeFailedRequest(
-        "https://example.com/analytics.js",
-        "net::ERR_BLOCKED_BY_CLIENT",
-      ),
+      makeFailedRequest("https://example.com/analytics.js", "net::ERR_BLOCKED_BY_CLIENT"),
     );
     expect(state.console).toHaveLength(1);
   });
@@ -169,10 +167,7 @@ describe("attachCollectors — requestfailed filtering (issue #40)", () => {
     const page = makeMockPage();
     // biome-ignore lint/suspicious/noExplicitAny: minimal mock
     const state = attachCollectors(page as any);
-    page.emit(
-      "requestfailed",
-      makeFailedRequest("https://example.com/x", "net::ERR_TIMED_OUT"),
-    );
+    page.emit("requestfailed", makeFailedRequest("https://example.com/x", "net::ERR_TIMED_OUT"));
     expect(state.console[0]?.text).toMatch(/^\[request-failed\]/);
   });
 });

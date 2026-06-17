@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  type SpinnerLike,
   attachSpinnerHeartbeat,
   startHeartbeat,
-  type SpinnerLike,
 } from "../../src/util/heartbeat.ts";
 
 describe("startHeartbeat (issue #56: per-phase progress beacons)", () => {

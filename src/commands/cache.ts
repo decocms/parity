@@ -9,12 +9,7 @@ import { resolveSitemapUrls } from "../diff/sitemap.ts";
 import { launchBrowser, newContext } from "../engine/browser.ts";
 import { capturePage } from "../engine/collect.ts";
 import { renderHtmlReport } from "../report/render.ts";
-import {
-  createRunDir,
-  newRunId,
-  writeRunReportHtml,
-  writeRunReportJson,
-} from "../storage/fs.ts";
+import { createRunDir, newRunId, writeRunReportHtml, writeRunReportJson } from "../storage/fs.ts";
 import type {
   CheckResult,
   FlowCapture,
@@ -103,7 +98,10 @@ export async function cacheCommand(opts: CacheOptions): Promise<number> {
       } finally {
         completed++;
         const elapsed = ((Date.now() - t0) / 1000).toFixed(0);
-        const etaSec = completed > 0 ? Math.round(((Date.now() - t0) / completed) * (total - completed) / 1000) : 0;
+        const etaSec =
+          completed > 0
+            ? Math.round((((Date.now() - t0) / completed) * (total - completed)) / 1000)
+            : 0;
         progress.text = `${completed}/${total} · ${elapsed}s · ETA ${etaSec}s · ${task.side === "prod" ? chalk.cyan("prod") : chalk.magenta("cand")} ${task.path} (${task.viewport})`;
       }
     });
@@ -275,7 +273,11 @@ async function discoverPagePaths(
   limit: number,
 ): Promise<string[]> {
   if (opts.urls) {
-    if (opts.urls.endsWith(".txt") || opts.urls.endsWith(".list") || opts.urls.startsWith("file:")) {
+    if (
+      opts.urls.endsWith(".txt") ||
+      opts.urls.endsWith(".list") ||
+      opts.urls.startsWith("file:")
+    ) {
       const path = opts.urls.replace(/^file:\/\//, "");
       if (existsSync(path)) {
         return readFileSync(path, "utf8")
@@ -352,6 +354,8 @@ function printSummary(check: CheckResult): void {
   console.log(
     `    ${chalk.green(`${((data.hitRate ?? 0) * 100).toFixed(0)}%`)} cache hit rate (cand)${data.prodHitRate != null ? `  ${chalk.dim(`(prod: ${(data.prodHitRate * 100).toFixed(0)}%)`)}` : ""}`,
   );
-  console.log(`    ${chalk.red(data.opportunityCount ?? 0)} oportunidades — ${((data.opportunityBytes ?? 0) / 1024).toFixed(0)} KB`);
+  console.log(
+    `    ${chalk.red(data.opportunityCount ?? 0)} oportunidades — ${((data.opportunityBytes ?? 0) / 1024).toFixed(0)} KB`,
+  );
   console.log(`    ${chalk.dim(check.issues.length)} issue(s) gerada(s)`);
 }

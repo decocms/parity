@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { imageLoadingHealth } from "../../src/checks/image-health.ts";
+import type { NetworkEntry } from "../../src/types/schema.ts";
 import { makeContext } from "../helpers/make-context.ts";
 import { makePageCapture } from "../helpers/make-page-capture.ts";
-import type { NetworkEntry } from "../../src/types/schema.ts";
 
 function netImg(over: Partial<NetworkEntry> = {}): NetworkEntry {
   return {
@@ -27,8 +27,12 @@ describe("imageLoadingHealth", () => {
     const h = html(`<img src="a.jpg" alt="a" srcset="a.jpg 1x, a2.jpg 2x"/>`);
     const r = imageLoadingHealth(
       makeContext({
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", html: h, network: [netImg()] })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", html: h, network: [netImg()] })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", html: h, network: [netImg()] }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", html: h, network: [netImg()] }),
+        ],
       }),
     );
     expect(r.status).toBe("pass");
@@ -42,11 +46,7 @@ describe("imageLoadingHealth", () => {
           makePageCapture({
             url: "https://x.com/",
             side: "cand",
-            network: [
-              netImg({ status: 404 }),
-              netImg({ status: 500 }),
-              netImg({ status: 0 }),
-            ],
+            network: [netImg({ status: 404 }), netImg({ status: 500 }), netImg({ status: 0 })],
           }),
         ],
       }),
@@ -74,8 +74,12 @@ describe("imageLoadingHealth", () => {
         .join("");
     const r = imageLoadingHealth(
       makeContext({
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", html: html(withSrcset(5)) })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", html: html(withSrcset(1)) })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", html: html(withSrcset(5)) }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", html: html(withSrcset(1)) }),
+        ],
       }),
     );
     expect(r.issues.find((i) => i.id.includes("images:srcset"))).toBeDefined();

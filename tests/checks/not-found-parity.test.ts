@@ -15,8 +15,24 @@ describe("notFoundParity", () => {
     const html = "<html><body><h1>Página não encontrada</h1></body></html>";
     const r = notFoundParity(
       makeContext({
-        prodPages: [makePageCapture({ url: TEST_404_URL, finalUrl: TEST_404_URL, status: 404, html, side: "prod" })],
-        candPages: [makePageCapture({ url: TEST_404_URL, finalUrl: TEST_404_URL, status: 404, html, side: "cand" })],
+        prodPages: [
+          makePageCapture({
+            url: TEST_404_URL,
+            finalUrl: TEST_404_URL,
+            status: 404,
+            html,
+            side: "prod",
+          }),
+        ],
+        candPages: [
+          makePageCapture({
+            url: TEST_404_URL,
+            finalUrl: TEST_404_URL,
+            status: 404,
+            html,
+            side: "cand",
+          }),
+        ],
       }),
     );
     expect(r.status).toBe("pass");
@@ -26,8 +42,24 @@ describe("notFoundParity", () => {
     const html = "<html><body>Hi</body></html>";
     const r = notFoundParity(
       makeContext({
-        prodPages: [makePageCapture({ url: TEST_404_URL, finalUrl: TEST_404_URL, status: 404, html, side: "prod" })],
-        candPages: [makePageCapture({ url: TEST_404_URL, finalUrl: TEST_404_URL, status: 200, html, side: "cand" })],
+        prodPages: [
+          makePageCapture({
+            url: TEST_404_URL,
+            finalUrl: TEST_404_URL,
+            status: 404,
+            html,
+            side: "prod",
+          }),
+        ],
+        candPages: [
+          makePageCapture({
+            url: TEST_404_URL,
+            finalUrl: TEST_404_URL,
+            status: 200,
+            html,
+            side: "cand",
+          }),
+        ],
       }),
     );
     expect(r.status).toBe("fail");

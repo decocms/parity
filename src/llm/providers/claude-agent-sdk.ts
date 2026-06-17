@@ -21,7 +21,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { tryRepairJson } from "../client.ts";
-import type { ImageInput, ToolCallParams, MessageCallParams } from "../types.ts";
+import type { ImageInput, MessageCallParams, ToolCallParams } from "../types.ts";
 
 /**
  * Cheap synchronous check — does `~/.claude/` exist? If yes, the user has logged
@@ -48,7 +48,9 @@ async function loadSdk(): Promise<SdkModule | null> {
     const mod = (await import("@anthropic-ai/claude-agent-sdk")) as SdkModule;
     return { query: mod.query };
   } catch (err) {
-    console.error(`[llm-claude-sdk] failed to load @anthropic-ai/claude-agent-sdk: ${(err as Error).message}`);
+    console.error(
+      `[llm-claude-sdk] failed to load @anthropic-ai/claude-agent-sdk: ${(err as Error).message}`,
+    );
     return null;
   }
 }
@@ -79,7 +81,10 @@ function isResultMessage(m: unknown): m is SdkResultSuccess | SdkResultError {
  */
 function makeAbortHandle(ms: number): { controller: AbortController; clear: () => void } {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error(`SDK call timed out after ${ms}ms`)), ms);
+  const timer = setTimeout(
+    () => controller.abort(new Error(`SDK call timed out after ${ms}ms`)),
+    ms,
+  );
   return { controller, clear: () => clearTimeout(timer) };
 }
 
@@ -140,7 +145,9 @@ async function* buildImagePrompt(
  * care about the terminal message; intermediate `assistant`/`status` messages
  * are ignored since `maxTurns: 1` means there's only one round-trip.
  */
-async function awaitResult(iter: AsyncIterable<unknown>): Promise<SdkResultSuccess | SdkResultError | null> {
+async function awaitResult(
+  iter: AsyncIterable<unknown>,
+): Promise<SdkResultSuccess | SdkResultError | null> {
   for await (const msg of iter) {
     if (isResultMessage(msg)) return msg;
   }
@@ -158,10 +165,12 @@ export async function callToolSdk<T>(
     // Ask for structured output matching the tool's input schema. The SDK
     // surfaces the parsed object on the success message as `structured_output`.
     opts.outputFormat = { type: "json_schema", schema: params.tool.inputSchema };
-    const queryParams: SdkQueryParams =
-      params.userImages?.length
-        ? { prompt: buildImagePrompt(params.systemPrompt, params.userText, params.userImages), options: opts }
-        : { prompt: buildTextPrompt(params.systemPrompt, params.userText), options: opts };
+    const queryParams: SdkQueryParams = params.userImages?.length
+      ? {
+          prompt: buildImagePrompt(params.systemPrompt, params.userText, params.userImages),
+          options: opts,
+        }
+      : { prompt: buildTextPrompt(params.systemPrompt, params.userText), options: opts };
     const result = await awaitResult(sdk.query(queryParams));
     if (!result) return null;
     if (result.subtype !== "success" || result.is_error) {

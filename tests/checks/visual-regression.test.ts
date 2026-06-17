@@ -83,8 +83,12 @@ describe("visualRegressionKeyframes", () => {
     const r = await visualRegressionKeyframes(
       makeContext({
         outDir: dir.path,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath }),
+        ],
       }),
     );
     expect(r.status).toBe("pass");
@@ -103,10 +107,20 @@ describe("visualRegressionKeyframes", () => {
       makeContext({
         outDir: dir.path,
         prodPages: [
-          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath, html: prodHtml }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "prod",
+            screenshotPath: prodPath,
+            html: prodHtml,
+          }),
         ],
         candPages: [
-          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath, html: candHtml }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "cand",
+            screenshotPath: candPath,
+            html: candHtml,
+          }),
         ],
       }),
     );
@@ -123,8 +137,12 @@ describe("visualRegressionKeyframes", () => {
     await visualRegressionKeyframes(
       makeContext({
         outDir: dir.path,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath }),
+        ],
       }),
     );
     expect(mockCreate).not.toHaveBeenCalled();
@@ -139,7 +157,12 @@ describe("visualRegressionKeyframes", () => {
           name: "report_visual_differences",
           input: {
             differences: [
-              { type: "missing-component", region: "hero", severity: "critical", description: "hero gone" },
+              {
+                type: "missing-component",
+                region: "hero",
+                severity: "critical",
+                description: "hero gone",
+              },
             ],
           },
         },
@@ -152,8 +175,12 @@ describe("visualRegressionKeyframes", () => {
     const r = await visualRegressionKeyframes(
       makeContext({
         outDir: dir.path,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath }),
+        ],
       }),
     );
     expect(mockCreate).toHaveBeenCalledOnce();
@@ -171,8 +198,12 @@ describe("visualRegressionKeyframes", () => {
     const r = await visualRegressionKeyframes(
       makeContext({
         outDir: dir.path,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath }),
+        ],
       }),
     );
     expect(r.data?.visualDiff).toMatchObject({
@@ -218,10 +249,20 @@ describe("visualRegressionKeyframes", () => {
       makeContext({
         outDir: dir.path,
         prodPages: [
-          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath, html: prodHtml }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "prod",
+            screenshotPath: prodPath,
+            html: prodHtml,
+          }),
         ],
         candPages: [
-          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath, html: candHtml }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "cand",
+            screenshotPath: candPath,
+            html: candHtml,
+          }),
         ],
       }),
     );
@@ -276,10 +317,20 @@ describe("visualRegressionKeyframes", () => {
       makeContext({
         outDir: dir.path,
         prodPages: [
-          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath, html: prodHtml }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "prod",
+            screenshotPath: prodPath,
+            html: prodHtml,
+          }),
         ],
         candPages: [
-          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath, html: candHtml }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "cand",
+            screenshotPath: candPath,
+            html: candHtml,
+          }),
         ],
       }),
     );
@@ -328,14 +379,26 @@ describe("visualRegressionKeyframes", () => {
       makeContext({
         outDir: dir.path,
         prodPages: [
-          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath, html: prodHtml }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "prod",
+            screenshotPath: prodPath,
+            html: prodHtml,
+          }),
         ],
         candPages: [
-          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath, html: candHtml }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "cand",
+            screenshotPath: candPath,
+            html: candHtml,
+          }),
         ],
       }),
     );
-    const heroIssue = r.issues.find((i) => i.id.includes("visual:semantic") && i.summary.includes("[hero]"));
+    const heroIssue = r.issues.find(
+      (i) => i.id.includes("visual:semantic") && i.summary.includes("[hero]"),
+    );
     expect(heroIssue?.severity).toBe("critical");
     expect(heroIssue?.summary).not.toMatch(/downgraded/);
     delete process.env.ANTHROPIC_API_KEY;
@@ -352,8 +415,12 @@ describe("visualRegressionKeyframes", () => {
     const r = await visualRegressionKeyframes(
       makeContext({
         outDir: dir.path,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath }),
+        ],
       }),
     );
     // LLM error returns null; visualSemanticDiff swallows it via console.error.
@@ -371,8 +438,12 @@ describe("visualRegressionKeyframes", () => {
     const r = await visualRegressionKeyframes(
       makeContext({
         outDir: dir.path,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath }),
+        ],
       }),
     );
     const vd = r.data?.visualDiff as { parityOk: boolean; pagesFromCache: number };
@@ -402,8 +473,12 @@ describe("visualRegressionKeyframes", () => {
     const r = await visualRegressionKeyframes(
       makeContext({
         outDir: dir.path,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath }),
+        ],
       }),
     );
     const vd = r.data?.visualDiff as { parityOk: boolean };
@@ -424,8 +499,12 @@ describe("visualRegressionKeyframes", () => {
     const r = await visualRegressionKeyframes(
       makeContext({
         outDir: dir.path,
-        prodPages: [makePageCapture({ url: "https://x.com/account", side: "prod", screenshotPath: prodPath })],
-        candPages: [makePageCapture({ url: "https://x.com/account", side: "cand", screenshotPath: candPath })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/account", side: "prod", screenshotPath: prodPath }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/account", side: "cand", screenshotPath: candPath }),
+        ],
       }),
     );
     const vd = r.data?.visualDiff as {
@@ -459,8 +538,12 @@ describe("visualRegressionKeyframes", () => {
     await visualRegressionKeyframes(
       makeContext({
         outDir: dir.path,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath }),
+        ],
       }),
     );
     expect(mockCreate).toHaveBeenCalledOnce();
@@ -494,8 +577,12 @@ describe("visualRegressionKeyframes", () => {
       makeContext({
         outDir: dir.path,
         cacheDir,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath }),
+        ],
       }),
     );
     const vd1 = r1.data?.visualDiff as { llmCallsUsed: number; pagesFromCache: number };
@@ -509,8 +596,12 @@ describe("visualRegressionKeyframes", () => {
       makeContext({
         outDir: dir.path,
         cacheDir,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath }),
+        ],
       }),
     );
     const vd2 = r2.data?.visualDiff as {
@@ -539,13 +630,15 @@ describe("visualRegressionKeyframes", () => {
                 type: "missing-component",
                 region: "shelf",
                 severity: "critical",
-                description: "Product shelf shows only gray skeleton placeholder cards in cand while prod has fully loaded products",
+                description:
+                  "Product shelf shows only gray skeleton placeholder cards in cand while prod has fully loaded products",
               },
               {
                 type: "missing-component",
                 region: "footer",
                 severity: "high",
-                description: "Footer 'About Us' navigation block is absent in cand — entire <ul> markup removed",
+                description:
+                  "Footer 'About Us' navigation block is absent in cand — entire <ul> markup removed",
               },
             ],
           },
@@ -559,13 +652,28 @@ describe("visualRegressionKeyframes", () => {
     makePng(prodPath, 50, 50, [100, 100, 100]);
     makePngWithDiff(candPath, 50, 50, [100, 100, 100], 1);
     // Imbalanced skeletons: cand has 8 skeletons, prod has none
-    const prodHtml = "<html><body><div data-section='Shelf'><div class='product'>real product</div></div></body></html>";
+    const prodHtml =
+      "<html><body><div data-section='Shelf'><div class='product'>real product</div></div></body></html>";
     const candHtml = `<html><body><div data-section='Shelf'>${"<div class='skeleton'></div>".repeat(8)}</div></body></html>`;
     const r = await visualRegressionKeyframes(
       makeContext({
         outDir: dir.path,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath, html: prodHtml })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath, html: candHtml })],
+        prodPages: [
+          makePageCapture({
+            url: "https://x.com/",
+            side: "prod",
+            screenshotPath: prodPath,
+            html: prodHtml,
+          }),
+        ],
+        candPages: [
+          makePageCapture({
+            url: "https://x.com/",
+            side: "cand",
+            screenshotPath: candPath,
+            html: candHtml,
+          }),
+        ],
       }),
     );
     const semantic = r.issues.filter((i) => i.id.includes("visual:semantic"));
@@ -593,7 +701,8 @@ describe("visualRegressionKeyframes", () => {
                 type: "missing-component",
                 region: "main",
                 severity: "critical",
-                description: "Half the page is filled with skeleton placeholder cards — prod failed to load the product shelves",
+                description:
+                  "Half the page is filled with skeleton placeholder cards — prod failed to load the product shelves",
               },
             ],
           },
@@ -611,11 +720,27 @@ describe("visualRegressionKeyframes", () => {
     const r = await visualRegressionKeyframes(
       makeContext({
         outDir: dir.path,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath, html: prodHtml })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath, html: candHtml })],
+        prodPages: [
+          makePageCapture({
+            url: "https://x.com/",
+            side: "prod",
+            screenshotPath: prodPath,
+            html: prodHtml,
+          }),
+        ],
+        candPages: [
+          makePageCapture({
+            url: "https://x.com/",
+            side: "cand",
+            screenshotPath: candPath,
+            html: candHtml,
+          }),
+        ],
       }),
     );
-    const issue = r.issues.find((i) => i.id.includes("visual:semantic") && i.summary.includes("[main]"));
+    const issue = r.issues.find(
+      (i) => i.id.includes("visual:semantic") && i.summary.includes("[main]"),
+    );
     // High pctDiff bypasses the skeleton downgrade — severity stays critical
     expect(issue?.severity).toBe("critical");
     expect(issue?.summary).not.toMatch(/downgraded/);
@@ -648,15 +773,32 @@ describe("visualRegressionKeyframes", () => {
     makePng(candPath, 50, 50, [255, 255, 255]);
     // Only 2-skeleton imbalance: under the 5 threshold, should NOT downgrade
     const prodHtml = "<html><body><div class='skeleton'></div></body></html>";
-    const candHtml = "<html><body><div class='skeleton'></div><div class='skeleton'></div><div class='skeleton'></div></body></html>";
+    const candHtml =
+      "<html><body><div class='skeleton'></div><div class='skeleton'></div><div class='skeleton'></div></body></html>";
     const r = await visualRegressionKeyframes(
       makeContext({
         outDir: dir.path,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath, html: prodHtml })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath, html: candHtml })],
+        prodPages: [
+          makePageCapture({
+            url: "https://x.com/",
+            side: "prod",
+            screenshotPath: prodPath,
+            html: prodHtml,
+          }),
+        ],
+        candPages: [
+          makePageCapture({
+            url: "https://x.com/",
+            side: "cand",
+            screenshotPath: candPath,
+            html: candHtml,
+          }),
+        ],
       }),
     );
-    const shelfIssue = r.issues.find((i) => i.id.includes("visual:semantic") && i.summary.includes("[shelf]"));
+    const shelfIssue = r.issues.find(
+      (i) => i.id.includes("visual:semantic") && i.summary.includes("[shelf]"),
+    );
     expect(shelfIssue?.severity).toBe("critical"); // unchanged
     expect(shelfIssue?.summary).not.toMatch(/downgraded/);
     delete process.env.ANTHROPIC_API_KEY;
@@ -680,8 +822,12 @@ describe("visualRegressionKeyframes", () => {
       makeContext({
         outDir: dir.path,
         cacheDir,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath }),
+        ],
       }),
     );
     mockCreate.mockClear();
@@ -692,8 +838,12 @@ describe("visualRegressionKeyframes", () => {
         outDir: dir.path,
         cacheDir,
         noCache: true,
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", screenshotPath: prodPath }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", screenshotPath: candPath }),
+        ],
       }),
     );
     const vd = r.data?.visualDiff as { llmCallsUsed: number; pagesFromCache: number };

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  type RunTimings,
   TimingRegistry,
   formatTimingsSummary,
   withTiming,
-  type RunTimings,
 } from "../../src/util/timing.ts";
 
 describe("withTiming", () => {

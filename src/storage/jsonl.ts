@@ -1,4 +1,4 @@
-import { closeSync, openSync, writeSync, type WriteStream } from "node:fs";
+import { type WriteStream, closeSync, openSync, writeSync } from "node:fs";
 import type { CheckResult, Issue } from "../types/schema.ts";
 
 /**
@@ -61,11 +61,7 @@ export interface JsonlErrorRecord {
   durationMs: number;
 }
 
-export type JsonlRecord =
-  | JsonlMetadata
-  | JsonlCheckRecord
-  | JsonlFinalRecord
-  | JsonlErrorRecord;
+export type JsonlRecord = JsonlMetadata | JsonlCheckRecord | JsonlFinalRecord | JsonlErrorRecord;
 
 export class JsonlWriter {
   private fd: number | null = null;

@@ -28,22 +28,26 @@ describe("extractJsonLd", () => {
   });
 
   it("handles JSON arrays at top level", () => {
-    const m = extractJsonLd(html([
-      { "@type": "Product", name: "A" },
-      { "@type": "Organization", name: "Acme" },
-    ]));
+    const m = extractJsonLd(
+      html([
+        { "@type": "Product", name: "A" },
+        { "@type": "Organization", name: "Acme" },
+      ]),
+    );
     expect(m.has("Product")).toBe(true);
     expect(m.has("Organization")).toBe(true);
   });
 
   it("handles @graph collection", () => {
-    const m = extractJsonLd(html({
-      "@context": "https://schema.org",
-      "@graph": [
-        { "@type": "Product", name: "P" },
-        { "@type": "Organization", name: "Acme" },
-      ],
-    }));
+    const m = extractJsonLd(
+      html({
+        "@context": "https://schema.org",
+        "@graph": [
+          { "@type": "Product", name: "P" },
+          { "@type": "Organization", name: "Acme" },
+        ],
+      }),
+    );
     expect(m.has("Product")).toBe(true);
     expect(m.has("Organization")).toBe(true);
   });
@@ -86,17 +90,21 @@ describe("diffProductSchema", () => {
   });
 
   it("flags missing required fields in cand", () => {
-    const prod = extractJsonLd(html({
-      "@type": "Product",
-      name: "Tênis",
-      sku: "1",
-      offers: { price: 100, priceCurrency: "BRL", availability: "InStock" },
-    }));
-    const cand = extractJsonLd(html({
-      "@type": "Product",
-      name: "Tênis",
-      // sku, image, brand, description, offers.* missing
-    }));
+    const prod = extractJsonLd(
+      html({
+        "@type": "Product",
+        name: "Tênis",
+        sku: "1",
+        offers: { price: 100, priceCurrency: "BRL", availability: "InStock" },
+      }),
+    );
+    const cand = extractJsonLd(
+      html({
+        "@type": "Product",
+        name: "Tênis",
+        // sku, image, brand, description, offers.* missing
+      }),
+    );
     const d = diffProductSchema(prod, cand);
     expect(d.bothPresent).toBe(true);
     expect(d.missingFieldsInCand).toContain("sku");
@@ -118,8 +126,12 @@ describe("diffProductSchema", () => {
   });
 
   it("handles price as string with BR-format decimal", () => {
-    const prod = extractJsonLd(html({ "@type": "Product", name: "X", offers: { price: "100,00" } }));
-    const cand = extractJsonLd(html({ "@type": "Product", name: "X", offers: { price: "100.00" } }));
+    const prod = extractJsonLd(
+      html({ "@type": "Product", name: "X", offers: { price: "100,00" } }),
+    );
+    const cand = extractJsonLd(
+      html({ "@type": "Product", name: "X", offers: { price: "100.00" } }),
+    );
     const d = diffProductSchema(prod, cand);
     expect(d.changedFields.some((c) => c.field === "offers.price")).toBe(false);
   });

@@ -23,15 +23,15 @@ export function loginFlow(ctx: CheckContext): CheckResult {
   const single = isSingleSite(ctx.prodFlows, ctx.candFlows);
 
   const hasFlow =
-    ctx.prodFlows.some((f) => f.flow === "login") ||
-    ctx.candFlows.some((f) => f.flow === "login");
+    ctx.prodFlows.some((f) => f.flow === "login") || ctx.candFlows.some((f) => f.flow === "login");
   if (!hasFlow) {
     return {
       name: "login-flow",
       status: "skipped",
       severity: "critical",
       durationMs: Date.now() - start,
-      summary: "login flow não estava no escopo do run (rc.login.enabled=false ou credenciais ausentes)",
+      summary:
+        "login flow não estava no escopo do run (rc.login.enabled=false ou credenciais ausentes)",
       issues: [],
     };
   }
@@ -50,7 +50,9 @@ export function loginFlow(ctx: CheckContext): CheckResult {
           category: "functional",
           check: "login-flow",
           summary: `[${viewport}] Login com credenciais válidas falhou: ${submitValid.note ?? submitValid.actionDescription ?? ""}`,
-          evidence: submitValid.screenshotPath ? [{ kind: "screenshot", path: submitValid.screenshotPath }] : [],
+          evidence: submitValid.screenshotPath
+            ? [{ kind: "screenshot", path: submitValid.screenshotPath }]
+            : [],
         });
       }
       const submitInvalid = findStep(flow, "submit-invalid");
@@ -88,12 +90,11 @@ export function loginFlow(ctx: CheckContext): CheckResult {
     }
   }
 
-  const status: CheckResult["status"] =
-    issues.some((i) => i.severity === "critical")
-      ? "fail"
-      : issues.length > 0
-        ? "warn"
-        : "pass";
+  const status: CheckResult["status"] = issues.some((i) => i.severity === "critical")
+    ? "fail"
+    : issues.length > 0
+      ? "warn"
+      : "pass";
 
   return {
     name: "login-flow",

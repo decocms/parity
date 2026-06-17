@@ -83,10 +83,7 @@ describe("seoDeepAudit", () => {
       "/robots.txt": { status: 404, body: "" },
       "/sitemap.xml": { status: 404, body: "" },
     }));
-    const candHtml = HTML_OK.replace(
-      'href="https://x.com/"',
-      'href="/relative-path"',
-    );
+    const candHtml = HTML_OK.replace('href="https://x.com/"', 'href="/relative-path"');
     const r = await seoDeepAudit(
       makeContext({
         prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", html: HTML_OK })],
@@ -119,11 +116,17 @@ describe("seoDeepAudit", () => {
       if (url.includes("https://x.com/robots.txt")) return { status: 200, body: ROBOTS_OK };
       if (url.includes("https://other.example/robots.txt")) return { status: 200, body: ROBOTS_OK };
       if (url.includes("https://x.com/sitemap.xml")) {
-        const urls = Array.from({ length: 100 }, (_, i) => `<url><loc>https://x.com/${i}</loc></url>`).join("");
+        const urls = Array.from(
+          { length: 100 },
+          (_, i) => `<url><loc>https://x.com/${i}</loc></url>`,
+        ).join("");
         return { status: 200, body: `<?xml version="1.0"?><urlset>${urls}</urlset>` };
       }
       if (url.includes("https://other.example/sitemap.xml")) {
-        const urls = Array.from({ length: 10 }, (_, i) => `<url><loc>https://other.example/${i}</loc></url>`).join("");
+        const urls = Array.from(
+          { length: 10 },
+          (_, i) => `<url><loc>https://other.example/${i}</loc></url>`,
+        ).join("");
         return { status: 200, body: `<?xml version="1.0"?><urlset>${urls}</urlset>` };
       }
       return { status: 404, body: "" };
@@ -131,7 +134,9 @@ describe("seoDeepAudit", () => {
     const r = await seoDeepAudit(
       makeContext({
         prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", html: HTML_OK })],
-        candPages: [makePageCapture({ url: "https://other.example/", side: "cand", html: HTML_OK })],
+        candPages: [
+          makePageCapture({ url: "https://other.example/", side: "cand", html: HTML_OK }),
+        ],
       }),
     );
     expect(r.issues.find((i) => i.id === "seo:sitemap-url-count")).toBeDefined();
@@ -142,10 +147,7 @@ describe("seoDeepAudit", () => {
       "/robots.txt": { status: 404, body: "" },
       "/sitemap.xml": { status: 404, body: "" },
     }));
-    const candHtml = HTML_OK.replace(
-      /<script type="application\/ld\+json">[^<]+<\/script>/,
-      "",
-    );
+    const candHtml = HTML_OK.replace(/<script type="application\/ld\+json">[^<]+<\/script>/, "");
     const r = await seoDeepAudit(
       makeContext({
         prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", html: HTML_OK })],

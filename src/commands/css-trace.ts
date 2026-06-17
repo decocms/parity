@@ -134,7 +134,14 @@ export async function traceLoadedPage(
       rule: {
         styleSheetId?: string;
         selectorList: { selectors: Array<{ text: string }> };
-        style: { cssProperties: Array<{ name: string; value: string; important?: boolean; disabled?: boolean }> };
+        style: {
+          cssProperties: Array<{
+            name: string;
+            value: string;
+            important?: boolean;
+            disabled?: boolean;
+          }>;
+        };
         origin: string;
       };
       matchingSelectors: number[];
@@ -145,7 +152,12 @@ export async function traceLoadedPage(
           styleSheetId?: string;
           selectorList: { selectors: Array<{ text: string }> };
           style: {
-            cssProperties: Array<{ name: string; value: string; important?: boolean; disabled?: boolean }>;
+            cssProperties: Array<{
+              name: string;
+              value: string;
+              important?: boolean;
+              disabled?: boolean;
+            }>;
           };
           origin: string;
         };
@@ -172,10 +184,7 @@ export async function traceLoadedPage(
       // CDP doesn't return URL via getStyleSheetText. Fall back to a stable
       // marker derived from the first ~80 chars of the sheet — enough to
       // tell daisyUI apart from app.css, etc.
-      const preview = header.text
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 100);
+      const preview = header.text.replace(/\s+/g, " ").trim().slice(0, 100);
       const label = `stylesheet#${styleSheetId} (${preview})`;
       sheetUrlCache.set(styleSheetId, label);
       return label;
@@ -189,7 +198,22 @@ export async function traceLoadedPage(
   // Shared rule-extraction logic for both direct matches and matches on
   // ancestors that inherit into the target element.
   const buildRule = async (
-    m: { rule: { styleSheetId?: string; selectorList: { selectors: Array<{ text: string }> }; style: { cssProperties: Array<{ name: string; value: string; important?: boolean; disabled?: boolean }> }; origin: string }; matchingSelectors: number[] },
+    m: {
+      rule: {
+        styleSheetId?: string;
+        selectorList: { selectors: Array<{ text: string }> };
+        style: {
+          cssProperties: Array<{
+            name: string;
+            value: string;
+            important?: boolean;
+            disabled?: boolean;
+          }>;
+        };
+        origin: string;
+      };
+      matchingSelectors: number[];
+    },
     inheritedFromDistance?: number,
   ): Promise<MatchedRule> => {
     const r = m.rule;
@@ -250,7 +274,12 @@ export async function traceLoadedPage(
 
 function applyFilter(result: TraceResult, filter?: string): TraceResult {
   if (!filter) return result;
-  const wanted = new Set(filter.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
+  const wanted = new Set(
+    filter
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
   const computed: Record<string, string> = {};
   for (const [k, v] of Object.entries(result.computed)) {
     if (wanted.has(k.toLowerCase())) computed[k] = v;
@@ -356,9 +385,7 @@ export async function cssTraceCommand(opts: CssTraceOptions): Promise<number> {
     return 1;
   }
   if ((hasProd && !hasCand) || (!hasProd && hasCand)) {
-    console.error(
-      chalk.red("Comparison mode needs both --prod and --cand (got only one)."),
-    );
+    console.error(chalk.red("Comparison mode needs both --prod and --cand (got only one)."));
     return 1;
   }
   if (!hasUrl && !hasProd && !hasCand) {
@@ -384,7 +411,9 @@ export async function cssTraceCommand(opts: CssTraceOptions): Promise<number> {
         const prodF = applyFilter(prodRes, opts.filter);
         const candF = applyFilter(candRes, opts.filter);
         if (opts.json) {
-          console.log(JSON.stringify({ prod: prodF, cand: candF, diff: diffComputed(prodF, candF) }, null, 2));
+          console.log(
+            JSON.stringify({ prod: prodF, cand: candF, diff: diffComputed(prodF, candF) }, null, 2),
+          );
         } else {
           printComparison(prodF, candF);
         }

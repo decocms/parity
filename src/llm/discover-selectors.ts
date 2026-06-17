@@ -81,7 +81,7 @@ const DISCOVER_SELECTORS_TOOL = {
       search_suggestions: {
         type: "string",
         description:
-          "CSS selector for the container that shows AUTOCOMPLETE suggestions while typing (e.g. \"[role='listbox']\", \".vtex-search-bar__autocomplete\", \"[data-search-suggestions]\"). May not exist on the home (lazy-rendered after typing). Return EMPTY STRING if you cannot detect it.",
+          'CSS selector for the container that shows AUTOCOMPLETE suggestions while typing (e.g. "[role=\'listbox\']", ".vtex-search-bar__autocomplete", "[data-search-suggestions]"). May not exist on the home (lazy-rendered after typing). Return EMPTY STRING if you cannot detect it.',
       },
       pdp_gallery_thumbnail: {
         type: "string",
@@ -196,11 +196,13 @@ export function compactHtmlForSelectors(html: string, maxChars = 30_000): string
 
     // Always include the head meta (helps detect platform)
     const head = $("head").clone();
-    head.find("title, meta[name='generator'], meta[name='vtex'], meta[name='platform'], link[rel='canonical']").each(
-      (_, el) => {
+    head
+      .find(
+        "title, meta[name='generator'], meta[name='vtex'], meta[name='platform'], link[rel='canonical']",
+      )
+      .each((_, el) => {
         sections.push($.html(el)!);
-      },
-    );
+      });
 
     // Header + nav
     $("header, nav, [role='banner']").each((_, el) => {
@@ -208,7 +210,9 @@ export function compactHtmlForSelectors(html: string, maxChars = 30_000): string
     });
 
     // First "shelf"/product list-like region
-    const shelf = $("[data-product-card], [data-deco='view-product'], article a[href*='/p/'], article a[href*='/products/']")
+    const shelf = $(
+      "[data-product-card], [data-deco='view-product'], article a[href*='/p/'], article a[href*='/products/']",
+    )
       .closest("section, ul, div")
       .first();
     if (shelf.length > 0) sections.push($.html(shelf)!);

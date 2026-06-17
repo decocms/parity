@@ -24,11 +24,7 @@ const LOW_CACHE_HIT_PCT = 0.5;
 const MIN_STATIC_FOR_CACHE_CHECK = 10;
 const STATIC_RESOURCE_TYPES = new Set(["script", "stylesheet", "image", "font"]);
 
-export function auditNetwork(
-  pageKey: string,
-  pageUrl: string,
-  entries: NetworkEntry[],
-): Issue[] {
+export function auditNetwork(pageKey: string, pageUrl: string, entries: NetworkEntry[]): Issue[] {
   const out: Issue[] = [];
   if (entries.length === 0) return out;
 
@@ -63,7 +59,12 @@ export function auditNetwork(
       page: pageKey,
       check: "audit-network",
       summary: `${thirdPartyErrors.length} third-party request(s) com erro (analytics, ads, widgets)`,
-      details: `Sample (até 5):\n${thirdPartyErrors.slice(0, 5).map((e) => `  [${e.status}] ${e.url.slice(0, 120)}`).join("\n")}\n\nA maioria desses erros vem de ad blockers do usuário, não são bugs do site. Worth investigating only if a third-party serviço crítico (e.g. checkout SDK) está aí.`,
+      details: `Sample (até 5):\n${thirdPartyErrors
+        .slice(0, 5)
+        .map((e) => `  [${e.status}] ${e.url.slice(0, 120)}`)
+        .join(
+          "\n",
+        )}\n\nA maioria desses erros vem de ad blockers do usuário, não são bugs do site. Worth investigating only if a third-party serviço crítico (e.g. checkout SDK) está aí.`,
     });
   }
 
@@ -77,7 +78,12 @@ export function auditNetwork(
       page: pageKey,
       check: "audit-network",
       summary: `${slow.length} request(s) > ${SLOW_REQUEST_MS}ms — degrada TTFB/LCP`,
-      details: `Mais lentos (top 5):\n${slow.slice(0, 5).map((e) => `  ${Math.round(e.durationMs ?? 0)}ms · [${e.status}] ${e.url.slice(0, 120)}`).join("\n")}\n\nCausas comuns: SSR sem cache, queries N+1, third-party slow (ads, analytics não-async).`,
+      details: `Mais lentos (top 5):\n${slow
+        .slice(0, 5)
+        .map((e) => `  ${Math.round(e.durationMs ?? 0)}ms · [${e.status}] ${e.url.slice(0, 120)}`)
+        .join(
+          "\n",
+        )}\n\nCausas comuns: SSR sem cache, queries N+1, third-party slow (ads, analytics não-async).`,
     });
   }
 
@@ -90,7 +96,15 @@ export function auditNetwork(
       page: pageKey,
       check: "audit-network",
       summary: `Page peso ${(summary.totalBytes / 1e6).toFixed(1)}MB total — acima de ${BLOATED_BYTES / 1e6}MB`,
-      details: `Total: ${summary.total} requests · ${(summary.totalBytes / 1e6).toFixed(2)}MB\n\nPor tipo:\n${Object.entries(summary.byType).sort((a, b) => b[1].bytes - a[1].bytes).slice(0, 5).map(([t, v]) => `  ${t}: ${v.count} requests · ${(v.bytes / 1e6).toFixed(2)}MB`).join("\n")}\n\nAções: code-splitting, lazy-load de imagens, remover libs não usadas, fonts subset.`,
+      details: `Total: ${summary.total} requests · ${(summary.totalBytes / 1e6).toFixed(2)}MB\n\nPor tipo:\n${Object.entries(
+        summary.byType,
+      )
+        .sort((a, b) => b[1].bytes - a[1].bytes)
+        .slice(0, 5)
+        .map(([t, v]) => `  ${t}: ${v.count} requests · ${(v.bytes / 1e6).toFixed(2)}MB`)
+        .join(
+          "\n",
+        )}\n\nAções: code-splitting, lazy-load de imagens, remover libs não usadas, fonts subset.`,
     });
   }
 

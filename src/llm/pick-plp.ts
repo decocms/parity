@@ -60,9 +60,7 @@ function isBlocked(href: string): boolean {
   }
 }
 
-async function llmPick(
-  candidates: CategoryLinkCandidate[],
-): Promise<CategoryLinkCandidate | null> {
+async function llmPick(candidates: CategoryLinkCandidate[]): Promise<CategoryLinkCandidate | null> {
   const input = await callTool<{ index?: number }>({
     feature: "plp-matching",
     systemPrompt:

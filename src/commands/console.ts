@@ -100,7 +100,11 @@ function printResults(
     return;
   }
   if (entries.length === 0) {
-    console.log(chalk.dim(`  ${meta.viewport} · ${meta.url}\n  nenhuma entrada de console nos filtros pedidos`));
+    console.log(
+      chalk.dim(
+        `  ${meta.viewport} · ${meta.url}\n  nenhuma entrada de console nos filtros pedidos`,
+      ),
+    );
     return;
   }
   console.log(chalk.bold(`\n  ${meta.viewport} · ${meta.url}`));

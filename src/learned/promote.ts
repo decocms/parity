@@ -2,11 +2,11 @@ import type { FlowCapture } from "../types/schema.ts";
 import type { Platform } from "./platform.ts";
 import {
   type LearnedSelectors,
+  type SelectorEntry,
+  SelectorKey,
   promoteFromLlm,
   recordFailure,
   recordSuccess,
-  SelectorKey,
-  type SelectorEntry,
 } from "./repo.ts";
 
 export interface PromoteResult {
@@ -90,4 +90,3 @@ function isAlreadyDeprecated(
   const entry = entries.find((e) => e.selector === selector);
   return !!entry?.deprecated;
 }
-

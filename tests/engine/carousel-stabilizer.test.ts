@@ -104,12 +104,7 @@ describe("CAROUSEL_STABILIZER_INIT_SCRIPT", () => {
     const fakeDocument = {
       querySelectorAll: () => [] as unknown[],
     };
-    const fn = new Function(
-      "window",
-      "document",
-      "jQuery",
-      CAROUSEL_STABILIZER_INIT_SCRIPT,
-    );
+    const fn = new Function("window", "document", "jQuery", CAROUSEL_STABILIZER_INIT_SCRIPT);
     expect(() => fn(fakeWindow, fakeDocument, undefined)).not.toThrow();
     // After running, the global hook should be defined.
     expect(typeof fakeWindow.__parityStabilizeCarousels).toBe("function");
@@ -119,12 +114,7 @@ describe("CAROUSEL_STABILIZER_INIT_SCRIPT", () => {
   it("the in-page hook is idempotent (second eval is a no-op)", () => {
     const fakeWindow: Record<string, unknown> = {};
     const fakeDocument = { querySelectorAll: () => [] as unknown[] };
-    const fn = new Function(
-      "window",
-      "document",
-      "jQuery",
-      CAROUSEL_STABILIZER_INIT_SCRIPT,
-    );
+    const fn = new Function("window", "document", "jQuery", CAROUSEL_STABILIZER_INIT_SCRIPT);
     fn(fakeWindow, fakeDocument, undefined);
     const firstHook = fakeWindow.__parityStabilizeCarousels;
     fn(fakeWindow, fakeDocument, undefined);

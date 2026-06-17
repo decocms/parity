@@ -1,9 +1,5 @@
 import chalk from "chalk";
-import {
-  deleteBaseline,
-  listBaselines,
-  saveBaseline,
-} from "../storage/baselines.ts";
+import { deleteBaseline, listBaselines, saveBaseline } from "../storage/baselines.ts";
 import { loadRun } from "../storage/fs.ts";
 
 export interface BaselineSetOptions {

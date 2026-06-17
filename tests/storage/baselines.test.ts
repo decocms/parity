@@ -86,7 +86,9 @@ describe("deleteBaseline", () => {
 
 describe("compareToBaseline", () => {
   it("identifies resolved (in base, not in current)", () => {
-    const baseline = { issues: [makeIssue({ id: "old" })] } as ReturnType<typeof makeRun> as unknown as {
+    const baseline = { issues: [makeIssue({ id: "old" })] } as ReturnType<
+      typeof makeRun
+    > as unknown as {
       issues: typeof makeIssue extends () => infer T ? T[] : never;
     };
     const current: Run = makeRun({ issues: [makeIssue({ id: "new" })] });

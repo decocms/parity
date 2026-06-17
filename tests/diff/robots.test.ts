@@ -56,10 +56,7 @@ Sitemap: https://x.com/sitemap-2.xml
     expect(r.userAgents["*"]?.disallow).toContain("/admin");
     expect(r.userAgents["*"]?.allow).toContain("/admin/help");
     expect(r.userAgents.googlebot?.disallow).toContain("/private");
-    expect(r.sitemaps).toEqual([
-      "https://x.com/sitemap-2.xml",
-      "https://x.com/sitemap.xml",
-    ]);
+    expect(r.sitemaps).toEqual(["https://x.com/sitemap-2.xml", "https://x.com/sitemap.xml"]);
   });
 
   it("treats User-agent values case-insensitively (bug #16)", () => {

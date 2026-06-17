@@ -112,7 +112,8 @@ export function snapshotDom(html: string): DomSnapshot {
       for (const item of items) {
         const type = (item as Record<string, unknown>)["@type"];
         if (typeof type === "string") jsonLdTypes.push(type);
-        else if (Array.isArray(type)) jsonLdTypes.push(...type.filter((t) => typeof t === "string"));
+        else if (Array.isArray(type))
+          jsonLdTypes.push(...type.filter((t) => typeof t === "string"));
       }
     } catch {
       /* invalid JSON-LD, ignore */
@@ -139,16 +140,14 @@ export function snapshotDom(html: string): DomSnapshot {
       .parents("[data-section]")
       .filter((_, p) => BANNER_SECTION_RE.test($(p).attr("data-section") ?? ""))
       .first();
-    const sectionName = sectionAncestor.length > 0
-      ? sectionAncestor.attr("data-section") ?? null
-      : null;
+    const sectionName =
+      sectionAncestor.length > 0 ? (sectionAncestor.attr("data-section") ?? null) : null;
     const looksLikeBanner =
       sectionName !== null || (widthAttr !== null && widthAttr >= BANNER_WIDTH_THRESHOLD);
     if (!looksLikeBanner) return;
     const src = $el.attr("src") ?? "";
     if (!src) return;
-    const aspectRatio =
-      widthAttr && heightAttr && heightAttr > 0 ? widthAttr / heightAttr : null;
+    const aspectRatio = widthAttr && heightAttr && heightAttr > 0 ? widthAttr / heightAttr : null;
     banners.push({ src, width: widthAttr, height: heightAttr, aspectRatio, sectionName });
   });
   const imageStats = {
@@ -215,11 +214,7 @@ export interface DomDiffOptions {
   countTolerance?: number; // ±N per count
 }
 
-export function diffDom(
-  prod: DomSnapshot,
-  cand: DomSnapshot,
-  opts: DomDiffOptions = {},
-): DomDiff {
+export function diffDom(prod: DomSnapshot, cand: DomSnapshot, opts: DomDiffOptions = {}): DomDiff {
   const tol = opts.countTolerance ?? 2;
   const countsDelta: DomDiff["countsDelta"] = {};
   let anyFailed = false;
@@ -248,12 +243,20 @@ export function diffDom(
   const decoSectionsOnlyCand = [...candSecs].filter((s) => !prodSecs.has(s));
   if (decoSectionsOnlyProd.length > 0) anyFailed = true;
 
-  return { countsDelta, metaDelta, imagesDelta, decoSectionsOnlyProd, decoSectionsOnlyCand, anyFailed };
+  return {
+    countsDelta,
+    metaDelta,
+    imagesDelta,
+    decoSectionsOnlyProd,
+    decoSectionsOnlyCand,
+    anyFailed,
+  };
 }
 
 function diffMeta(prod: MetaSeo, cand: MetaSeo): DomDiff["metaDelta"] {
   const out: DomDiff["metaDelta"] = [];
-  const norm = (s: string | null) => (s == null ? null : normalizeForCompare(collapseWhitespace(s)).toLowerCase());
+  const norm = (s: string | null) =>
+    s == null ? null : normalizeForCompare(collapseWhitespace(s)).toLowerCase();
 
   const simpleKeys: (keyof MetaSeo)[] = ["title", "description", "canonical", "robots"];
   for (const key of simpleKeys) {

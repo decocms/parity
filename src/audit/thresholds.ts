@@ -41,7 +41,7 @@ export interface VitalThreshold {
 export const VITAL_THRESHOLDS: Record<VitalMetric, VitalThreshold> = {
   lcp: { goodMax: 2500, niMax: 4000, poorCriticalMultiplier: 2 },
   fcp: { goodMax: 1800, niMax: 3000 },
-  cls: { goodMax: 0.10, niMax: 0.25, poorCriticalMultiplier: 2 },
+  cls: { goodMax: 0.1, niMax: 0.25, poorCriticalMultiplier: 2 },
   inp: { goodMax: 200, niMax: 500, poorCriticalMultiplier: 2 },
   ttfb: { goodMax: 800, niMax: 1800 },
 };

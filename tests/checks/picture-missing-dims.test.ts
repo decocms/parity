@@ -162,10 +162,15 @@ describe("pictureMissingDims check", () => {
   });
 
   it("summary conta offenders e detail trunca em 10", () => {
-    const offenders = Array.from({ length: 15 }, (_, i) => `<picture><img src="i${i}.jpg" /></picture>`).join("");
+    const offenders = Array.from(
+      { length: 15 },
+      (_, i) => `<picture><img src="i${i}.jpg" /></picture>`,
+    ).join("");
     const r = pictureMissingDims(
       makeContext({
-        candPages: [makePageCapture({ html: `<html><body>${offenders}</body></html>`, side: "cand" })],
+        candPages: [
+          makePageCapture({ html: `<html><body>${offenders}</body></html>`, side: "cand" }),
+        ],
       }),
     );
     expect(r.issues[0]!.summary).toMatch(/15 <Picture>/);

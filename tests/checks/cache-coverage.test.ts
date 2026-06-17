@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { cacheCoverage } from "../../src/checks/cache-coverage.ts";
+import type { NetworkEntry } from "../../src/types/schema.ts";
 import { makeContext } from "../helpers/make-context.ts";
 import { makePageCapture } from "../helpers/make-page-capture.ts";
-import type { NetworkEntry } from "../../src/types/schema.ts";
 
 function net(over: Partial<NetworkEntry> = {}): NetworkEntry {
   return {
@@ -49,9 +49,7 @@ describe("cacheCoverage", () => {
           makePageCapture({
             url: "https://x.com/",
             side: "cand",
-            network: [
-              net({ url: "https://x.com/app.deadbeef.js", bytes: 50_000 }),
-            ],
+            network: [net({ url: "https://x.com/app.deadbeef.js", bytes: 50_000 })],
           }),
         ],
       }),

@@ -60,7 +60,9 @@ export function runAuditForPage(capture: PageCapture): PageAuditResult {
 
   pushSafe(issues, "audit-vitals", () => auditVitals(pageKey, capture.vitals));
   pushSafe(issues, "audit-console", () => auditConsole(pageKey, capture.console));
-  pushSafe(issues, "audit-network", () => auditNetwork(pageKey, capture.finalUrl || capture.url, capture.network));
+  pushSafe(issues, "audit-network", () =>
+    auditNetwork(pageKey, capture.finalUrl || capture.url, capture.network),
+  );
   pushSafe(issues, "audit-images", () => auditImages(pageKey, capture.html));
   pushSafe(issues, "audit-seo", () => auditSeo(pageKey, capture.html));
 
@@ -130,10 +132,7 @@ function pushSafe(target: Issue[], checkName: string, fn: () => Issue[]): void {
   }
 }
 
-function countBy<K extends string>(
-  arr: Issue[],
-  pick: (i: Issue) => K,
-): Record<K, number> {
+function countBy<K extends string>(arr: Issue[], pick: (i: Issue) => K): Record<K, number> {
   const out: Partial<Record<K, number>> = {};
   for (const i of arr) {
     const k = pick(i);

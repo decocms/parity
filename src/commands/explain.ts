@@ -3,7 +3,11 @@ import { callMessage, isLlmAvailable } from "../llm/client.ts";
 import { ISSUE_AGGREGATOR_SYSTEM_PROMPT } from "../llm/system-prompt.ts";
 import { loadRun } from "../storage/fs.ts";
 
-export async function explainCommand(runId: string, issueId: string, output: string): Promise<number> {
+export async function explainCommand(
+  runId: string,
+  issueId: string,
+  output: string,
+): Promise<number> {
   if (!isLlmAvailable()) {
     console.error(
       chalk.red("Nenhuma API key de LLM encontrada — set ANTHROPIC_API_KEY ou OPENROUTER_API_KEY."),

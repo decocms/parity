@@ -35,7 +35,8 @@ function pageMaxSeverity(page: VisualDiffPage): Severity | null {
   if (page.differences.length === 0 && page.sectionsOnlyInProd.length === 0) return null;
   if (page.sectionsOnlyInProd.length > 0) {
     // missing sections are treated as at least "high"
-    const maxFromDiffs = page.differences.length > 0 ? minByOrder(page.differences.map((d) => d.severity)) : "high";
+    const maxFromDiffs =
+      page.differences.length > 0 ? minByOrder(page.differences.map((d) => d.severity)) : "high";
     return SEVERITY_ORDER[maxFromDiffs] < SEVERITY_ORDER.high ? maxFromDiffs : "high";
   }
   return minByOrder(page.differences.map((d) => d.severity));
@@ -62,9 +63,7 @@ export function buildVisualPrompt(
   sections.push(buildHeader(run, summary));
 
   if (!summary || summary.results.length === 0) {
-    sections.push(
-      "_No visual comparison ran in this run (visual-pages=0 or capture error)._",
-    );
+    sections.push("_No visual comparison ran in this run (visual-pages=0 or capture error)._");
     return sections.join("\n");
   }
 
@@ -88,11 +87,7 @@ export function buildVisualPrompt(
     return sections.join("\n");
   }
 
-  sections.push(
-    "",
-    `## Pages with differences (${pages.length}/${summary.pagesChecked})`,
-    "",
-  );
+  sections.push("", `## Pages with differences (${pages.length}/${summary.pagesChecked})`, "");
 
   for (const [idx, page] of pages.entries()) {
     sections.push(renderPageBlock(idx + 1, page, runDir));
@@ -102,10 +97,7 @@ export function buildVisualPrompt(
   return sections.join("\n");
 }
 
-function buildHeader(
-  run: Run,
-  summary: Run["visualDiff"],
-): string {
+function buildHeader(run: Run, summary: Run["visualDiff"]): string {
   const lines: string[] = [];
   lines.push(
     `# Visual Diff Report — ${run.id}`,
@@ -179,7 +171,9 @@ function renderPageBlock(idx: number, page: VisualDiffPage, runDir: string): str
   if (page.differences.length > 0) {
     lines.push("", "**Visual differences identified by LLM Vision:**", "");
     for (const [i, d] of page.differences.entries()) {
-      lines.push(`${i + 1}. ${SEVERITY_EMOJI[d.severity]} [${d.region} · ${d.type} · ${d.severity}] ${d.description}`);
+      lines.push(
+        `${i + 1}. ${SEVERITY_EMOJI[d.severity]} [${d.region} · ${d.type} · ${d.severity}] ${d.description}`,
+      );
     }
   }
 

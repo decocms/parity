@@ -97,7 +97,9 @@ export function formatTimingsSummary(timings: RunTimings): string {
     const pct = max > 0 ? Math.round((p.durationMs / max) * 16) : 0;
     const bar = "█".repeat(pct) + "░".repeat(16 - pct);
     const pctOfTotal = timings.totalMs > 0 ? Math.round((p.durationMs / timings.totalMs) * 100) : 0;
-    lines.push(`    ${p.phase.padEnd(maxLabel)}  ${formatMs(p.durationMs).padStart(7)}  ${bar} ${pctOfTotal}%`);
+    lines.push(
+      `    ${p.phase.padEnd(maxLabel)}  ${formatMs(p.durationMs).padStart(7)}  ${bar} ${pctOfTotal}%`,
+    );
   }
   return lines.join("\n");
 }

@@ -75,12 +75,11 @@ export function searchAutocomplete(ctx: CheckContext): CheckResult {
     }
   }
 
-  const status: CheckResult["status"] =
-    issues.some((i) => i.severity === "critical")
-      ? "fail"
-      : issues.length > 0
-        ? "warn"
-        : "pass";
+  const status: CheckResult["status"] = issues.some((i) => i.severity === "critical")
+    ? "fail"
+    : issues.length > 0
+      ? "warn"
+      : "pass";
 
   return {
     name: "search-autocomplete",

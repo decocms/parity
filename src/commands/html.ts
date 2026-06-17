@@ -1,6 +1,6 @@
+import chalk from "chalk";
 import * as cheerio from "cheerio";
 import * as diff from "diff";
-import chalk from "chalk";
 import prettier from "prettier";
 import { launchBrowser, newContext } from "../engine/browser.ts";
 import type { Viewport } from "../types/schema.ts";
@@ -74,7 +74,14 @@ export async function htmlCommand(opts: HtmlOptions): Promise<number> {
       if (piece.warning) console.error(chalk.yellow(`  ⚠ ${piece.warning}`));
       const finalText = await maybePretty(piece.html, opts.pretty === true);
       if (opts.json) {
-        console.log(JSON.stringify({ url: mode.url, viewport, selector: opts.selector ?? null, html: finalText }));
+        console.log(
+          JSON.stringify({
+            url: mode.url,
+            viewport,
+            selector: opts.selector ?? null,
+            html: finalText,
+          }),
+        );
       } else {
         console.log(finalText);
       }
@@ -158,7 +165,8 @@ export function resolveMode(opts: HtmlOptions): Mode {
       // but warn that --diff is the intended UX.
       return {
         kind: "error",
-        message: "passe --diff junto com --prod/--cand pra ver o unified diff (ou use --url single-side)",
+        message:
+          "passe --diff junto com --prod/--cand pra ver o unified diff (ou use --url single-side)",
       };
     }
     return { kind: "diff", prod: opts.prod, cand: opts.cand };
@@ -253,7 +261,8 @@ export function extractSelector(html: string, selector: string | undefined): Ext
  * so callers can branch instead of accepting silently-truncated input.
  */
 export function parseWaitMs(raw: string | number | undefined): number | null {
-  if (typeof raw === "number") return Number.isFinite(raw) && raw >= 0 && Number.isInteger(raw) ? raw : null;
+  if (typeof raw === "number")
+    return Number.isFinite(raw) && raw >= 0 && Number.isInteger(raw) ? raw : null;
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
   if (!/^\d+$/.test(trimmed)) return null;

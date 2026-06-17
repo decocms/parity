@@ -1,13 +1,6 @@
 import * as cheerio from "cheerio";
 
-export type Platform =
-  | "vtex"
-  | "vtex-fs"
-  | "shopify"
-  | "deco"
-  | "wake"
-  | "nuvemshop"
-  | "custom";
+export type Platform = "vtex" | "vtex-fs" | "shopify" | "deco" | "wake" | "nuvemshop" | "custom";
 
 export interface PlatformDetectionInput {
   url: string;

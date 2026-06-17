@@ -7,31 +7,31 @@ import type {
   ParityRc,
   Viewport,
 } from "../types/schema.ts";
-import { httpStatusParity } from "./http-status.ts";
-import { consoleErrorsBaseline } from "./console-errors.ts";
-import { htmlStructuralDiff } from "./html-structural.ts";
-import { metaSeoParity } from "./meta-seo.ts";
-import { visualRegressionKeyframes } from "./visual-regression.ts";
-import { purchaseJourneyFlow } from "./purchase-journey-flow.ts";
-import { networkSummaryDelta } from "./network-summary.ts";
-import { webVitalsMobile } from "./web-vitals.ts";
-import { imageLoadingHealth } from "./image-health.ts";
 import { bannerAspectRatio } from "./banner-aspect-ratio.ts";
-import { cartRevealModeDivergence } from "./cart-reveal-mode.ts";
-import { lazySectionPresence } from "./lazy-sections.ts";
 import { cacheCoverage } from "./cache-coverage.ts";
-import { seoDeepAudit } from "./seo-deep-audit.ts";
-import { searchPresence } from "./search-presence.ts";
-import { searchAutocomplete } from "./search-autocomplete.ts";
-import { searchResults } from "./search-results.ts";
-import { searchNoResults } from "./search-no-results.ts";
 import { cartInteractionsFlow } from "./cart-interactions-flow.ts";
-import { notFoundParity } from "./not-found-parity.ts";
+import { cartRevealModeDivergence } from "./cart-reveal-mode.ts";
+import { consoleErrorsBaseline } from "./console-errors.ts";
 import { cookieCepModalCls } from "./cookie-cep-modal-cls.ts";
-import { pdpGalleryRelated } from "./pdp-gallery-related.ts";
 import { footerLinksHealth } from "./footer-links-health.ts";
+import { htmlStructuralDiff } from "./html-structural.ts";
+import { httpStatusParity } from "./http-status.ts";
+import { imageLoadingHealth } from "./image-health.ts";
+import { lazySectionPresence } from "./lazy-sections.ts";
 import { loginFlow } from "./login-flow.ts";
+import { metaSeoParity } from "./meta-seo.ts";
+import { networkSummaryDelta } from "./network-summary.ts";
+import { notFoundParity } from "./not-found-parity.ts";
+import { pdpGalleryRelated } from "./pdp-gallery-related.ts";
 import { pictureMissingDims } from "./picture-missing-dims.ts";
+import { purchaseJourneyFlow } from "./purchase-journey-flow.ts";
+import { searchAutocomplete } from "./search-autocomplete.ts";
+import { searchNoResults } from "./search-no-results.ts";
+import { searchPresence } from "./search-presence.ts";
+import { searchResults } from "./search-results.ts";
+import { seoDeepAudit } from "./seo-deep-audit.ts";
+import { visualRegressionKeyframes } from "./visual-regression.ts";
+import { webVitalsMobile } from "./web-vitals.ts";
 
 export interface CheckContext {
   /** Page captures from prod side, across all flows/viewports */

@@ -111,7 +111,13 @@ export async function readComputedStyles(
   // The fix: wrap the page.evaluate in try/catch and degrade to a
   // structured error. The diagnostic message names the selector so the
   // user knows why the read failed even though the locator matched.
-  let got: { ok: true; styles: Record<string, string>; rect: { x: number; y: number; width: number; height: number } } | { ok: false; reason: string };
+  let got:
+    | {
+        ok: true;
+        styles: Record<string, string>;
+        rect: { x: number; y: number; width: number; height: number };
+      }
+    | { ok: false; reason: string };
   try {
     got = await page.evaluate(
       ({ sel, keys }) => {

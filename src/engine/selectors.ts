@@ -1,5 +1,5 @@
-import { getLearnedSelectors, type LearnedSelectors } from "../learned/repo.ts";
 import type { Platform } from "../learned/platform.ts";
+import { type LearnedSelectors, getLearnedSelectors } from "../learned/repo.ts";
 import type { ParityRc } from "../types/schema.ts";
 
 /**
@@ -333,9 +333,7 @@ export function selectorsFor(
   key: SelectorKey,
   ctxOrRc: SelectorResolutionContext | ParityRc = {},
 ): string[] {
-  const ctx: SelectorResolutionContext = isResolutionContext(ctxOrRc)
-    ? ctxOrRc
-    : { rc: ctxOrRc };
+  const ctx: SelectorResolutionContext = isResolutionContext(ctxOrRc) ? ctxOrRc : { rc: ctxOrRc };
 
   const out: string[] = [];
   const override = ctx.rc?.selectors?.[key];
@@ -356,4 +354,3 @@ function isResolutionContext(v: unknown): v is SelectorResolutionContext {
   const k = Object.keys(v as object);
   return k.length === 0 || k.some((x) => x === "rc" || x === "learned" || x === "platform");
 }
-

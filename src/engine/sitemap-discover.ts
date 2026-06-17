@@ -28,7 +28,12 @@ export function classifyPath(pathname: string): PageKind {
   // when /account verdict came back as "pass" because cand was rendering the
   // home page instead of the login modal — the page never got into the right
   // sampling bucket to flag as auth-specific drift.
-  if (/^\/(account|login|signin|signup|conta|entrar|cadastro|cadastrar|register|minha-conta|meu-perfil)(?:\/|$)/.test(p)) return "auth";
+  if (
+    /^\/(account|login|signin|signup|conta|entrar|cadastro|cadastrar|register|minha-conta|meu-perfil)(?:\/|$)/.test(
+      p,
+    )
+  )
+    return "auth";
 
   // Search pages — distinct bucket so quotas can ensure at least one search
   // surface gets tested even on sites with thousands of PLPs.

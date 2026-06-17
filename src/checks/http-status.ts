@@ -65,7 +65,11 @@ export function httpStatusParity(ctx: CheckContext): CheckResult {
 
   return {
     name: "http-status-parity",
-    status: issues.some((i) => i.severity === "critical") ? "fail" : issues.length ? "warn" : "pass",
+    status: issues.some((i) => i.severity === "critical")
+      ? "fail"
+      : issues.length
+        ? "warn"
+        : "pass",
     severity: "critical",
     durationMs: Date.now() - start,
     summary: `${pairs.length} pares verificados, ${issues.length} divergência(s)`,

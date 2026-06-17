@@ -29,7 +29,13 @@ export function createRunDir(outputDir: string, runId: string): RunPaths {
     consoleDir: join(runDir, "console"),
     runLog: join(runDir, "run.log"),
   };
-  for (const dir of [paths.runDir, paths.screenshotsDir, paths.harDir, paths.tracesDir, paths.consoleDir]) {
+  for (const dir of [
+    paths.runDir,
+    paths.screenshotsDir,
+    paths.harDir,
+    paths.tracesDir,
+    paths.consoleDir,
+  ]) {
     mkdirSync(dir, { recursive: true });
   }
   return paths;
@@ -70,7 +76,9 @@ export function loadRun(outputDir: string, runId: string): Run {
   return Run.parse(raw);
 }
 
-export function listRuns(outputDir: string): { id: string; timestamp: string; reportPath: string }[] {
+export function listRuns(
+  outputDir: string,
+): { id: string; timestamp: string; reportPath: string }[] {
   const runsDir = join(outputDir, "runs");
   if (!existsSync(runsDir)) return [];
   const entries = readdirSync(runsDir, { withFileTypes: true })

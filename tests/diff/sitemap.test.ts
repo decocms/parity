@@ -44,7 +44,10 @@ describe("fetchSitemap", () => {
   });
 
   it("returns null when all candidates fail", async () => {
-    ({ restore } = mockFetch({ "/sitemap.xml": { status: 404, body: "" }, "/sitemap_index.xml": { status: 404, body: "" } }));
+    ({ restore } = mockFetch({
+      "/sitemap.xml": { status: 404, body: "" },
+      "/sitemap_index.xml": { status: 404, body: "" },
+    }));
     expect(await fetchSitemap("https://x.com")).toBeNull();
   });
 
@@ -90,7 +93,9 @@ describe("parseSitemap", () => {
   });
 
   it("returns empty when XML is non-sitemap content", () => {
-    const r = parseSitemap("<rss><channel><item><title>not a sitemap</title></item></channel></rss>");
+    const r = parseSitemap(
+      "<rss><channel><item><title>not a sitemap</title></item></channel></rss>",
+    );
     expect(r.urls).toEqual([]);
     expect(r.childSitemaps).toEqual([]);
   });
@@ -121,7 +126,10 @@ describe("resolveSitemapUrls", () => {
   });
 
   it("returns [] when fetch returns nothing", async () => {
-    ({ restore } = mockFetch({ "/sitemap.xml": { status: 404, body: "" }, "/sitemap_index.xml": { status: 404, body: "" } }));
+    ({ restore } = mockFetch({
+      "/sitemap.xml": { status: 404, body: "" },
+      "/sitemap_index.xml": { status: 404, body: "" },
+    }));
     expect(await resolveSitemapUrls("https://x.com")).toEqual([]);
   });
 });

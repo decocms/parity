@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.0](https://github.com/decocms/parity/compare/v0.10.1...v0.11.0) (2026-06-17)
+
+### Added
+
+* **Claude Agent SDK as a third LLM provider (#66).** Reuses the local `claude` CLI auth via [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk). Auto-detected when no env key is set — devs with `claude` already logged in don't need to configure anything. Goes through the user's Claude plan instead of API billing.
+* **Per-feature model routing.** Selector discovery / step recovery / classification → Haiku 4.5 (cheap), visual diff / aggregation → Sonnet 4.6, explain → Opus 4.7. Overridable via `--llm-model <feat>=<model>,...`, `--llm-tier-default <tier>`, or `--llm-model-default <model>`. Cuts ~70% of the LLM cost on a `--preset full` run.
+* **`parity pr` CI/CD command (#79).** Compares a PR preview URL against prod and emits a Markdown comment ready to paste into a GitHub PR. With `--github`, writes to `$GITHUB_STEP_SUMMARY`. Thin wrapper around `parity run` with CI-tuned defaults (preset=ci, mobile-only, purchase-journey).
+* **`parity report --section <name>` (#74).** Extracts one tab from a saved run as HTML or, with `--json`, as a tailored JSON projection (verdict, top-issues, checks, network, etc.). Lets agents pull the SEO/Network/Vitals slice without parsing the whole report or loading the full Run.
+* **Per-page Network waterfall (#78).** SVG bar chart on the Network tab, positioned by `requestStart`, color-coded by resource type, faded for cached. `NetworkEntry` schema gets optional `startMs`/`endMs` (back-compat).
+* **Clickable dashboard tiles → per-check detail panels (#76).** Tiles route to `#detail/<checkName>` showing status, duration, summary, issues, raw `data` payload, and a copy-pasteable reproduction command.
+* **Side-by-side Home/PLP/PDP/Cart/Checkout buttons (#77).** SBS panel classifies captured paths by role and emits one button per role. URLs captured on one side only get a dashed border + warning chip.
+* **`--pt` flag for LLM output language (#67).** Available on `parity run`, `audit`, `e2e`, `journey`, `fix`, `explain`. Affects only LLM-generated content — static report stays in English.
+* **Tab descriptions / inline help (#73).** Every tab opens with a one-line description so new readers (and agents) immediately know what the tab covers.
+* **Interactive selector prompt foundation (#72).** When parity hits a missing selector AND no LLM provider is available AND running in a TTY, the new prompt module guides the dev through writing a `.parityrc.json` override. Wiring into the runner is a follow-up.
+
+### Changed
+
+* **Report HTML now in English by default (#67).** Every user-facing PT-BR string in the report, audit HTML, and visual-diff prompt is translated. New regression test scans the output for PT-BR diacritics and a deny-list of common tokens.
+* **`#diff` tab hidden when no baseline (#68).** The empty-state "Run executed without baseline" message that looked like a bug on every normal run is gone — the tab simply doesn't render unless `--baseline <name>` is loaded.
+* **LLM-only tabs hidden when no LLM ran (#75).** Visual Diff and LLM Prompt tabs are omitted entirely from the nav + DOM when no LLM output exists. Single header banner explains why.
+* **Side-by-side iframe forces mobile viewport via proxy (#70).** When `parity serve` is active, the proxy injects `<meta name="viewport" content="width=375">`, sets a mobile UA, and adds `Sec-CH-UA-Mobile: ?1` so cand renders in real mobile.
+* **Smart `--visual-pages` default (#71).** Auto-zeroes when no LLM provider is available — the capture without analysis was just wasted seconds. Opt in with `--visual-pages N` if you want the raw screenshots anyway.
+* **README rewrites around the agents-in-loop thesis (#80).** Three use cases (assisted migration, CI/CD PR review, continuous smoke) up front. New `docs/cli.md`, `docs/checks.md`, `docs/config.md`.
+* **Report mobile-friendly + a11y focus rings + tabular numerics (#81).** Below 880px the sidebar becomes a horizontal chip strip; numeric values in tiles stay aligned across columns.
+
+### Fixed
+
+* **SDK provider image handling.** First implementation embedded base64 data URLs as text in the prompt — vision features (visual-diff, section-understanding) silently produced garbage. Now switches to the async-iterable `SDKUserMessage` form with proper `image` content blocks when `userImages` is set.
+* **Timer leak in SDK provider abort handle.** `setTimeout` was created but never cleared. New `makeAbortHandle` returns a `clear()` callback that callers invoke in `finally`.
+* **JSON repair reuse in SDK provider.** Bare `JSON.parse` was dropping fenced/wrapped output the OpenRouter provider would have salvaged. Now reuses the exported `tryRepairJson`.
+* **`setForcedProvider` validates credentials before activating.** Returns a user-facing error string instead of failing with a 401 mid-run.
+* **`disallowedTools: ["*"]` removed.** Was treated as a literal tool name, not a glob — misleading dead code.
+* **Repo-wide lint sweep.** 9 biome errors carried over from in-flight PRs (template-literal-as-string, optional-chain, assign-in-expression) now fixed. `bun run lint` is clean.
+
 ## [0.10.1](https://github.com/decocms/parity/compare/v0.10.0...v0.10.1) (2026-05-30)
 
 ### Fixed

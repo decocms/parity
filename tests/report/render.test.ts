@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { renderHtmlReport } from "../../src/report/render.ts";
-import type { CheckResult, Issue, Run, SeoSummary, VisualDiffSummary } from "../../src/types/schema.ts";
+import type {
+  CheckResult,
+  Issue,
+  Run,
+  SeoSummary,
+  VisualDiffSummary,
+} from "../../src/types/schema.ts";
 import { makeIssue, makeRun } from "../helpers/make-run.ts";
 
 function makeCheck(over: Partial<CheckResult> = {}): CheckResult {
@@ -30,7 +36,18 @@ describe("renderHtmlReport — structure", () => {
     // Default makeRun() has no LLM output and no baseline, so:
     //   - "diff" is conditional on baseline (Issue #68) → absent
     //   - "visualdiff" / "prompt" are LLM-only (Issue #75) → absent
-    const tabs = ["summary", "seo", "sidebyside", "issues", "vitals", "cache", "checks", "pages", "console", "network"];
+    const tabs = [
+      "summary",
+      "seo",
+      "sidebyside",
+      "issues",
+      "vitals",
+      "cache",
+      "checks",
+      "pages",
+      "console",
+      "network",
+    ];
     for (const tab of tabs) {
       expect(html).toContain(`data-tab="${tab}"`);
       expect(html).toContain(`data-panel="${tab}"`);
@@ -103,7 +120,12 @@ describe("renderHtmlReport — structure", () => {
           sectionsOnlyInProd: ["Hero"],
           sectionsOnlyInCand: [],
           differences: [
-            { type: "missing-component", region: "hero", severity: "critical", description: "missing" },
+            {
+              type: "missing-component",
+              region: "hero",
+              severity: "critical",
+              description: "missing",
+            },
           ],
           llmCalled: true,
         },

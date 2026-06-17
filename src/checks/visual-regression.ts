@@ -12,14 +12,14 @@ import type {
   VisualDifference,
 } from "../types/schema.ts";
 import type { CheckContext } from "./index.ts";
-import { pairCaptures, type PagePair } from "./lib/pairing.ts";
+import { type PagePair, pairCaptures } from "./lib/pairing.ts";
 import {
+  type ParityCache,
   getCacheEntry,
   hashScreenshotPair,
   readCache,
   setCacheEntry,
   writeCache,
-  type ParityCache,
 } from "./lib/parity-cache.ts";
 
 /** Pixelmatch threshold — pixels that differ by this much are flagged. */
@@ -308,8 +308,7 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
     const prodSkeletonCount = prodSnapshot?.skeletonCount ?? 0;
     const candSkeletonCount = candSnapshot?.skeletonCount ?? 0;
 
-    const bothHaveCarousel =
-      hasCarouselSection(prodSections) && hasCarouselSection(candSections);
+    const bothHaveCarousel = hasCarouselSection(prodSections) && hasCarouselSection(candSections);
 
     let hash: string | undefined;
     let cacheHit: PreparedPair["cacheHit"];
@@ -358,8 +357,7 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
   const llmCandidates = prepared
     .filter((p) => !p.cacheHit) // cache hit already has a verdict, no LLM needed
     .filter((p) => {
-      const trivial =
-        p.pctDiff < PASS_PCT_THRESHOLD && p.sectionsOnlyInProd.length === 0;
+      const trivial = p.pctDiff < PASS_PCT_THRESHOLD && p.sectionsOnlyInProd.length === 0;
       return !trivial;
     })
     .sort((a, b) => {
@@ -537,11 +535,12 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
 
   return {
     name: "visual-regression-keyframes",
-    status: pagesWithDiffs > 0
-      ? issues.some((i) => i.severity === "critical" || i.severity === "high")
-        ? "fail"
-        : "warn"
-      : "pass",
+    status:
+      pagesWithDiffs > 0
+        ? issues.some((i) => i.severity === "critical" || i.severity === "high")
+          ? "fail"
+          : "warn"
+        : "pass",
     severity: "high",
     durationMs: Date.now() - start,
     summary: summaryText,

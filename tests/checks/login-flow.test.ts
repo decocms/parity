@@ -3,7 +3,12 @@ import { loginFlow } from "../../src/checks/login-flow.ts";
 import type { FlowCapture, StepCapture } from "../../src/types/schema.ts";
 import { makeContext } from "../helpers/make-context.ts";
 
-function step(name: string, status: StepCapture["status"], side: "prod" | "cand", note?: string): StepCapture {
+function step(
+  name: string,
+  status: StepCapture["status"],
+  side: "prod" | "cand",
+  note?: string,
+): StepCapture {
   return {
     step: 1,
     name,
@@ -35,14 +40,18 @@ describe("loginFlow", () => {
       step("verify-account-area", "ok", "prod"),
     ];
     const cands = steps.map((s) => ({ ...s, side: "cand" as const }));
-    const r = loginFlow(makeContext({ prodFlows: [flow("prod", steps)], candFlows: [flow("cand", cands)] }));
+    const r = loginFlow(
+      makeContext({ prodFlows: [flow("prod", steps)], candFlows: [flow("cand", cands)] }),
+    );
     expect(r.status).toBe("pass");
   });
 
   it("critical quando submit-valid falha em cand", () => {
     const prod = [step("submit-valid", "ok", "prod")];
     const cand = [step("submit-valid", "failed", "cand", "accountMenu não detectado")];
-    const r = loginFlow(makeContext({ prodFlows: [flow("prod", prod)], candFlows: [flow("cand", cand)] }));
+    const r = loginFlow(
+      makeContext({ prodFlows: [flow("prod", prod)], candFlows: [flow("cand", cand)] }),
+    );
     expect(r.issues.some((i) => i.severity === "critical")).toBe(true);
   });
 

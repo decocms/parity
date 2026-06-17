@@ -43,9 +43,7 @@ export function auditImages(pageKey: string, html: string): Issue[] {
   }
 
   // 2. Banner images sem width/height — CLS risk
-  const bannersMissingDims = stats.banners.filter(
-    (b) => b.width === null || b.height === null,
-  );
+  const bannersMissingDims = stats.banners.filter((b) => b.width === null || b.height === null);
   if (bannersMissingDims.length > 0) {
     out.push({
       id: `audit:images:banner-dims:${pageKey}`,
@@ -57,7 +55,9 @@ export function auditImages(pageKey: string, html: string): Issue[] {
       details: `Banner-class images sem dimensões fazem o browser não conseguir reservar o slot antes da imagem decodificar, gerando layout shift quando a imagem chega.\n\nBanners afetados (até 5):\n${bannersMissingDims
         .slice(0, 5)
         .map((b) => `  - ${b.src.split("?")[0]?.split("/").pop() ?? b.src}`)
-        .join("\n")}\n\nAção: adicionar atributos width="..." e height="..." em todos os <img> de banner. CSS pode redimensionar depois, mas o atributo HTML preserva o aspect ratio.`,
+        .join(
+          "\n",
+        )}\n\nAção: adicionar atributos width="..." e height="..." em todos os <img> de banner. CSS pode redimensionar depois, mas o atributo HTML preserva o aspect ratio.`,
     });
   }
 

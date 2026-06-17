@@ -10,12 +10,7 @@ import { resolveSitemapUrls } from "../diff/sitemap.ts";
 import { launchBrowser, newContext } from "../engine/browser.ts";
 import { capturePage, installVitalsCollector } from "../engine/collect.ts";
 import { renderHtmlReport } from "../report/render.ts";
-import {
-  createRunDir,
-  newRunId,
-  writeRunReportHtml,
-  writeRunReportJson,
-} from "../storage/fs.ts";
+import { createRunDir, newRunId, writeRunReportHtml, writeRunReportJson } from "../storage/fs.ts";
 import type {
   CheckResult,
   FlowCapture,
@@ -94,13 +89,22 @@ export async function vitalsCommand(opts: VitalsOptions): Promise<number> {
     await runWithConcurrency(tasks, concurrency, async (task) => {
       const url = new URL(task.path, task.side === "prod" ? opts.prod : opts.cand).toString();
       try {
-        task.capture = await captureVitalsPage(browser!, task.viewport, task.side, url, paths.screenshotsDir);
+        task.capture = await captureVitalsPage(
+          browser!,
+          task.viewport,
+          task.side,
+          url,
+          paths.screenshotsDir,
+        );
       } catch (err) {
         task.error = (err as Error).message;
       } finally {
         completed++;
         const elapsed = ((Date.now() - t0) / 1000).toFixed(0);
-        const etaSec = completed > 0 ? Math.round(((Date.now() - t0) / completed) * (total - completed) / 1000) : 0;
+        const etaSec =
+          completed > 0
+            ? Math.round((((Date.now() - t0) / completed) * (total - completed)) / 1000)
+            : 0;
         progress.text = `${completed}/${total} · ${elapsed}s · ETA ${etaSec}s · ${task.side === "prod" ? chalk.cyan("prod") : chalk.magenta("cand")} ${task.path} (${task.viewport})`;
       }
     });
@@ -217,7 +221,10 @@ async function captureVitalsPage(
   await installVitalsCollector(ctx);
   const page: Page = await ctx.newPage();
   try {
-    const safeName = url.replace(/^https?:\/\//, "").replace(/[^a-z0-9_-]+/gi, "_").slice(0, 80);
+    const safeName = url
+      .replace(/^https?:\/\//, "")
+      .replace(/[^a-z0-9_-]+/gi, "_")
+      .slice(0, 80);
     return await capturePage(page, {
       url,
       side,

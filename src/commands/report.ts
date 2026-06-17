@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import chalk from "chalk";
 import open from "open";
+import { type ReportSection, extractReportSection } from "../report/extract-section.ts";
 import { getRunPaths, loadRun } from "../storage/fs.ts";
-import { extractReportSection, type ReportSection } from "../report/extract-section.ts";
 
 export interface ReportCommandOptions {
   /** Output directory containing runs/. */
@@ -19,10 +19,7 @@ export interface ReportCommandOptions {
  * HTML of that one tab to stdout. Add `--json` to print a JSON projection
  * of the same section pulled from `report.json` instead. Issue #74.
  */
-export async function reportCommand(
-  runId: string,
-  opts: ReportCommandOptions,
-): Promise<number> {
+export async function reportCommand(runId: string, opts: ReportCommandOptions): Promise<number> {
   const paths = getRunPaths(opts.output, runId);
 
   if (opts.section) {
@@ -46,7 +43,9 @@ export async function reportCommand(
       return 1;
     }
     const html = readFileSync(paths.reportHtml, "utf8");
-    const slice = extractReportSection({ kind: "html", section: opts.section, html }) as string | null;
+    const slice = extractReportSection({ kind: "html", section: opts.section, html }) as
+      | string
+      | null;
     if (slice === null) {
       console.error(chalk.red(`section "${opts.section}" not present in this report`));
       return 1;

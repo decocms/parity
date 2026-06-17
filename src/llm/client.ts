@@ -1,7 +1,17 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { resolveModel, type Feature, type Provider, snapshotResolved, PROVIDER_MODELS } from "./models.ts";
+import {
+  type Feature,
+  PROVIDER_MODELS,
+  type Provider,
+  resolveModel,
+  snapshotResolved,
+} from "./models.ts";
+import {
+  callMessageSdk,
+  callToolSdk,
+  isClaudeAgentSdkAvailable,
+} from "./providers/claude-agent-sdk.ts";
 import type { ImageInput, MessageCallParams, ToolCallParams } from "./types.ts";
-import { callMessageSdk, callToolSdk, isClaudeAgentSdkAvailable } from "./providers/claude-agent-sdk.ts";
 
 export type { Feature, Provider } from "./models.ts";
 export type { ImageInput, MessageCallParams, ToolCallParams } from "./types.ts";
@@ -147,9 +157,15 @@ export async function callTool<T = Record<string, unknown>>(
   return null;
 }
 
-async function callAnthropicTool<T>(params: ToolCallParams, model: string, timeoutMs: number): Promise<T | null> {
+async function callAnthropicTool<T>(
+  params: ToolCallParams,
+  model: string,
+  timeoutMs: number,
+): Promise<T | null> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? "" });
-  const userContent: Anthropic.ContentBlockParam[] = [{ type: "text", text: withLanguage(params.userText) }];
+  const userContent: Anthropic.ContentBlockParam[] = [
+    { type: "text", text: withLanguage(params.userText) },
+  ];
   for (const img of params.userImages ?? []) {
     userContent.push({
       type: "image",
@@ -166,9 +182,7 @@ async function callAnthropicTool<T>(params: ToolCallParams, model: string, timeo
       {
         model,
         max_tokens: params.maxTokens ?? 2000,
-        system: [
-          { type: "text", text: params.systemPrompt, cache_control: { type: "ephemeral" } },
-        ],
+        system: [{ type: "text", text: params.systemPrompt, cache_control: { type: "ephemeral" } }],
         tools: [
           {
             name: params.tool.name,
@@ -200,7 +214,11 @@ interface OpenAiContentBlock {
   image_url?: { url: string };
 }
 
-async function callOpenRouterTool<T>(params: ToolCallParams, model: string, timeoutMs: number): Promise<T | null> {
+async function callOpenRouterTool<T>(
+  params: ToolCallParams,
+  model: string,
+  timeoutMs: number,
+): Promise<T | null> {
   // Retry transient failures (5xx, 429, network aborts, or truncated tool
   // arguments that `tryRepairJson` can't salvage). The second attempt
   // doubles `maxTokens` so the model has enough room to complete its
@@ -222,7 +240,13 @@ async function callOpenRouterTool<T>(params: ToolCallParams, model: string, time
       return null;
     }
     const tokens = isRetry ? Math.max(baseTokens * 2, 4000) : baseTokens;
-    const result = await openRouterToolOnce<T>(params, model, tokens, isRetry, Math.max(remaining, 2_000));
+    const result = await openRouterToolOnce<T>(
+      params,
+      model,
+      tokens,
+      isRetry,
+      Math.max(remaining, 2_000),
+    );
     if (result !== undefined) return result;
   }
   return null;
@@ -404,7 +428,11 @@ export async function callMessage(params: MessageCallParams): Promise<string | n
   return null;
 }
 
-async function callAnthropicMessage(params: MessageCallParams, model: string, timeoutMs: number): Promise<string | null> {
+async function callAnthropicMessage(
+  params: MessageCallParams,
+  model: string,
+  timeoutMs: number,
+): Promise<string | null> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? "" });
   const { signal, clear } = makeTimeoutSignal(timeoutMs);
   try {
@@ -412,9 +440,7 @@ async function callAnthropicMessage(params: MessageCallParams, model: string, ti
       {
         model,
         max_tokens: params.maxTokens ?? 1500,
-        system: [
-          { type: "text", text: params.systemPrompt, cache_control: { type: "ephemeral" } },
-        ],
+        system: [{ type: "text", text: params.systemPrompt, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: withLanguage(params.userText) }],
       },
       { signal },
@@ -432,7 +458,11 @@ async function callAnthropicMessage(params: MessageCallParams, model: string, ti
   }
 }
 
-async function callOpenRouterMessage(params: MessageCallParams, model: string, timeoutMs: number): Promise<string | null> {
+async function callOpenRouterMessage(
+  params: MessageCallParams,
+  model: string,
+  timeoutMs: number,
+): Promise<string | null> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return null;
   const { signal, clear } = makeTimeoutSignal(timeoutMs);

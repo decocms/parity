@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
 import { PNG } from "pngjs";
+import { describe, expect, it } from "vitest";
 import { cropPngBuffer } from "../../src/engine/capture-utils.ts";
 
-function makeSolidPng(width: number, height: number, rgba: [number, number, number, number]): Buffer {
+function makeSolidPng(
+  width: number,
+  height: number,
+  rgba: [number, number, number, number],
+): Buffer {
   const png = new PNG({ width, height });
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -83,6 +87,8 @@ describe("cropPngBuffer (issue #51 regression: full-page + crop preserves CSS co
 
   it("lança quando a boundingBox tem área zero após o clamp", () => {
     const src = makeSolidPng(100, 100, [0, 0, 0, 255]);
-    expect(() => cropPngBuffer(src, { x: 100, y: 100, width: 50, height: 50 })).toThrow(/zero area/);
+    expect(() => cropPngBuffer(src, { x: 100, y: 100, width: 50, height: 50 })).toThrow(
+      /zero area/,
+    );
   });
 });

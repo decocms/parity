@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { auditVitals } from "../../src/audit/vitals.ts";
 import { classifyVital } from "../../src/audit/thresholds.ts";
+import { auditVitals } from "../../src/audit/vitals.ts";
 
 describe("classifyVital — Core Web Vitals thresholds", () => {
   it("LCP good (≤ 2500ms) não vira issue", () => {
@@ -22,11 +22,11 @@ describe("classifyVital — Core Web Vitals thresholds", () => {
 
   it("CLS good (≤ 0.10) → ok", () => {
     expect(classifyVital("cls", 0.05).severity).toBe("ok");
-    expect(classifyVital("cls", 0.10).severity).toBe("ok");
+    expect(classifyVital("cls", 0.1).severity).toBe("ok");
   });
 
   it("CLS 0.30 (poor) → high", () => {
-    expect(classifyVital("cls", 0.30).severity).toBe("high");
+    expect(classifyVital("cls", 0.3).severity).toBe("high");
   });
 
   it("CLS catastrófico (>2× poor=0.5) → critical", () => {

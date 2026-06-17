@@ -5,38 +5,36 @@ import ora from "ora";
 import type { Browser } from "playwright";
 import { runAllChecks } from "../checks/index.ts";
 import type { CheckContext } from "../checks/index.ts";
+import { resolveSitemapUrls } from "../diff/sitemap.ts";
 import { launchBrowser, newContext, stopTracing, userAgentFor } from "../engine/browser.ts";
 import { capturePage, installVitalsCollector } from "../engine/collect.ts";
 import { runFlow } from "../engine/flows.ts";
-import { discoverPagesFromSitemap } from "../engine/sitemap-discover.ts";
-import { resolveSitemapUrls } from "../diff/sitemap.ts";
-import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
-import { detectPlatform, type Platform } from "../learned/platform.ts";
-import { promoteStepsFromFlow } from "../learned/promote.ts";
-import {
-  type LearnedSelectors,
-  loadLearned,
-  saveLearned,
-} from "../learned/repo.ts";
-import { aggregateIssues } from "../llm/aggregate-issues.ts";
-import { disableLlm, isLlmAvailable, providerLabel, setForcedProvider, setLlmLanguage } from "../llm/client.ts";
 import { disableInteractive, isInteractiveMode } from "../engine/interactive-selector-prompt.ts";
-import { applyModelOverrides, parseFeatureOverrides, type ModelTier, type Provider } from "../llm/models.ts";
+import { discoverPagesFromSitemap } from "../engine/sitemap-discover.ts";
+import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
+import { type Platform, detectPlatform } from "../learned/platform.ts";
+import { promoteStepsFromFlow } from "../learned/promote.ts";
+import { type LearnedSelectors, loadLearned, saveLearned } from "../learned/repo.ts";
+import { aggregateIssues } from "../llm/aggregate-issues.ts";
+import {
+  disableLlm,
+  isLlmAvailable,
+  providerLabel,
+  setForcedProvider,
+  setLlmLanguage,
+} from "../llm/client.ts";
 import { discoverSelectorsFromUrl } from "../llm/discover-selectors.ts";
 import { fingerprintPdp, matchPdps } from "../llm/match-pdp.ts";
-import { renderHtmlReport } from "../report/render.ts";
-import { serveRunAndBlock } from "./serve.ts";
-import { attachSpinnerHeartbeat } from "../util/heartbeat.ts";
-import { JsonlWriter, checkToJsonl } from "../storage/jsonl.ts";
-import { TimingRegistry, formatTimingsSummary } from "../util/timing.ts";
-import { isLocalhost } from "../util/localhost.ts";
-import { compareToBaseline, loadBaseline } from "../storage/baselines.ts";
 import {
-  createRunDir,
-  newRunId,
-  writeRunReportHtml,
-  writeRunReportJson,
-} from "../storage/fs.ts";
+  type ModelTier,
+  type Provider,
+  applyModelOverrides,
+  parseFeatureOverrides,
+} from "../llm/models.ts";
+import { renderHtmlReport } from "../report/render.ts";
+import { compareToBaseline, loadBaseline } from "../storage/baselines.ts";
+import { createRunDir, newRunId, writeRunReportHtml, writeRunReportJson } from "../storage/fs.ts";
+import { JsonlWriter, checkToJsonl } from "../storage/jsonl.ts";
 import type {
   CheckResult,
   FlowCapture,
@@ -47,9 +45,13 @@ import type {
   SeoSummary,
   Side,
   Verdict,
-  VisualDiffSummary,
   Viewport,
+  VisualDiffSummary,
 } from "../types/schema.ts";
+import { attachSpinnerHeartbeat } from "../util/heartbeat.ts";
+import { isLocalhost } from "../util/localhost.ts";
+import { TimingRegistry, formatTimingsSummary } from "../util/timing.ts";
+import { serveRunAndBlock } from "./serve.ts";
 
 export interface RunOptions {
   prod: string;
@@ -162,14 +164,12 @@ export interface RunOptions {
   interactive?: boolean;
 }
 
-type PresetDefaults = Partial<Pick<RunOptions,
-  | "flows"
-  | "viewports"
-  | "vitalsPages"
-  | "visualPages"
-  | "noVisualDiff"
-  | "autoSelectors"
->>;
+type PresetDefaults = Partial<
+  Pick<
+    RunOptions,
+    "flows" | "viewports" | "vitalsPages" | "visualPages" | "noVisualDiff" | "autoSelectors"
+  >
+>;
 
 /**
  * Named bundles of defaults so users don't have to remember every flag.
@@ -280,7 +280,8 @@ function applyLlmOptions(opts: RunOptions): string | null {
         "claude-code": "claude-agent-sdk",
       };
       const target = map[llmFlag];
-      if (!target) return `--llm: invalid provider "${llmFlag}" (valid: anthropic, openrouter, claude-code, none, auto)`;
+      if (!target)
+        return `--llm: invalid provider "${llmFlag}" (valid: anthropic, openrouter, claude-code, none, auto)`;
       const err = setForcedProvider(target);
       if (err) return err;
     }
@@ -326,7 +327,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   if (!llmStillAvailable && opts.visualPages !== preSmart.visualPages) {
     console.log(
       chalk.dim(
-        `  visual-pages auto-set to 0 (no LLM available — analysis layer would be skipped; opt in with --visual-pages N)`,
+        "  visual-pages auto-set to 0 (no LLM available — analysis layer would be skipped; opt in with --visual-pages N)",
       ),
     );
   }
@@ -362,9 +363,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   // the timeout to ~5s). Review feedback on PR #58.
   const llmTimeoutRaw = opts.llmTimeout ?? 60;
   if (!Number.isFinite(llmTimeoutRaw)) {
-    console.error(
-      chalk.red(`  --llm-timeout inválido: "${opts.llmTimeout}" não é um número`),
-    );
+    console.error(chalk.red(`  --llm-timeout inválido: "${opts.llmTimeout}" não é um número`));
     return 2;
   }
   const llmTimeoutSec = Math.max(5, Math.floor(llmTimeoutRaw));
@@ -464,7 +463,11 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   console.log(chalk.bold(`\n  parity run ${runId}`));
   console.log(chalk.dim(`  prod: ${opts.prod}`));
   console.log(chalk.dim(`  cand: ${opts.cand}`));
-  console.log(chalk.dim(`  flows: ${flows.join(", ")} · viewports: ${viewports.join(", ")} · CEP: ${rc.cep}\n`));
+  console.log(
+    chalk.dim(
+      `  flows: ${flows.join(", ")} · viewports: ${viewports.join(", ")} · CEP: ${rc.cep}\n`,
+    ),
+  );
 
   const spinner = ora("Launching browser…").start();
   let browser: Browser | null = null;
@@ -495,7 +498,9 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     }
     shuttingDown = true;
     spinner.stop();
-    process.stderr.write(`\n  ⚠ run interrompido (${reason}) durante "${currentPhase}" — escrevendo report parcial…\n`);
+    process.stderr.write(
+      `\n  ⚠ run interrompido (${reason}) durante "${currentPhase}" — escrevendo report parcial…\n`,
+    );
     try {
       // Stamp the current in-flight phase so the user sees how long the
       // wedged phase lasted before the interrupt. Snapshot timings now
@@ -697,7 +702,10 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         const extraPaths: string[] = [];
         const keys = [...buckets.keys()];
         let idx = 0;
-        while (extraPaths.length < vitalsPagesLimit && keys.some((k) => (buckets.get(k)?.length ?? 0) > 0)) {
+        while (
+          extraPaths.length < vitalsPagesLimit &&
+          keys.some((k) => (buckets.get(k)?.length ?? 0) > 0)
+        ) {
           const k = keys[idx % keys.length]!;
           const next = buckets.get(k)!.shift();
           if (next) extraPaths.push(next);
@@ -729,7 +737,11 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
             // the spinner. Issue #55.
             const PER_TASK_WALLCLOCK_MS = 35_000;
             try {
-              const ctx = await newContext(browser!, { viewport: task.viewport, cohortCookieValue: "control", noCache: opts.bypassCache });
+              const ctx = await newContext(browser!, {
+                viewport: task.viewport,
+                cohortCookieValue: "control",
+                noCache: opts.bypassCache,
+              });
               await installVitalsCollector(ctx);
               const page = await ctx.newPage();
               try {
@@ -811,8 +823,11 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         baseText: visualSpinnerBaseText,
       });
       try {
-        const visualPaths = explicitPaths
-          ?? (await discoverPagesFromSitemap(opts.prod, { sampleSize: visualPagesLimit })).all.map((p) => p.path);
+        const visualPaths =
+          explicitPaths ??
+          (await discoverPagesFromSitemap(opts.prod, { sampleSize: visualPagesLimit })).all.map(
+            (p) => p.path,
+          );
         // Always (re-)capture visual-diff pages with the visual-diff capture
         // settings (4s settleMs, 45s timeoutMs, scrollToLoad: true), even when
         // the same path was already captured by a flow (homepage, purchase-
@@ -835,7 +850,9 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
 
         if (tasks.length === 0) {
           visualHb.stop();
-          visualSpinner.succeed(`Visual diff: páginas já capturadas em flows (${visualPaths.length} alvos)`);
+          visualSpinner.succeed(
+            `Visual diff: páginas já capturadas em flows (${visualPaths.length} alvos)`,
+          );
         } else {
           visualSpinner.text = `Visual diff: capturando ${tasks.length} screenshot(s) (${visualPaths.length} páginas × ${viewports.length} viewport(s) × 2 sides)…`;
           let done = 0;
@@ -845,7 +862,11 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
             const safePath = task.path.replace(/[/?&=]+/g, "_") || "_root";
             const screenshotPath = `${paths.screenshotsDir}/visual-${safePath}-${task.viewport}-${task.side}.png`;
             try {
-              const ctx = await newContext(browser!, { viewport: task.viewport, cohortCookieValue: "control", noCache: opts.bypassCache });
+              const ctx = await newContext(browser!, {
+                viewport: task.viewport,
+                cohortCookieValue: "control",
+                noCache: opts.bypassCache,
+              });
               await installVitalsCollector(ctx);
               const page = await ctx.newPage();
               try {
@@ -933,7 +954,9 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         : "Agregando issues (modo offline — sem LLM keys)…",
     );
     const llmHb = attachSpinnerHeartbeat(spinner, {
-      baseText: isLlmAvailable() ? "Agregando issues via LLM (Sonnet 4.6)…" : "Agregando issues (modo offline)…",
+      baseText: isLlmAvailable()
+        ? "Agregando issues via LLM (Sonnet 4.6)…"
+        : "Agregando issues (modo offline)…",
     });
     const topIssues = await aggregateIssues({
       runId,
@@ -976,10 +999,10 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
 
     // Pull the structured visual-diff summary out of the visual-regression check
     const visualCheck = checks.find((c) => c.name === "visual-regression-keyframes");
-    const visualDiff = (visualCheck?.data?.visualDiff as VisualDiffSummary | undefined);
+    const visualDiff = visualCheck?.data?.visualDiff as VisualDiffSummary | undefined;
     // Pull the structured SEO summary out of the seo-deep-audit check
     const seoCheck = checks.find((c) => c.name === "seo-deep-audit");
-    const seo = (seoCheck?.data?.seo as SeoSummary | undefined);
+    const seo = seoCheck?.data?.seo as SeoSummary | undefined;
 
     // Finalize timings BEFORE rendering the HTML so the report can show
     // the breakdown. The "report" phase itself (writes + render) is timed
@@ -1040,7 +1063,9 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       const blocking = allIssues.filter((i) => failOn.includes(i.severity));
       if (blocking.length > 0) {
         console.log(
-          chalk.red(`\n  ✖ ${blocking.length} issue(s) bloqueante(s) [${failOn.join(", ")}] — exit 1`),
+          chalk.red(
+            `\n  ✖ ${blocking.length} issue(s) bloqueante(s) [${failOn.join(", ")}] — exit 1`,
+          ),
         );
         return 1;
       }
@@ -1261,7 +1286,8 @@ async function preflightCheck(
         },
       });
       if (res.status >= 500) errors.push(`${label}: HTTP ${res.status} ${res.statusText} (${url})`);
-      else if (res.status >= 400) errors.push(`${label}: HTTP ${res.status} ${res.statusText} (${url})`);
+      else if (res.status >= 400)
+        errors.push(`${label}: HTTP ${res.status} ${res.statusText} (${url})`);
     } catch (err) {
       const e = err as Error;
       const msg = e.name === "AbortError" ? `timeout (${PREFLIGHT_TIMEOUT_MS / 1000}s)` : e.message;
@@ -1314,7 +1340,7 @@ async function warmupTargets(opts: {
   bypassCache: boolean;
 }): Promise<WarmupResult> {
   const headers: Record<string, string> = opts.bypassCache
-    ? { "Cache-Control": "no-cache", "Pragma": "no-cache" }
+    ? { "Cache-Control": "no-cache", Pragma: "no-cache" }
     : {};
   type Outcome = { ok: true } | { ok: false; url: string; viewport: Viewport; reason: string };
   const jobs: Array<Promise<Outcome>> = [];
@@ -1331,17 +1357,20 @@ async function warmupTargets(opts: {
           redirect: "follow",
           headers: { ...headers, "User-Agent": ua },
         })
-          .then((res): Outcome =>
-            res.ok || (res.status >= 200 && res.status < 400)
-              ? { ok: true }
-              : { ok: false, url, viewport, reason: `HTTP ${res.status} ${res.statusText}` },
+          .then(
+            (res): Outcome =>
+              res.ok || (res.status >= 200 && res.status < 400)
+                ? { ok: true }
+                : { ok: false, url, viewport, reason: `HTTP ${res.status} ${res.statusText}` },
           )
-          .catch((err): Outcome => ({
-            ok: false,
-            url,
-            viewport,
-            reason: (err as Error).message ?? "fetch failed",
-          })),
+          .catch(
+            (err): Outcome => ({
+              ok: false,
+              url,
+              viewport,
+              reason: (err as Error).message ?? "fetch failed",
+            }),
+          ),
       );
     }
   }
@@ -1358,7 +1387,7 @@ async function fetchHomeHtml(url: string, viewport: Viewport = "desktop"): Promi
     const res = await fetch(url, {
       headers: {
         "User-Agent": userAgentFor(viewport),
-        "Accept": "text/html,application/xhtml+xml",
+        Accept: "text/html,application/xhtml+xml",
         "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
       },
       redirect: "follow",
@@ -1395,12 +1424,24 @@ function printSummary(
   meta: { promotedCount: number; deprecatedCount: number; platform: Platform },
 ): void {
   const { verdict } = run;
-  const emoji = verdict.status === "pass" ? chalk.green("✔") : verdict.status === "warn" ? chalk.yellow("⚠") : chalk.red("✖");
-  const score = verdict.status === "pass" ? chalk.green(verdict.score) : verdict.status === "warn" ? chalk.yellow(verdict.score) : chalk.red(verdict.score);
+  const emoji =
+    verdict.status === "pass"
+      ? chalk.green("✔")
+      : verdict.status === "warn"
+        ? chalk.yellow("⚠")
+        : chalk.red("✖");
+  const score =
+    verdict.status === "pass"
+      ? chalk.green(verdict.score)
+      : verdict.status === "warn"
+        ? chalk.yellow(verdict.score)
+        : chalk.red(verdict.score);
 
   console.log("");
   console.log(`  ${emoji}  parity ${verdict.status.toUpperCase()} · score ${score}/100`);
-  console.log(`     checks: ${chalk.green(verdict.checksPassed)} pass · ${chalk.red(verdict.checksFailed)} fail · ${chalk.dim(`${verdict.checksSkipped} skipped`)}`);
+  console.log(
+    `     checks: ${chalk.green(verdict.checksPassed)} pass · ${chalk.red(verdict.checksFailed)} fail · ${chalk.dim(`${verdict.checksSkipped} skipped`)}`,
+  );
   console.log(
     `     issues: ${chalk.red(verdict.critical)} critical · ${chalk.yellow(verdict.high)} high · ${verdict.medium} medium · ${chalk.dim(`${verdict.low} low`)}`,
   );
@@ -1417,7 +1458,12 @@ function printSummary(
     console.log("");
     console.log(chalk.bold("  Top issues:"));
     for (const i of run.topIssues.slice(0, 5)) {
-      const sev = i.severity === "critical" ? chalk.red(`[${i.severity}]`) : i.severity === "high" ? chalk.yellow(`[${i.severity}]`) : chalk.dim(`[${i.severity}]`);
+      const sev =
+        i.severity === "critical"
+          ? chalk.red(`[${i.severity}]`)
+          : i.severity === "high"
+            ? chalk.yellow(`[${i.severity}]`)
+            : chalk.dim(`[${i.severity}]`);
       console.log(`     ${sev} ${i.summary}`);
     }
   }

@@ -24,7 +24,8 @@ export function mockFetch(
   const calls: string[] = [];
 
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const url =
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     calls.push(url);
     const route = typeof routes === "function" ? routes(url) : matchRoute(routes, url);
     if (!route) {
@@ -35,7 +36,10 @@ export function mockFetch(
     }
     if ("delayMs" in route) {
       return new Promise<Response>((resolve, reject) => {
-        const t = setTimeout(() => resolve(new Response(route.body ?? "", { status: route.status ?? 200 })), route.delayMs);
+        const t = setTimeout(
+          () => resolve(new Response(route.body ?? "", { status: route.status ?? 200 })),
+          route.delayMs,
+        );
         init?.signal?.addEventListener("abort", () => {
           clearTimeout(t);
           reject(new DOMException("Aborted", "AbortError"));

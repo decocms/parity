@@ -1,12 +1,9 @@
 import { writeFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
-import type { HeatmapAnalysis } from "./heatmap-regions.ts";
-import type { CssSource } from "../engine/css-source-resolver.ts";
-import type {
-  ComputedStylesNotFound,
-  ComputedStylesResult,
-} from "../engine/computed-styles.ts";
+import type { ComputedStylesNotFound, ComputedStylesResult } from "../engine/computed-styles.ts";
 import { SECTION_STYLE_KEYS } from "../engine/computed-styles.ts";
+import type { CssSource } from "../engine/css-source-resolver.ts";
+import type { HeatmapAnalysis } from "./heatmap-regions.ts";
 
 /**
  * Per-section diff bundle assembler — turns all the signals collected
@@ -197,7 +194,9 @@ function renderMarkdownBundle(input: BundleInputs, deltas: StyleDelta[]): string
     md("## Visual diff");
     if (input.heatmap) {
       const pct = (input.heatmap.pctDiff * 100).toFixed(2);
-      md(`- **${pct}% of pixels differ** (${input.heatmap.diffPixels} / ${input.heatmap.imageWidth * input.heatmap.imageHeight})`);
+      md(
+        `- **${pct}% of pixels differ** (${input.heatmap.diffPixels} / ${input.heatmap.imageWidth * input.heatmap.imageHeight})`,
+      );
       if (input.heatmap.boundingBox) {
         const bb = input.heatmap.boundingBox;
         md(`- Bounding box of divergence: \`x=${bb.x} y=${bb.y} w=${bb.width} h=${bb.height}\``);
@@ -250,7 +249,9 @@ function renderMarkdownBundle(input: BundleInputs, deltas: StyleDelta[]): string
     md("|---|---|---|---|");
     for (const d of deltas) {
       const source = formatSource(d.candSource);
-      md(`| \`${d.property}\` | \`${truncate(d.prod, 60)}\` | \`${truncate(d.cand, 60)}\` | ${source} |`);
+      md(
+        `| \`${d.property}\` | \`${truncate(d.prod, 60)}\` | \`${truncate(d.cand, 60)}\` | ${source} |`,
+      );
     }
     md("");
   }

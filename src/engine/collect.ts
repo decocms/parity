@@ -225,10 +225,7 @@ export function attachCollectors(page: Page): CollectorState {
 export async function flushCollectors(state: CollectorState, timeoutMs = 5_000): Promise<void> {
   const flush = (state as CollectorState & { __flush?: () => Promise<void> }).__flush;
   if (!flush) return;
-  await Promise.race([
-    flush(),
-    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
-  ]);
+  await Promise.race([flush(), new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))]);
 }
 
 async function responseToEntry(resp: Response): Promise<NetworkEntry> {
@@ -361,7 +358,8 @@ export async function scrollFullPage(page: Page, budgetMs = 45_000): Promise<Scr
   // here and inline the work directly.
   const result = await page.evaluate(async (budget: number) => {
     // SKELETON_SELECTOR_INLINE — keep in sync with module-level SKELETON_SELECTOR
-    const SK = "[aria-busy='true'],[data-skeleton],[data-loading='true'],.skeleton,[class*='skeleton' i],[class*='Skeleton'],[class*='shimmer' i],.animate-pulse,.placeholder-shimmer,.react-loading-skeleton";
+    const SK =
+      "[aria-busy='true'],[data-skeleton],[data-loading='true'],.skeleton,[class*='skeleton' i],[class*='Skeleton'],[class*='shimmer' i],.animate-pulse,.placeholder-shimmer,.react-loading-skeleton";
     const innerStart = Date.now();
 
     let y = 0;
@@ -508,7 +506,11 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
         waitUntil: "domcontentloaded",
         timeout: Math.min(opts.timeoutMs ?? 30_000, remaining()),
       });
-      dlog(opts.side, opts.viewport, `    capturePage: goto done status=${response?.status() ?? "?"} (remaining=${remaining()}ms)`);
+      dlog(
+        opts.side,
+        opts.viewport,
+        `    capturePage: goto done status=${response?.status() ?? "?"} (remaining=${remaining()}ms)`,
+      );
       finalUrl = page.url();
       if (response) {
         const headers = response.headers();
@@ -525,13 +527,29 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
         }
         await page.waitForTimeout(Math.min(opts.settleMs ?? 1_200, remaining()));
       } else {
-        dlog(opts.side, opts.viewport, `    capturePage: waitForLoadState('load') (cap=${Math.min(12_000, remaining())}ms)`);
-        await page.waitForLoadState("load", { timeout: Math.min(12_000, remaining()) }).catch(() => undefined);
+        dlog(
+          opts.side,
+          opts.viewport,
+          `    capturePage: waitForLoadState('load') (cap=${Math.min(12_000, remaining())}ms)`,
+        );
+        await page
+          .waitForLoadState("load", { timeout: Math.min(12_000, remaining()) })
+          .catch(() => undefined);
         if (!opts.noNetworkIdle) {
-          dlog(opts.side, opts.viewport, `    capturePage: waitForLoadState('networkidle') (cap=${Math.min(6_000, remaining())}ms)`);
-          await page.waitForLoadState("networkidle", { timeout: Math.min(6_000, remaining()) }).catch(() => undefined);
+          dlog(
+            opts.side,
+            opts.viewport,
+            `    capturePage: waitForLoadState('networkidle') (cap=${Math.min(6_000, remaining())}ms)`,
+          );
+          await page
+            .waitForLoadState("networkidle", { timeout: Math.min(6_000, remaining()) })
+            .catch(() => undefined);
         }
-        dlog(opts.side, opts.viewport, `    capturePage: settle (cap=${Math.min(opts.settleMs ?? 2_000, remaining())}ms)`);
+        dlog(
+          opts.side,
+          opts.viewport,
+          `    capturePage: settle (cap=${Math.min(opts.settleMs ?? 2_000, remaining())}ms)`,
+        );
         await page.waitForTimeout(Math.min(opts.settleMs ?? 2_000, remaining()));
 
         // Auto-scroll to trigger lazy-loaded content (images, sections, analytics)
@@ -542,16 +560,26 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
           // We pass the budget INTO the page.evaluate so the inner loop is
           // self-bounded, and ALSO race it externally as a hard safety cap.
           const scrollBudget = Math.min(45_000, remaining());
-          dlog(opts.side, opts.viewport, `    capturePage: scrollFullPage start (budget=${scrollBudget}ms, remaining=${remaining()}ms)`);
+          dlog(
+            opts.side,
+            opts.viewport,
+            `    capturePage: scrollFullPage start (budget=${scrollBudget}ms, remaining=${remaining()}ms)`,
+          );
           const scrollResult = await Promise.race([
             scrollFullPage(page, scrollBudget).catch((err) => {
               // Don't swallow — a syntax/reference error inside the browser-
               // side evaluate would otherwise look indistinguishable from a
               // legitimate timeout, and that exact bug bit us once already.
-              dlog(opts.side, opts.viewport, `    capturePage: scrollFullPage threw: ${(err as Error).message}`);
+              dlog(
+                opts.side,
+                opts.viewport,
+                `    capturePage: scrollFullPage threw: ${(err as Error).message}`,
+              );
               return undefined;
             }),
-            new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), scrollBudget + 2_000)),
+            new Promise<undefined>((resolve) =>
+              setTimeout(() => resolve(undefined), scrollBudget + 2_000),
+            ),
           ]);
           if (scrollResult) {
             dlog(
@@ -560,13 +588,21 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
               `    capturePage: scrollFullPage done steps=${scrollResult.steps} finalHeight=${scrollResult.finalHeight} stable=${scrollResult.stableAtEnd} duration=${scrollResult.durationMs}ms (remaining=${remaining()}ms)`,
             );
           } else {
-            dlog(opts.side, opts.viewport, `    capturePage: scrollFullPage timed out at outer race (remaining=${remaining()}ms)`);
+            dlog(
+              opts.side,
+              opts.viewport,
+              `    capturePage: scrollFullPage timed out at outer race (remaining=${remaining()}ms)`,
+            );
           }
           // Post-scroll settle. With the new adaptive scroll already doing
           // inter-step skeleton waits, this is just a small grace period
           // for late analytics pings and trailing image decodes.
           if (!opts.noNetworkIdle && remaining() > 2_000) {
-            dlog(opts.side, opts.viewport, `    capturePage: post-scroll networkidle (cap=${Math.min(3_000, remaining())}ms)`);
+            dlog(
+              opts.side,
+              opts.viewport,
+              `    capturePage: post-scroll networkidle (cap=${Math.min(3_000, remaining())}ms)`,
+            );
             await page
               .waitForLoadState("networkidle", { timeout: Math.min(3_000, remaining()) })
               .catch(() => undefined);
@@ -586,13 +622,20 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
     // setTimeout chain that didn't resolve before its outer race fired),
     // this call blocks until that previous evaluate settles. Wrap it in
     // an explicit race so the budget is actually enforced.
-    dlog(opts.side, opts.viewport, `    capturePage: vitals evaluate (cap=${Math.min(5_000, remaining())}ms)`);
-    vitals = (await Promise.race([
-      page
-        .evaluate(() => (window as unknown as { __parity_vitals?: WebVitals }).__parity_vitals)
-        .catch(() => null),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), Math.min(5_000, remaining()))),
-    ])) ?? null;
+    dlog(
+      opts.side,
+      opts.viewport,
+      `    capturePage: vitals evaluate (cap=${Math.min(5_000, remaining())}ms)`,
+    );
+    vitals =
+      (await Promise.race([
+        page
+          .evaluate(() => (window as unknown as { __parity_vitals?: WebVitals }).__parity_vitals)
+          .catch(() => null),
+        new Promise<null>((resolve) =>
+          setTimeout(() => resolve(null), Math.min(5_000, remaining())),
+        ),
+      ])) ?? null;
 
     if (!opts.skipScreenshot) {
       // Pin every detected carousel to slide 0 BEFORE the screenshot so
@@ -612,7 +655,11 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
       // never enter the viewport (off-screen lazy renders).
       const skeletonBudget = Math.min(5_000, remaining());
       if (skeletonBudget > 500) {
-        dlog(opts.side, opts.viewport, `    capturePage: waitForSkeletons (cap=${skeletonBudget}ms)`);
+        dlog(
+          opts.side,
+          opts.viewport,
+          `    capturePage: waitForSkeletons (cap=${skeletonBudget}ms)`,
+        );
         await Promise.race([
           waitForSkeletonsToResolve(page, skeletonBudget).catch(() => undefined),
           new Promise<void>((resolve) => setTimeout(resolve, skeletonBudget)),
@@ -624,25 +671,43 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
         const skeletonsAtCapture = await page
           .evaluate((sel) => document.querySelectorAll(sel).length, SKELETON_SELECTOR)
           .catch(() => -1);
-        dlog(opts.side, opts.viewport, `    capturePage: pre-screenshot skeletons=${skeletonsAtCapture}`);
+        dlog(
+          opts.side,
+          opts.viewport,
+          `    capturePage: pre-screenshot skeletons=${skeletonsAtCapture}`,
+        );
       } catch {
         /* tolerated */
       }
-      dlog(opts.side, opts.viewport, `    capturePage: screenshot start (cap=${Math.min(15_000, remaining())}ms)`);
+      dlog(
+        opts.side,
+        opts.viewport,
+        `    capturePage: screenshot start (cap=${Math.min(15_000, remaining())}ms)`,
+      );
       await Promise.race([
-        page.screenshot({ path: opts.screenshotPath, fullPage: true, animations: "disabled" }).catch(() => undefined),
+        page
+          .screenshot({ path: opts.screenshotPath, fullPage: true, animations: "disabled" })
+          .catch(() => undefined),
         new Promise<void>((resolve) => setTimeout(resolve, Math.min(15_000, remaining()))),
       ]);
       dlog(opts.side, opts.viewport, "    capturePage: screenshot done");
     }
 
-    dlog(opts.side, opts.viewport, `    capturePage: page.content() (cap=${Math.min(5_000, remaining())}ms)`);
+    dlog(
+      opts.side,
+      opts.viewport,
+      `    capturePage: page.content() (cap=${Math.min(5_000, remaining())}ms)`,
+    );
     html = await Promise.race([
       page.content().catch(() => ""),
       new Promise<string>((resolve) => setTimeout(() => resolve(""), Math.min(5_000, remaining()))),
     ]);
 
-    dlog(opts.side, opts.viewport, `    capturePage: flushCollectors (cap=${Math.min(3_000, remaining())}ms)`);
+    dlog(
+      opts.side,
+      opts.viewport,
+      `    capturePage: flushCollectors (cap=${Math.min(3_000, remaining())}ms)`,
+    );
     await flushCollectors(state, Math.min(3_000, remaining()));
 
     dlog(opts.side, opts.viewport, `    capturePage: inner done total=${Date.now() - start}ms`);

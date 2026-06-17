@@ -3,7 +3,12 @@ import { cartInteractionsFlow } from "../../src/checks/cart-interactions-flow.ts
 import type { FlowCapture, StepCapture } from "../../src/types/schema.ts";
 import { makeContext } from "../helpers/make-context.ts";
 
-function step(name: string, status: StepCapture["status"], side: "prod" | "cand", note?: string): StepCapture {
+function step(
+  name: string,
+  status: StepCapture["status"],
+  side: "prod" | "cand",
+  note?: string,
+): StepCapture {
   return {
     step: 1,
     name,
@@ -56,14 +61,8 @@ describe("cartInteractionsFlow", () => {
   });
 
   it("high quando increment falhou em cand", () => {
-    const prod = [
-      step("seed-cart", "ok", "prod"),
-      step("increment-qty", "ok", "prod"),
-    ];
-    const cand = [
-      step("seed-cart", "ok", "cand"),
-      step("increment-qty", "failed", "cand"),
-    ];
+    const prod = [step("seed-cart", "ok", "prod"), step("increment-qty", "ok", "prod")];
+    const cand = [step("seed-cart", "ok", "cand"), step("increment-qty", "failed", "cand")];
     const r = cartInteractionsFlow(
       makeContext({ prodFlows: [flow("prod", prod)], candFlows: [flow("cand", cand)] }),
     );

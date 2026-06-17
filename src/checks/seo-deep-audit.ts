@@ -97,7 +97,10 @@ export async function seoDeepAudit(ctx: CheckContext): Promise<CheckResult> {
   // Run-wide sub-checks (only once per run)
   const { issues: robotsIssues, robotsTxt } = await checkRobotsTxtStructured(state);
   issues.push(...robotsIssues);
-  const { issues: sitemapIssues, sitemap } = await checkSitemapStructured(state, pairs.map((p) => p.cand));
+  const { issues: sitemapIssues, sitemap } = await checkSitemapStructured(
+    state,
+    pairs.map((p) => p.cand),
+  );
   issues.push(...sitemapIssues);
 
   const seo: SeoSummary = {
@@ -243,8 +246,14 @@ function checkCanonical(pair: { prod: PageCapture; cand: PageCapture; key: strin
 
 function checkHreflang(pair: { prod: PageCapture; cand: PageCapture; key: string }): Issue[] {
   const re = /<link[^>]+rel=["']alternate["'][^>]+hreflang=["']([^"']+)["']/gi;
-  const prodLangs = [...pair.prod.html.matchAll(re)].map((m) => m[1]).filter(Boolean).sort();
-  const candLangs = [...pair.cand.html.matchAll(re)].map((m) => m[1]).filter(Boolean).sort();
+  const prodLangs = [...pair.prod.html.matchAll(re)]
+    .map((m) => m[1])
+    .filter(Boolean)
+    .sort();
+  const candLangs = [...pair.cand.html.matchAll(re)]
+    .map((m) => m[1])
+    .filter(Boolean)
+    .sort();
   const prodSet = new Set(prodLangs);
   const candSet = new Set(candLangs);
   const onlyProd = [...prodSet].filter((l) => !candSet.has(l));
@@ -298,7 +307,10 @@ function checkJsonLd(pair: { prod: PageCapture; cand: PageCapture; key: string }
         check: "seo-deep-audit",
         summary: `Campos do Product JSON-LD mudaram em ${pair.key}: ${productDiff.changedFields.map((c) => c.field).join(", ")}`,
         details: productDiff.changedFields
-          .map((c) => `• ${c.field}\n  prod: ${JSON.stringify(c.prod)}\n  cand: ${JSON.stringify(c.cand)}`)
+          .map(
+            (c) =>
+              `• ${c.field}\n  prod: ${JSON.stringify(c.prod)}\n  cand: ${JSON.stringify(c.cand)}`,
+          )
           .join("\n"),
       });
     }
@@ -344,7 +356,10 @@ function checkJsonLd(pair: { prod: PageCapture; cand: PageCapture; key: string }
 }
 
 async function checkRobotsTxt(state: SeoState): Promise<Issue[]> {
-  const [prodTxt, candTxt] = await Promise.all([fetchRobots(state.prodBaseUrl), fetchRobots(state.candBaseUrl)]);
+  const [prodTxt, candTxt] = await Promise.all([
+    fetchRobots(state.prodBaseUrl),
+    fetchRobots(state.candBaseUrl),
+  ]);
   const out: Issue[] = [];
 
   if (prodTxt && !candTxt) {
@@ -384,7 +399,9 @@ async function checkRobotsTxt(state: SeoState): Promise<Issue[]> {
       detailParts.push(`Allow removidos em cand: ${ua.allowOnlyProd.join(", ")}`);
     }
     if (ua.crawlDelayProd !== ua.crawlDelayCand) {
-      detailParts.push(`Crawl-delay: prod=${ua.crawlDelayProd ?? "—"}, cand=${ua.crawlDelayCand ?? "—"}`);
+      detailParts.push(
+        `Crawl-delay: prod=${ua.crawlDelayProd ?? "—"}, cand=${ua.crawlDelayCand ?? "—"}`,
+      );
     }
     out.push({
       id: `seo:robots-txt-ua:${ua.userAgent}`,

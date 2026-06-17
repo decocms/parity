@@ -105,7 +105,9 @@ export function purchaseJourneyFlow(ctx: CheckContext): CheckResult {
           category: "functional",
           check: "purchase-journey-flow",
           summary: `[${viewport}] Step "${label}" não executou em cand (existe em prod)`,
-          evidence: p.screenshotPath ? [{ kind: "screenshot", path: p.screenshotPath, label: "prod" }] : [],
+          evidence: p.screenshotPath
+            ? [{ kind: "screenshot", path: p.screenshotPath, label: "prod" }]
+            : [],
         });
         continue;
       }
@@ -153,12 +155,11 @@ export function purchaseJourneyFlow(ctx: CheckContext): CheckResult {
     });
   }
 
-  const status: CheckResult["status"] =
-    issues.some((i) => i.severity === "critical")
-      ? "fail"
-      : issues.length > 0
-        ? "warn"
-        : "pass";
+  const status: CheckResult["status"] = issues.some((i) => i.severity === "critical")
+    ? "fail"
+    : issues.length > 0
+      ? "warn"
+      : "pass";
 
   return {
     name: "purchase-journey-flow",

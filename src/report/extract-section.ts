@@ -64,10 +64,9 @@ export function extractReportSection(input: ExtractInput): string | unknown | nu
  * "from the matching opening tag, find the closest `</section>`".
  */
 function extractHtmlSection(html: string, section: ReportSection): string | null {
-  const openMatch = new RegExp(
-    `<section[^>]*\\bdata-panel=["']${section}["'][^>]*>`,
-    "i",
-  ).exec(html);
+  const openMatch = new RegExp(`<section[^>]*\\bdata-panel=["']${section}["'][^>]*>`, "i").exec(
+    html,
+  );
   if (!openMatch) return null;
   const start = openMatch.index + openMatch[0].length;
   // Find the next `</section>` AFTER the opening tag.
@@ -198,9 +197,16 @@ function extractSideBySideSlice(run: Run): unknown {
       if (p.side !== "prod") continue;
       // Find the paired cand page (same path, same viewport)
       const candPath = pathOf(p.url);
-      const cand = fc.pages.find((q) => q.side === "cand" && pathOf(q.url) === candPath && q.viewport === p.viewport);
+      const cand = fc.pages.find(
+        (q) => q.side === "cand" && pathOf(q.url) === candPath && q.viewport === p.viewport,
+      );
       if (!cand) continue;
-      pairs.push({ label: `${candPath || "/"} · ${p.viewport}`, prodUrl: p.url, candUrl: cand.url, viewport: p.viewport });
+      pairs.push({
+        label: `${candPath || "/"} · ${p.viewport}`,
+        prodUrl: p.url,
+        candUrl: cand.url,
+        viewport: p.viewport,
+      });
     }
   }
   return pairs;

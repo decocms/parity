@@ -55,10 +55,7 @@ export type SelectorEntry = z.infer<typeof SelectorEntry>;
 
 export const LearnedSelectors = z.object({
   schemaVersion: z.literal("0.1"),
-  platforms: z.record(
-    z.string(),
-    z.record(SelectorKey, z.array(SelectorEntry)),
-  ),
+  platforms: z.record(z.string(), z.record(SelectorKey, z.array(SelectorEntry))),
 });
 export type LearnedSelectors = z.infer<typeof LearnedSelectors>;
 
@@ -100,13 +97,12 @@ export function getLearnedSelectors(
   const platformEntries = lib.platforms[platform];
   if (!platformEntries) return [];
   const entries = platformEntries[key] ?? [];
-  return entries
-    .filter((e) => !e.deprecated)
-    .sort((a, b) => b.successRate - a.successRate);
+  return entries.filter((e) => !e.deprecated).sort((a, b) => b.successRate - a.successRate);
 }
 
 function ensureSlot(lib: LearnedSelectors, platform: Platform, key: SelectorKey): SelectorEntry[] {
-  if (!lib.platforms[platform]) lib.platforms[platform] = {} as Record<SelectorKey, SelectorEntry[]>;
+  if (!lib.platforms[platform])
+    lib.platforms[platform] = {} as Record<SelectorKey, SelectorEntry[]>;
   const platformEntries = lib.platforms[platform]!;
   if (!platformEntries[key]) platformEntries[key] = [];
   return platformEntries[key]!;
@@ -212,7 +208,9 @@ export function statsFromLib(lib: LearnedSelectors): LearnedStats {
         totalSelectors += 1;
         if (e.deprecated) deprecated += 1;
       }
-      const top = entries.filter((e) => !e.deprecated).sort((a, b) => b.successRate - a.successRate)[0];
+      const top = entries
+        .filter((e) => !e.deprecated)
+        .sort((a, b) => b.successRate - a.successRate)[0];
       if (top) {
         topByKey.push({
           key,

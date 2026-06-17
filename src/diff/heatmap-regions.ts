@@ -59,10 +59,7 @@ export interface AnalyzeOptions {
   minComponentPixels?: number;
 }
 
-export function analyzeHeatmapRegions(
-  pngPath: string,
-  opts: AnalyzeOptions = {},
-): HeatmapAnalysis {
+export function analyzeHeatmapRegions(pngPath: string, opts: AnalyzeOptions = {}): HeatmapAnalysis {
   const png = PNG.sync.read(readFileSync(pngPath));
   return analyzeHeatmapBuffer(png.data, png.width, png.height, opts);
 }
