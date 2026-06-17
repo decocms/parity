@@ -142,6 +142,10 @@ program
     "--llm-model-default <model>",
     "Force every LLM call to use this exact model ID, ignoring per-feature defaults. Issue #66.",
   )
+  .option(
+    "--no-interactive",
+    "Disable the interactive selector prompt that auto-fires in a TTY without an LLM provider. Use in scripts and CI where stdin is technically a TTY but you don't want to pause. Issue #72.",
+  )
   .action(async (opts) => {
     // --flow is just sugar for --flows with a single value
     if (opts.flow) {
