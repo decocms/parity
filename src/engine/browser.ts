@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import type { Browser, BrowserContext, BrowserContextOptions } from "playwright";
 import { chromium, devices } from "playwright";
 import type { Viewport } from "../types/schema.ts";
@@ -79,37 +80,65 @@ export interface LaunchOptions {
 }
 
 export async function launchBrowser(opts: LaunchOptions = {}): Promise<Browser> {
-  try {
-    return await chromium.launch({
+  const doLaunch = () =>
+    chromium.launch({
       headless: opts.headless ?? true,
       slowMo: opts.slowMo ?? 0,
       args: ["--disable-blink-features=AutomationControlled"],
     });
+  try {
+    return await doLaunch();
   } catch (err) {
     const msg = (err as Error).message ?? "";
-    // Playwright's own message starts with "Executable doesn't exist at ..."
-    // when the browser binary wasn't installed yet (e.g. fresh `npm install
-    // -g @decocms/parity` with no postinstall trigger). Replace it with a
-    // single clear instruction so the user doesn't have to parse a stack
-    // trace + Playwright's ASCII banner.
-    if (msg.includes("Executable doesn't exist")) {
-      const friendly = new Error(
-        [
-          "Playwright's Chromium binary is not installed yet. Run:",
-          "",
-          "    npx playwright install chromium",
-          "",
-          "(one-time, ~140 MB download). Then re-run parity. This usually happens",
-          "after a fresh `npm install -g @decocms/parity`.",
-        ].join("\n"),
-      );
-      // Preserve original error in `cause` so logs still have the full
-      // launcher path for debugging if needed.
-      (friendly as Error & { cause?: unknown }).cause = err;
-      throw friendly;
+    if (!msg.includes("Executable doesn't exist")) throw err;
+    // First-run after `npm install -g @decocms/parity`: the postinstall
+    // hook didn't run (npm `ignore-scripts=true`, or npm 11+ default for
+    // global installs). Auto-install the binary on demand — the user
+    // explicitly asked us to run, so blocking on a 140 MB download is
+    // better than failing with an error message and making them re-run.
+    if (process.env.PARITY_SKIP_PLAYWRIGHT_INSTALL === "1") {
+      throw missingBrowserError(err);
     }
-    throw err;
+    console.log("");
+    console.log(
+      "  ⚠  Playwright's Chromium binary is not installed yet — downloading now (~140 MB, one-time)…",
+    );
+    console.log("     Set PARITY_SKIP_PLAYWRIGHT_INSTALL=1 to disable this auto-install.");
+    console.log("");
+    const installRc = installChromiumSync();
+    if (installRc !== 0) throw missingBrowserError(err);
+    console.log("  ✓ Chromium ready. Continuing the run.");
+    console.log("");
+    // Retry the launch once. If it still fails the binary install
+    // didn't actually land where Playwright expects — surface the
+    // friendly error so the user can rerun the install manually.
+    try {
+      return await doLaunch();
+    } catch (retryErr) {
+      throw missingBrowserError(retryErr);
+    }
   }
+}
+
+function installChromiumSync(): number {
+  const result = spawnSync("npx", ["--yes", "playwright", "install", "chromium"], {
+    stdio: "inherit",
+    env: process.env,
+  });
+  return result.status ?? 1;
+}
+
+function missingBrowserError(cause: unknown): Error {
+  const original = cause instanceof Error ? cause.message : String(cause);
+  return new Error(
+    [
+      "Playwright's Chromium binary is not installed.",
+      "Run: npx playwright install chromium",
+      "Or set PARITY_SKIP_PLAYWRIGHT_INSTALL=0 and rerun `parity` to auto-install.",
+      "",
+      `Original error: ${original}`,
+    ].join("\n"),
+  );
 }
 
 export interface ContextOptions {
