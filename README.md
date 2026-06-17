@@ -68,7 +68,7 @@ Three providers, auto-detected in this order — **none required** if you have t
 2. `OPENROUTER_API_KEY` — OpenRouter
 3. **Local `claude` CLI** — uses [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk); goes through your existing Claude plan. No env vars needed
 
-Force with `--llm <anthropic|openrouter|claude-code|none|auto>`. Override per-feature with `--llm-model selector-discovery=claude-haiku-4-5,visual-diff=claude-opus-4-7`. Default tiers: Haiku for short tasks (selector discovery, classification), Sonnet for vision/aggregation, Opus for `explain`.
+Force with `--llm <anthropic|openrouter|claude-code|none|auto>`. Override per-feature with `--llm-model visual-diff=claude-opus-4-7,explain=claude-opus-4-7`, or flatten everything to one tier with `--llm-tier-default <haiku|sonnet|opus>`. Default tiers: **Sonnet** for selector discovery / recovery / matching / vision / aggregation (the structural-reasoning calls), **Haiku** for short copy-list classification (`search-terms`), **Opus** for `explain`. Cost-conscious? Try `--llm-tier-default haiku` and bump features back to Sonnet selectively if you hit selector misses.
 
 Without any provider, the CLI still runs and outputs raw check results — only the LLM-tagged tabs (Visual Diff, LLM Prompt) hide themselves and a banner explains why.
 
