@@ -116,18 +116,34 @@ interface Tile {
 function buildTiles(run: Run): Tile[] {
   const tiles: Tile[] = [];
 
-  // Purchase journey
+  // Purchase journey. `data.totalSteps` only counts steps that both sides
+  // recorded — when the runner bails early (e.g. PDP entry selector miss),
+  // the check still reports "everything that ran, ran fine". So we *also*
+  // pull the raw flowCaptures step count to detect early aborts and
+  // surface them on the tile rather than letting the run silently look
+  // green. Issue #100.
   const pj = run.checks.find((c) => c.name === "purchase-journey-flow");
   if (pj) {
     const data = (pj.data ?? {}) as { totalSteps?: number; failedSteps?: number };
-    const total = data.totalSteps ?? 0;
     const failed = data.failedSteps ?? 0;
+    const pjCaptures = run.flowCaptures.filter((fc) => fc.flow === "purchase-journey");
+    const maxSteps = pjCaptures.reduce((m, fc) => Math.max(m, fc.steps?.length ?? 0), 0);
+    const skippedSteps = pjCaptures.reduce(
+      (n, fc) => n + (fc.steps?.filter((s) => s.status === "skipped").length ?? 0),
+      0,
+    );
+    const okSteps = Math.max(0, maxSteps - failed - skippedSteps);
+    const aborted = skippedSteps > 0;
+    let meta: string;
+    if (failed > 0) meta = `${failed} step(s) failed`;
+    else if (aborted) meta = `${skippedSteps} step(s) skipped (recovery exhausted)`;
+    else meta = "completed in both";
     tiles.push({
       icon: "🛒",
       label: "Journey",
-      value: total > 0 ? `${total - failed}/${total}` : "—",
-      meta: failed > 0 ? `${failed} step(s) failed` : "completed in both",
-      state: failed > 0 ? "fail" : "pass",
+      value: maxSteps > 0 ? `${okSteps}/${maxSteps}` : "—",
+      meta,
+      state: failed > 0 ? "fail" : aborted ? "warn" : "pass",
       href: "#detail/purchase-journey-flow",
     });
   }
@@ -252,6 +268,12 @@ function renderCheckDetailPanel(check: CheckResult, run: Run, runDir: string): s
   const reproId = `repro-${check.name.replace(/[^a-zA-Z0-9]/g, "_")}`;
   const dataJson =
     check.data && Object.keys(check.data).length > 0 ? JSON.stringify(check.data, null, 2) : null;
+
+  // Per-flow step timeline. The check's `data` only has aggregate counts;
+  // the rich per-step trace (selector used, screenshot path, skip reason)
+  // lives on the matching `flowCaptures` entries. Issue #98 follow-up.
+  const stepTimeline = renderFlowStepTimeline(check.name, run, runDir);
+
   return `
   <div class="card">
     <div class="check-detail-header">
@@ -266,6 +288,8 @@ function renderCheckDetailPanel(check: CheckResult, run: Run, runDir: string): s
     <p class="check-detail-summary">${esc(check.summary)}</p>
   </div>
 
+  ${stepTimeline}
+
   <div class="card">
     <h2>Reproduce this check</h2>
     <div class="prompt-toolbar">
@@ -277,6 +301,134 @@ function renderCheckDetailPanel(check: CheckResult, run: Run, runDir: string): s
   ${check.issues.length > 0 ? `<div class="card"><h2>Issues from this check</h2>${check.issues.map((i: Issue) => renderIssue(i, runDir)).join("")}</div>` : ""}
 
   ${dataJson ? `<div class="card"><h2>Raw check data</h2><pre class="check-data">${esc(dataJson)}</pre></div>` : ""}`;
+}
+
+/**
+ * Map a check name to the flow whose `flowCaptures` carry the per-step
+ * trace for this check. Most checks aren't backed by a flow (purely
+ * static analysis on captured pages); for those we return null and the
+ * timeline block is skipped.
+ */
+const CHECK_TO_FLOW: Record<string, string> = {
+  "purchase-journey-flow": "purchase-journey",
+  "cart-interactions-flow": "cart-interactions",
+  "search-presence": "search",
+  "search-autocomplete": "search",
+  "search-results": "search",
+  "search-no-results": "search",
+  "login-flow": "login",
+};
+
+function renderFlowStepTimeline(checkName: string, run: Run, runDir: string): string {
+  const flowName = CHECK_TO_FLOW[checkName];
+  if (!flowName) return "";
+  const captures = run.flowCaptures.filter((fc) => fc.flow === flowName);
+  if (captures.length === 0) return "";
+
+  // Pair prod + cand by viewport so the user sees side-by-side step state.
+  const byViewport = new Map<string, { prod?: typeof captures[0]; cand?: typeof captures[0] }>();
+  for (const fc of captures) {
+    const slot = byViewport.get(fc.viewport) ?? {};
+    if (fc.side === "prod") slot.prod = fc;
+    else if (fc.side === "cand") slot.cand = fc;
+    byViewport.set(fc.viewport, slot);
+  }
+
+  const blocks: string[] = [];
+  for (const [viewport, sides] of byViewport) {
+    blocks.push(renderFlowTimelinePair(viewport, sides.prod, sides.cand, runDir));
+  }
+  if (blocks.length === 0) return "";
+  return `
+  <div class="card">
+    <h2>Step timeline</h2>
+    <div class="hint">Step-by-step trace of the flow on prod vs cand. Skipped steps usually mean a selector miss — the note column tells you why the runner gave up.</div>
+    ${blocks.join("")}
+  </div>`;
+}
+
+type FlowCaptureType = Run["flowCaptures"][number];
+
+function renderFlowTimelinePair(
+  viewport: string,
+  prod: FlowCaptureType | undefined,
+  cand: FlowCaptureType | undefined,
+  runDir: string,
+): string {
+  // Build a step-keyed merge so missing steps on one side still show as
+  // empty cells — that's the most useful view when prod completes 7 steps
+  // and cand bails at step 3.
+  const stepNumbers = new Set<number>();
+  for (const fc of [prod, cand]) {
+    if (!fc) continue;
+    for (const s of fc.steps ?? []) stepNumbers.add(s.step);
+  }
+  const ordered = Array.from(stepNumbers).sort((a, b) => a - b);
+  const stepBy = (fc: FlowCaptureType | undefined, n: number) =>
+    fc?.steps?.find((s) => s.step === n);
+
+  const rows = ordered
+    .map((n) => {
+      const ps = stepBy(prod, n);
+      const cs = stepBy(cand, n);
+      const stepName = ps?.name ?? cs?.name ?? `step ${n}`;
+      return `<tr>
+        <td class="num">${n}</td>
+        <td><code>${esc(stepName)}</code></td>
+        ${renderStepCell(ps, runDir)}
+        ${renderStepCell(cs, runDir)}
+      </tr>`;
+    })
+    .join("");
+
+  return `
+  <div class="step-timeline">
+    <div class="step-timeline-header">
+      <strong>${esc(viewport)}</strong>
+      <span class="dim">prod: ${prod ? formatStepSummary(prod) : "—"}</span>
+      <span class="dim">cand: ${cand ? formatStepSummary(cand) : "—"}</span>
+    </div>
+    <table class="step-table">
+      <thead>
+        <tr>
+          <th class="num">#</th>
+          <th>Step</th>
+          <th>prod</th>
+          <th>cand</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+function formatStepSummary(fc: FlowCaptureType): string {
+  const steps = fc.steps ?? [];
+  const ok = steps.filter((s) => s.status === "ok").length;
+  const skipped = steps.filter((s) => s.status === "skipped").length;
+  const failed = steps.filter((s) => s.status === "failed").length;
+  const total = steps.length;
+  const dur = (fc.totalDurationMs / 1000).toFixed(1);
+  return `${ok}/${total} ok · ${skipped} skipped · ${failed} failed · ${dur}s`;
+}
+
+type StepType = NonNullable<FlowCaptureType["steps"]>[number];
+
+function renderStepCell(s: StepType | undefined, runDir: string): string {
+  if (!s) return `<td class="step-cell empty">—</td>`;
+  const statusClass = `step-${s.status}`;
+  const screenshot = s.screenshotPath
+    ? `<a class="step-shot" href="${esc(relPath(runDir, s.screenshotPath))}" target="_blank" title="open screenshot">📷</a>`
+    : "";
+  const selector = s.usedSelector
+    ? `<div class="step-selector"><code>${esc(s.usedSelector)}</code></div>`
+    : "";
+  const note = s.note ? `<div class="step-note">${esc(s.note)}</div>` : "";
+  return `<td class="step-cell ${statusClass}">
+    <div class="step-cell-head"><span class="step-status">${s.status}</span>${screenshot}<span class="dim">${s.durationMs}ms</span></div>
+    ${selector}
+    ${note}
+  </td>`;
 }
 
 function renderChecksTable(run: Run): string {
