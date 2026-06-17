@@ -108,6 +108,10 @@ program
     "--json <path|->",
     "Emit JSON-Lines (one line per check) to the given file path, or '-' for stdout. Schema versioned via leading metadata line. Issue #53.",
   )
+  .option(
+    "--pt",
+    "Tell the LLM to respond in Brazilian Portuguese. Only affects LLM-generated content (issues, explain, prompts) — the static HTML report stays in English. Issue #67.",
+  )
   .action(async (opts) => {
     // --flow is just sugar for --flows with a single value
     if (opts.flow) {
@@ -133,7 +137,12 @@ program
     "Comma-separated severities that cause exit 1 (default: critical,high)",
     "critical,high",
   )
+  .option("--pt", "Tell the LLM to respond in Brazilian Portuguese. Issue #67.")
   .action(async (opts) => {
+    if (opts.pt) {
+      const { setLlmLanguage } = await import("./llm/client.ts");
+      setLlmLanguage("pt");
+    }
     process.exit(await auditCommand(opts));
   });
 
@@ -164,7 +173,12 @@ program
     "Comma-separated severities that cause exit 1 (default: critical,high)",
     "critical,high",
   )
+  .option("--pt", "Tell the LLM to respond in Brazilian Portuguese. Issue #67.")
   .action(async (opts) => {
+    if (opts.pt) {
+      const { setLlmLanguage } = await import("./llm/client.ts");
+      setLlmLanguage("pt");
+    }
     process.exit(await e2eCommand(opts));
   });
 
@@ -318,8 +332,13 @@ program
   .argument("<runId>", "Run ID")
   .argument("<issueId>", "Issue ID")
   .option("--output <dir>", "Output directory", "./parity-output")
+  .option("--pt", "Tell the LLM to respond in Brazilian Portuguese. Issue #67.")
   .description("LLM deep-dive on a specific issue (requires ANTHROPIC_API_KEY)")
   .action(async (runId, issueId, opts) => {
+    if (opts.pt) {
+      const { setLlmLanguage } = await import("./llm/client.ts");
+      setLlmLanguage("pt");
+    }
     process.exit(await explainCommand(runId, issueId, opts.output));
   });
 

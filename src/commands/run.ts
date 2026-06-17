@@ -19,7 +19,7 @@ import {
   saveLearned,
 } from "../learned/repo.ts";
 import { aggregateIssues } from "../llm/aggregate-issues.ts";
-import { isLlmAvailable, providerLabel } from "../llm/client.ts";
+import { isLlmAvailable, providerLabel, setLlmLanguage } from "../llm/client.ts";
 import { discoverSelectorsFromUrl } from "../llm/discover-selectors.ts";
 import { fingerprintPdp, matchPdps } from "../llm/match-pdp.ts";
 import { renderHtmlReport } from "../report/render.ts";
@@ -133,6 +133,12 @@ export interface RunOptions {
    * scraping the HTML report. Issue #53.
    */
   json?: string;
+  /**
+   * Tell the LLM to respond in Brazilian Portuguese. Only affects
+   * LLM-generated content (issues, explain, prompts) — the static
+   * HTML report stays in English. Issue #67.
+   */
+  pt?: boolean;
 }
 
 type PresetDefaults = Partial<Pick<RunOptions,
@@ -213,6 +219,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   if (rawOpts.preset) {
     console.log(chalk.dim(`  preset: ${rawOpts.preset}`));
   }
+  if (opts.pt) setLlmLanguage("pt");
   const flows = opts.flows.split(",").map((s) => s.trim()) as FlowName[];
   const viewports = opts.viewports.split(",").map((s) => s.trim()) as Viewport[];
   const failOn = opts.failOn

@@ -21,7 +21,7 @@ export function renderAuditHtmlReport(input: {
 }): string {
   const { result, url, generatedAt, durationMs } = input;
   return `<!doctype html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -36,7 +36,7 @@ export function renderAuditHtmlReport(input: {
         <p class="hero-meta">
           <span>${htmlEscape(url)}</span>
           <span>·</span>
-          <span>${result.totals.pages} página(s)</span>
+          <span>${result.totals.pages} page(s)</span>
           <span>·</span>
           <span>${Math.round(durationMs / 1000)}s</span>
           <span>·</span>
@@ -52,10 +52,10 @@ export function renderAuditHtmlReport(input: {
   <section class="container">
     ${renderDashboard(result)}
 
-    <h2>Issues por severidade</h2>
+    <h2>Issues by severity</h2>
     ${renderIssuesBySeverity(result.allIssues)}
 
-    <h2>Páginas auditadas</h2>
+    <h2>Audited pages</h2>
     ${renderPagesTable(result.pages)}
   </section>
 
@@ -80,7 +80,7 @@ function renderVerdict(r: AuditResult): string {
 
 function renderDashboard(r: AuditResult): string {
   const tiles = [
-    { label: "Páginas", value: r.totals.pages, sub: "auditadas" },
+    { label: "Pages", value: r.totals.pages, sub: "audited" },
     { label: "Critical", value: r.totals.critical, state: r.totals.critical > 0 ? "fail" : "pass" },
     { label: "High", value: r.totals.high, state: r.totals.high > 0 ? "warn" : "pass" },
     { label: "Medium", value: r.totals.medium, state: r.totals.medium > 0 ? "warn" : "pass" },
@@ -121,7 +121,7 @@ function renderDashboard(r: AuditResult): string {
   ${
     categoryRows
       ? `<div class="category-breakdown">
-    <h3>Por categoria</h3>
+    <h3>By category</h3>
     <div class="category-list">${categoryRows}</div>
   </div>`
       : ""
@@ -130,7 +130,7 @@ function renderDashboard(r: AuditResult): string {
 
 function renderIssuesBySeverity(issues: Issue[]): string {
   if (issues.length === 0) {
-    return `<div class="empty-state">Nenhum issue encontrado 🎉</div>`;
+    return `<div class="empty-state">No issues found 🎉</div>`;
   }
   const groups: Record<Issue["severity"], Issue[]> = {
     critical: [],
@@ -173,10 +173,10 @@ function renderPagesTable(pages: PageAuditResult[]): string {
   <table class="pages-table">
     <thead>
       <tr>
-        <th>Página</th>
+        <th>Page</th>
         <th>Viewport</th>
         <th>Status</th>
-        <th>Tempo</th>
+        <th>Time</th>
         <th>Critical</th>
         <th>High</th>
         <th>Medium</th>

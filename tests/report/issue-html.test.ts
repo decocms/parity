@@ -83,11 +83,11 @@ describe("renderIssueHtml", () => {
     expect(html).not.toContain("tag-page");
   });
 
-  it("inclui detalhes em <details> quando issue.details é setado", () => {
-    const html = renderIssueHtml({ ...baseIssue, details: "linha 1\nlinha 2" });
+  it("includes details in <details> when issue.details is set", () => {
+    const html = renderIssueHtml({ ...baseIssue, details: "line 1\nline 2" });
     expect(html).toContain('<details class="issue-section"');
-    expect(html).toContain("Detalhes");
-    expect(html).toContain("linha 1");
+    expect(html).toContain("Details");
+    expect(html).toContain("line 1");
   });
 
   it("inclui screenshots somente quando runDir é passado E há evidence", () => {
@@ -104,15 +104,15 @@ describe("renderIssueHtml", () => {
     expect(withRun).toContain("shot.png");
   });
 
-  it("inclui seção 'Fix sugerido' quando issue.suggestedFix está presente", () => {
+  it("includes 'Suggested fix' section when issue.suggestedFix is present", () => {
     const html = renderIssueHtml({ ...baseIssue, suggestedFix: "Add the missing tag." });
-    expect(html).toContain("Fix sugerido");
+    expect(html).toContain("Suggested fix");
     expect(html).toContain("Add the missing tag.");
   });
 
-  it("inclui seção 'Reprodução' quando issue.reproduction está presente", () => {
+  it("includes 'Reproduction' section when issue.reproduction is present", () => {
     const html = renderIssueHtml({ ...baseIssue, reproduction: "Step 1: do X\nStep 2: do Y" });
-    expect(html).toContain("Reprodução");
+    expect(html).toContain("Reproduction");
     expect(html).toContain("Step 1");
   });
 });

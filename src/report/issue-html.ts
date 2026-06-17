@@ -107,7 +107,7 @@ export function renderIssueHtml(issue: Issue, opts: RenderIssueOptions = {}): st
     ${
       issue.details
         ? `<details class="issue-section" ${detailsIsList ? "" : "open"}>
-        <summary><span class="section-label">Detalhes</span><button class="copy-btn" data-copy-target="issue-d-${escapeHtml(issue.id)}">copiar</button></summary>
+        <summary><span class="section-label">Details</span><button class="copy-btn" data-copy-target="issue-d-${escapeHtml(issue.id)}">copy</button></summary>
         <pre class="details" id="issue-d-${escapeHtml(issue.id)}">${escapeHtml(issue.details)}</pre>
       </details>`
         : ""
@@ -115,7 +115,7 @@ export function renderIssueHtml(issue: Issue, opts: RenderIssueOptions = {}): st
     ${
       issue.reproduction
         ? `<details class="issue-section">
-        <summary><span class="section-label">Reprodução</span><button class="copy-btn" data-copy-target="issue-r-${escapeHtml(issue.id)}">copiar</button></summary>
+        <summary><span class="section-label">Reproduction</span><button class="copy-btn" data-copy-target="issue-r-${escapeHtml(issue.id)}">copy</button></summary>
         <pre class="repro" id="issue-r-${escapeHtml(issue.id)}">${escapeHtml(issue.reproduction)}</pre>
       </details>`
         : ""
@@ -123,7 +123,7 @@ export function renderIssueHtml(issue: Issue, opts: RenderIssueOptions = {}): st
     ${
       issue.suggestedFix
         ? `<details class="issue-section" open>
-        <summary><span class="section-label">Fix sugerido</span><button class="copy-btn" data-copy-target="issue-f-${escapeHtml(issue.id)}">copiar</button></summary>
+        <summary><span class="section-label">Suggested fix</span><button class="copy-btn" data-copy-target="issue-f-${escapeHtml(issue.id)}">copy</button></summary>
         <pre class="fix" id="issue-f-${escapeHtml(issue.id)}">${escapeHtml(issue.suggestedFix)}</pre>
       </details>`
         : ""

@@ -19,7 +19,7 @@ describe("renderHtmlReport — structure", () => {
   it("returns a full HTML document with sidebar nav and panels", () => {
     const html = renderHtmlReport(makeRun(), "/tmp/run");
     expect(html).toMatch(/^<!DOCTYPE html>/);
-    expect(html).toMatch(/<html lang="pt-BR"/);
+    expect(html).toMatch(/<html lang="en"/);
     expect(html).toMatch(/<aside class="app-sidebar"/);
     expect(html).toMatch(/<main class="app-main"/);
     expect(html).toMatch(/<\/html>$/);
@@ -53,7 +53,7 @@ describe("renderHtmlReport — structure", () => {
       "/tmp/run",
     );
     expect(html).toContain("42");
-    expect(html).toMatch(/Crítico/);
+    expect(html).toMatch(/Critical/);
   });
 
   it("renders top issues with severity classes", () => {

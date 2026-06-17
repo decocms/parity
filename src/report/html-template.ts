@@ -1321,8 +1321,8 @@ export const REPORT_JS = `
     var statusEl = document.getElementById('sbs-status');
     if (statusEl) {
       statusEl.textContent = proxyBase
-        ? '✓ servidor proxy ativo — iframes contornam X-Frame-Options'
-        : '⚠ sem proxy (file://) — sites com X-Frame-Options vão aparecer vazios. Use "parity serve <runId>" pra subir o proxy local.';
+        ? '✓ proxy server active — iframes bypass X-Frame-Options'
+        : '⚠ no proxy (file://) — sites with X-Frame-Options will appear empty. Run "parity serve <runId>" to start the local proxy.';
       statusEl.className = proxyBase ? 'sbs-status ok' : 'sbs-status warn';
     }
     if (sbsState.pairs && sbsState.pairs.length > 0) {
