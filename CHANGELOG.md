@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.9](https://github.com/decocms/parity/compare/v0.11.8...v0.11.9) (2026-06-17)
+
+### Fixed
+
+* **Re-publish to refresh `@latest` and let the Publish workflow create the GitHub release.** All the 0.11.x manual `gh release create` calls collided with the CI Publish job's `gh release create --generate-notes` step (it gets `HTTP 422: Release.tag_name already exists` and exits non-zero), which made the workflow look red even though npm publish succeeded each time. This bump has no code changes — it triggers a clean end-to-end publish so the workflow can prove green and `@latest` carries the same artifact as 0.11.8 with a fresh install signature. From now on no manual release creation — the workflow does it.
+
 ## [0.11.8](https://github.com/decocms/parity/compare/v0.11.7...v0.11.8) (2026-06-17)
 
 ### Fixed
