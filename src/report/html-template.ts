@@ -1060,6 +1060,60 @@ export const REPORT_CSS = `
   .seo-meta tr.match-no { background: color-mix(in srgb, var(--state-bad) 6%, transparent); }
   .seo-meta .dim { color: var(--text-muted); }
 
+  /* Per-check detail panel — opened via #detail/<checkName>. Issue #76. */
+  .detail-panel { display: none; }
+  .detail-panel.active { display: block; }
+  .check-detail-header {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .check-detail-header h2 {
+    margin: 0;
+    flex: 1;
+  }
+  .check-detail-header .back-link {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+  .check-detail-header .back-link:hover { color: var(--accent-action); text-decoration: underline; }
+  .check-detail-meta {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    font-size: 12px;
+  }
+  .check-detail-meta .dim { color: var(--text-muted); }
+  .check-detail-summary {
+    color: var(--text-secondary);
+    margin: 12px 0 0 0;
+    line-height: 1.5;
+  }
+  .repro-cmd {
+    flex: 1;
+    background: var(--surface-base);
+    border: 1px solid var(--border-default);
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    color: var(--text-primary);
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .check-data {
+    background: var(--surface-base);
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    padding: 14px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    overflow-x: auto;
+    max-height: 480px;
+  }
+
   /* Print */
   @media print {
     .app { grid-template-columns: 1fr; grid-template-areas: "header" "main"; }
@@ -1074,23 +1128,46 @@ export const REPORT_JS = `
     // ---- Tab/panel switching ----
     var navItems = document.querySelectorAll('[data-tab]');
     var panels = document.querySelectorAll('[data-panel]');
+    var detailPanels = document.querySelectorAll('[data-detail]');
     var tabOrder = Array.from(navItems).map(function(t){ return t.dataset.tab; });
 
+    // Issue #76: dashboard tiles link to #detail/<checkName>; route those
+    // hashes to the corresponding detail panel and keep the sidebar nav
+    // off (no entry matches; user can return via the "← Dashboard" link).
     function activate(name) {
       if (!name) return;
+      if (name.indexOf('detail/') === 0) {
+        var detailName = name.slice('detail/'.length);
+        navItems.forEach(function(t) { t.classList.remove('active'); });
+        panels.forEach(function(p) { p.classList.remove('active'); });
+        detailPanels.forEach(function(p) {
+          p.classList.toggle('active', p.dataset.detail === detailName);
+        });
+        try { history.replaceState(null, '', '#' + name); } catch (e) {}
+        return;
+      }
       navItems.forEach(function(t) {
         t.classList.toggle('active', t.dataset.tab === name);
       });
       panels.forEach(function(p) {
         p.classList.toggle('active', p.dataset.panel === name);
       });
+      detailPanels.forEach(function(p) { p.classList.remove('active'); });
       try { history.replaceState(null, '', '#' + name); } catch (e) {}
     }
     navItems.forEach(function(t) {
       t.addEventListener('click', function() { activate(t.dataset.tab); });
     });
+    // React to hash changes from tile <a href> clicks (Issue #76).
+    window.addEventListener('hashchange', function() {
+      activate((location.hash || '#summary').slice(1));
+    });
     var hash = (location.hash || '#summary').slice(1);
-    activate(tabOrder.includes(hash) ? hash : tabOrder[0]);
+    if (hash.indexOf('detail/') === 0) {
+      activate(hash);
+    } else {
+      activate(tabOrder.includes(hash) ? hash : tabOrder[0]);
+    }
 
     // ---- Keyboard shortcuts ----
     function activeTabIndex() {
