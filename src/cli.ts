@@ -263,10 +263,26 @@ program
 program
   .command("report")
   .argument("<runId>", "Run ID to open")
-  .description("Open the HTML report for a run in the default browser")
+  .description(
+    "Open the HTML report for a run in the default browser. With --section, extract a single tab to stdout instead — useful for agents that need just the SEO/Network/Vitals slice without parsing the whole report. Issue #74.",
+  )
   .option("--output <dir>", "Output directory", "./parity-output")
+  .option(
+    "--section <name>",
+    "Extract one tab to stdout instead of opening the report. Valid names: summary, visualdiff, seo, sidebyside, issues, vitals, cache, checks, prompt, pages, console, network, diff.",
+  )
+  .option(
+    "--json",
+    "Pair with --section to emit a normalized JSON projection of the section (from report.json) instead of the raw HTML slice.",
+  )
   .action(async (runId, opts) => {
-    process.exit(await reportCommand(runId, opts.output));
+    process.exit(
+      await reportCommand(runId, {
+        output: opts.output,
+        section: opts.section,
+        json: opts.json,
+      }),
+    );
   });
 
 program
