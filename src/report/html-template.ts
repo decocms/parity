@@ -1126,6 +1126,36 @@ export const REPORT_CSS = `
     max-height: 480px;
   }
 
+  /* Network waterfall — per-page SVG bar chart. Issue #78. */
+  .wf-page {
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    background: var(--surface-base);
+  }
+  .wf-page summary {
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-primary);
+    user-select: none;
+  }
+  .wf-page summary .dim { color: var(--text-muted); font-size: 12px; }
+  .wf-wrap {
+    margin-top: 10px;
+    overflow-x: auto;
+    max-height: 480px;
+  }
+  .wf-svg {
+    width: 100%;
+    min-width: 768px;
+    height: auto;
+  }
+  .wf-svg .wf-label { fill: var(--text-secondary); font-size: 10px; font-family: "SF Mono", Menlo, monospace; }
+  .wf-svg .wf-tick { stroke: var(--border-default); stroke-width: 1; stroke-dasharray: 2 3; }
+  .wf-svg .wf-tick-label { fill: var(--text-muted); font-size: 9px; }
+  .wf-svg .wf-trunc { fill: var(--state-warn); font-size: 10px; }
+
   /* Print */
   @media print {
     .app { grid-template-columns: 1fr; grid-template-areas: "header" "main"; }

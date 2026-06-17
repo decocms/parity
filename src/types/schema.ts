@@ -54,6 +54,14 @@ export const NetworkEntry = z.object({
   fromCache: z.boolean(),
   bytes: z.number().nullable(),
   durationMs: z.number().nullable(),
+  /**
+   * Request start time in ms relative to the page's navigation start.
+   * Lets the report render a real waterfall. Optional for back-compat with
+   * older report.json files that pre-date this field. Issue #78.
+   */
+  startMs: z.number().nullable().optional(),
+  /** Request end time, paired with `startMs`. Optional for back-compat. Issue #78. */
+  endMs: z.number().nullable().optional(),
   cacheControl: z.string().nullable(),
   serverTiming: z.string().nullable(),
   decoSection: z.string().nullable(),

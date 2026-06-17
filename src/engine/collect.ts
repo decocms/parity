@@ -244,6 +244,11 @@ async function responseToEntry(resp: Response): Promise<NetworkEntry> {
     fromCache: resp.fromServiceWorker() || isFromHttpCache(resp),
     bytes,
     durationMs: timing.responseEnd > 0 ? timing.responseEnd - timing.requestStart : null,
+    // Page-relative request timing. `startTime` is the absolute ms since
+    // unix epoch; we use `requestStart` (relative to navigation) for a
+    // proper waterfall scoped to the page. Issue #78.
+    startMs: timing.requestStart >= 0 ? timing.requestStart : null,
+    endMs: timing.responseEnd > 0 ? timing.responseEnd : null,
     cacheControl: headers["cache-control"] ?? null,
     serverTiming: headers["server-timing"] ?? null,
     decoSection: headers["x-deco-section"] ?? null,
