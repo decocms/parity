@@ -25,17 +25,21 @@ describe("renderHtmlReport — structure", () => {
     expect(html).toMatch(/<\/html>$/);
   });
 
-  it("includes all top-level navigation tabs", () => {
+  it("includes the always-visible navigation tabs", () => {
     const html = renderHtmlReport(makeRun(), "/tmp/run");
-    // "diff" is conditional (only when baseline is loaded — Issue #68); check the rest.
-    const tabs = ["summary", "visualdiff", "seo", "sidebyside", "issues", "vitals", "cache", "checks", "prompt", "pages", "console", "network"];
+    // Default makeRun() has no LLM output and no baseline, so:
+    //   - "diff" is conditional on baseline (Issue #68) → absent
+    //   - "visualdiff" / "prompt" are LLM-only (Issue #75) → absent
+    const tabs = ["summary", "seo", "sidebyside", "issues", "vitals", "cache", "checks", "pages", "console", "network"];
     for (const tab of tabs) {
       expect(html).toContain(`data-tab="${tab}"`);
       expect(html).toContain(`data-panel="${tab}"`);
     }
-    // No baseline on the default run fixture → diff tab/panel absent.
     expect(html).not.toContain('data-tab="diff"');
     expect(html).not.toContain('data-panel="diff"');
+    expect(html).not.toContain('data-tab="visualdiff"');
+    expect(html).not.toContain('data-tab="prompt"');
+    expect(html).toContain("LLM disabled");
   });
 
   it("renders the health score from verdict", () => {
@@ -163,11 +167,48 @@ describe("renderHtmlReport — structure", () => {
     expect(html).toContain("title diverges");
   });
 
-  it("renders the LLM prompt panel with copy button", () => {
-    const html = renderHtmlReport(makeRun(), "/tmp/run");
+  it("renders the LLM prompt panel with copy button when LLM ran", () => {
+    // The Prompt tab is now LLM-only (Issue #75) — it shows only when at
+    // least one visualDiff result was produced by an actual LLM call.
+    const html = renderHtmlReport(
+      makeRun({
+        visualDiff: {
+          pagesChecked: 1,
+          pagesWithDiffs: 0,
+          pagesPassed: 1,
+          pagesFailed: 0,
+          llmCallsUsed: 1,
+          parityOk: true,
+          pagesFromCache: 0,
+          results: [
+            {
+              pageKey: "/::mobile",
+              pagePath: "/",
+              pageLabel: "Home · mobile",
+              viewport: "mobile",
+              prodUrl: "https://prod/",
+              candUrl: "https://cand/",
+              prodScreenshotPath: "/tmp/run/p.png",
+              candScreenshotPath: "/tmp/run/c.png",
+              heatmapPath: undefined,
+              pctDiff: 0,
+              verdict: "pass",
+              prodSections: [],
+              candSections: [],
+              sectionsOnlyInProd: [],
+              sectionsOnlyInCand: [],
+              differences: [],
+              llmCalled: true,
+            },
+          ],
+        },
+      }),
+      "/tmp/run",
+    );
     expect(html).toContain("LLM prompt");
     expect(html).toMatch(/prompt-copy/);
     expect(html).toMatch(/prompt-download/);
+    expect(html).toContain('data-tab="prompt"');
   });
 
   it("renders checks table from run.checks", () => {
@@ -186,11 +227,13 @@ describe("renderHtmlReport — structure", () => {
     expect(html).toContain("broken");
   });
 
-  it("renders empty-state for visual diff when run.visualDiff is missing", () => {
+  it("hides the visual-diff tab entirely when no LLM ran (Issue #75)", () => {
     const html = renderHtmlReport(makeRun(), "/tmp/run");
-    // Should still have the tab, but with an empty/intro message
-    expect(html).toMatch(/visualdiff/);
-    expect(html).toMatch(/No visual comparison ran|Visual Diff/);
+    // No LLM output → tab + panel both omitted, banner explains why
+    expect(html).not.toContain('data-tab="visualdiff"');
+    expect(html).not.toContain('data-panel="visualdiff"');
+    expect(html).toContain("LLM disabled");
+    expect(html).toContain("tabs hidden");
   });
 
   it("escapes HTML in user-supplied strings to prevent injection", () => {

@@ -1117,8 +1117,31 @@ interface NavEntry {
   count?: number;
 }
 
+/**
+ * Tabs whose ENTIRE content depends on an LLM call having actually run.
+ * When the run had no LLM available, these panels render as empty-state
+ * placeholders that just say "LLM disabled" — useless noise. Issue #75.
+ *
+ * Visual Diff: only meaningful when `run.visualDiff` has at least one
+ *   result with `llmCalled: true` (the pixelmatch heatmap alone isn't
+ *   what users come here for).
+ * Prompt: literal LLM-aggregator output. Without aggregation the panel
+ *   is just a "ready to paste" wrapper around an empty list.
+ *
+ * `Issues` is NOT in this list — the issues list is populated by the
+ * checks themselves (deterministic) even without an LLM. LLM aggregation
+ * only re-ranks them.
+ */
+const LLM_ONLY_TABS = new Set(["visualdiff", "prompt"]);
+
+function hasAnyLlmOutput(run: Run): boolean {
+  if (run.visualDiff && run.visualDiff.results.some((p) => p.llmCalled)) return true;
+  return false;
+}
+
 function buildNav(run: Run): NavEntry[] {
-  const entries: NavEntry[] = [
+  const llmRan = hasAnyLlmOutput(run);
+  const all: NavEntry[] = [
     { tab: "summary", label: "Dashboard", icon: "🏠" },
     { tab: "visualdiff", label: "Visual Diff", icon: "🖼", count: run.visualDiff?.pagesWithDiffs },
     { tab: "seo", label: "SEO", icon: "🔍", count: run.seo?.issues.length },
@@ -1132,6 +1155,7 @@ function buildNav(run: Run): NavEntry[] {
     { tab: "console", label: "Console", icon: "🔧" },
     { tab: "network", label: "Network", icon: "🌐" },
   ];
+  const entries = all.filter((e) => llmRan || !LLM_ONLY_TABS.has(e.tab));
   // Diff tab only when a baseline is loaded — otherwise the panel just
   // shows an empty state that looks like a bug. Use --baseline <name> on
   // `parity run` to enable. Issue #68.
@@ -1139,6 +1163,11 @@ function buildNav(run: Run): NavEntry[] {
     entries.push({ tab: "diff", label: "Diff", icon: "📈" });
   }
   return entries;
+}
+
+/** Count of tabs hidden in the nav, for the disabled-LLM banner. Issue #75. */
+function countHiddenLlmTabs(run: Run): number {
+  return hasAnyLlmOutput(run) ? 0 : LLM_ONLY_TABS.size;
 }
 
 export function renderHtmlReport(run: Run, runDir: string): string {
@@ -1189,16 +1218,14 @@ export function renderHtmlReport(run: Run, runDir: string): string {
       </div>
     </header>
     ${run.partial ? `<div style="background:#7c2d12;color:#fed7aa;padding:12px 24px;border-bottom:2px solid #ea580c;font-weight:600">⚠ Partial run — interrupted${run.partialReason ? ` (${esc(run.partialReason)})` : ""}. Verdict, top-issues, and some sections may be incomplete.</div>` : ""}
+    ${countHiddenLlmTabs(run) > 0 ? `<div class="llm-disabled-banner">LLM disabled — ${countHiddenLlmTabs(run)} tab${countHiddenLlmTabs(run) !== 1 ? "s" : ""} hidden (Visual Diff, LLM Prompt). Set <code>ANTHROPIC_API_KEY</code> or log in to the local <code>claude</code> CLI and re-run for semantic analysis.</div>` : ""}
     ${renderTimingsBar(run)}
     <main class="app-main">
       <section class="panel" data-panel="summary">
         ${tabHelp(TAB_HELP.summary)}
         ${renderDashboard(run)}
       </section>
-      <section class="panel" data-panel="visualdiff">
-        ${tabHelp(TAB_HELP.visualdiff)}
-        ${renderVisualDiffPanel(run, runDir)}
-      </section>
+      ${hasAnyLlmOutput(run) ? `<section class="panel" data-panel="visualdiff">${tabHelp(TAB_HELP.visualdiff)}${renderVisualDiffPanel(run, runDir)}</section>` : ""}
       <section class="panel" data-panel="seo">
         ${tabHelp(TAB_HELP.seo)}
         ${renderSeoPanel(run, runDir)}
@@ -1223,10 +1250,7 @@ export function renderHtmlReport(run: Run, runDir: string): string {
         ${tabHelp(TAB_HELP.checks)}
         ${renderChecksTable(run)}
       </section>
-      <section class="panel" data-panel="prompt">
-        ${tabHelp(TAB_HELP.prompt)}
-        ${renderPromptPanel(run)}
-      </section>
+      ${hasAnyLlmOutput(run) ? `<section class="panel" data-panel="prompt">${tabHelp(TAB_HELP.prompt)}${renderPromptPanel(run)}</section>` : ""}
       <section class="panel" data-panel="pages">
         ${tabHelp(TAB_HELP.pages)}
         ${renderPagesTable(run)}
