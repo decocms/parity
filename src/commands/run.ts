@@ -196,6 +196,34 @@ const PRESETS: Record<NonNullable<RunOptions["preset"]>, PresetDefaults> = {
   },
 };
 
+/**
+ * Apply LLM-availability heuristics to the resolved options. Issue #71:
+ * Several flags are wasteful when no LLM provider is available — e.g.
+ * `--visual-pages 5` captures screenshots and computes pixelmatch heatmaps
+ * but the semantic analysis (the actual value) is LLM-only. We auto-zero
+ * those numeric defaults when no LLM is configured, unless the user
+ * explicitly set them.
+ *
+ * Detection is intentionally conservative: we only auto-disable if the
+ * caller never touched the flag (still equals commander's default).
+ */
+function applySmartDefaults(opts: RunOptions, llmAvailable: boolean): RunOptions {
+  if (llmAvailable) return opts;
+  const merged: RunOptions = { ...opts };
+  const COMMANDER_DEFAULTS: Record<string, unknown> = {
+    visualPages: 5,
+  };
+  const mergedRec = merged as unknown as Record<string, unknown>;
+  // Without LLM the visual diff has no analysis layer — skip the capture
+  // pass entirely to save ~10-30s per page. Users can still opt in with
+  // `--visual-pages N` to get the prod/cand screenshots + pixelmatch heatmap.
+  if (mergedRec.visualPages === COMMANDER_DEFAULTS.visualPages) {
+    mergedRec.visualPages = 0;
+    mergedRec.noVisualDiff = true;
+  }
+  return merged;
+}
+
 function applyPreset(opts: RunOptions): RunOptions {
   if (!opts.preset) return opts;
   const preset = PRESETS[opts.preset];
@@ -270,7 +298,7 @@ function applyLlmOptions(opts: RunOptions): string | null {
 }
 
 export async function runCommand(rawOpts: RunOptions): Promise<number> {
-  const opts = applyPreset(rawOpts);
+  let opts = applyPreset(rawOpts);
   if (rawOpts.preset) {
     console.log(chalk.dim(`  preset: ${rawOpts.preset}`));
   }
@@ -279,6 +307,19 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   if (llmCfgErr) {
     console.error(chalk.red(`  ${llmCfgErr}`));
     return 2;
+  }
+  // Apply smart defaults AFTER --llm flags are applied so the heuristic
+  // reads the user's final intent (--llm none disables LLM-dependent capture
+  // even when the env has a key). Issue #71.
+  const llmStillAvailable = isLlmAvailable();
+  const preSmart = opts;
+  opts = applySmartDefaults(opts, llmStillAvailable);
+  if (!llmStillAvailable && opts.visualPages !== preSmart.visualPages) {
+    console.log(
+      chalk.dim(
+        `  visual-pages auto-set to 0 (no LLM available — analysis layer would be skipped; opt in with --visual-pages N)`,
+      ),
+    );
   }
   const flows = opts.flows.split(",").map((s) => s.trim()) as FlowName[];
   const viewports = opts.viewports.split(",").map((s) => s.trim()) as Viewport[];
