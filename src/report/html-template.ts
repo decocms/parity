@@ -57,7 +57,12 @@ export const REPORT_CSS = `
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     background: var(--surface-base);
     color: var(--text-primary);
-    line-height: 1.5;
+    line-height: 1.55;
+    /* Issue #81 — improves character rendering for small UI text and
+       eliminates fractional rounding in tile values. */
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-variant-numeric: tabular-nums;
   }
   a { color: var(--accent-action); text-decoration: none; }
   a:hover { text-decoration: underline; }
@@ -1155,6 +1160,51 @@ export const REPORT_CSS = `
   .wf-svg .wf-tick { stroke: var(--border-default); stroke-width: 1; stroke-dasharray: 2 3; }
   .wf-svg .wf-tick-label { fill: var(--text-muted); font-size: 9px; }
   .wf-svg .wf-trunc { fill: var(--state-warn); font-size: 10px; }
+
+  /* Accessibility — keyboard focus rings. Issue #81. */
+  .nav-item:focus-visible,
+  .action-btn:focus-visible,
+  .copy-btn:focus-visible,
+  .sbs-toolbar button:focus-visible {
+    outline: 2px solid var(--accent-action);
+    outline-offset: 2px;
+  }
+
+  /* Mobile layout — collapse the sidebar above the main content. Below
+     880px the 240px sidebar steals too much of the viewport and the
+     report becomes unreadable. Issue #81. */
+  @media (max-width: 880px) {
+    .app {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto 1fr;
+      grid-template-areas: "header" "side" "main";
+    }
+    .app-sidebar {
+      position: relative;
+      height: auto;
+      border-right: none;
+      border-bottom: 1px solid var(--border-default);
+      padding: 12px 0;
+    }
+    .sidebar-brand { display: none; }
+    .sidebar-nav {
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding: 0 12px;
+    }
+    .nav-item { padding: 6px 10px; font-size: 12px; }
+    .sidebar-footer { display: none; }
+    .app-main { padding: 16px; }
+    .dash-hero {
+      grid-template-columns: 1fr;
+      gap: 16px;
+      padding: 16px;
+    }
+    .health-score { margin: 0 auto; }
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+    .sbs-container { flex-direction: column; }
+  }
 
   /* Print */
   @media print {
