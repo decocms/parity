@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.1](https://github.com/decocms/parity/compare/v0.11.0...v0.11.1) (2026-06-17)
+
+### Fixed
+
+* **Claude Agent SDK provider — every call failed with `error_max_turns` (#98).** Live testing against `lojabagaggio.deco.site` vs `bagaggio-tanstack.deco-cx.workers.dev` showed `[llm-claude-sdk] call failed: error_max_turns` on every selector-discovery, step-recovery, and aggregation call when running with `--llm claude-code`. Root cause: `maxTurns: 1` in `baseSdkOptions` — Claude Code's harness counts the response emission as turn 2 even when `allowedTools: []` prevents any tool from firing. Removed `maxTurns`; the empty tool whitelist alone guarantees a single round-trip. The SDK provider now actually produces output.
+
 ## [0.11.0](https://github.com/decocms/parity/compare/v0.10.1...v0.11.0) (2026-06-17)
 
 ### Added

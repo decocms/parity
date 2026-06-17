@@ -90,18 +90,24 @@ function makeAbortHandle(ms: number): { controller: AbortController; clear: () =
 
 /**
  * Shared SDK options for plain LLM calls. We:
- *   - disable all tools (`allowedTools: []` is an exact whitelist; combined
- *     with `maxTurns: 1` this guarantees a single API round-trip)
+ *   - disable all tools (`allowedTools: []` is an exact whitelist) — this
+ *     alone guarantees no agent loop, no tool execution, just a single
+ *     `query → response` round-trip.
  *   - skip filesystem context (`settingSources: []`) so we don't auto-load
- *     the user's CLAUDE.md / skills / agents into the prompt
- *   - silence the permission UI (`permissionMode: 'dontAsk'`)
+ *     the user's CLAUDE.md / skills / agents into the prompt.
+ *   - silence the permission UI (`permissionMode: 'dontAsk'`).
+ *
+ * `maxTurns` is intentionally NOT set. Live testing showed `maxTurns: 1`
+ * caused every call to fail with `error_max_turns` — Claude Code's harness
+ * counts the response emission as turn 2 even when no tools can fire. With
+ * `allowedTools: []` the model has nothing to do with extra turns anyway,
+ * so leaving it to the SDK default is safe. Issue #98.
  */
 function baseSdkOptions(model: string, controller: AbortController): Record<string, unknown> {
   return {
     model,
     allowedTools: [],
     permissionMode: "dontAsk",
-    maxTurns: 1,
     abortController: controller,
     settingSources: [],
   };
