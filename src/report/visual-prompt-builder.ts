@@ -63,7 +63,7 @@ export function buildVisualPrompt(
 
   if (!summary || summary.results.length === 0) {
     sections.push(
-      "_Nenhuma comparação visual rodou neste run (visual-pages=0 ou erro no capture)._",
+      "_No visual comparison ran in this run (visual-pages=0 or capture error)._",
     );
     return sections.join("\n");
   }
@@ -84,13 +84,13 @@ export function buildVisualPrompt(
     });
 
   if (pages.length === 0) {
-    sections.push("_Todas as páginas comparadas passaram (sem diferenças relevantes)._");
+    sections.push("_All compared pages passed (no relevant differences)._");
     return sections.join("\n");
   }
 
   sections.push(
     "",
-    `## Páginas com diferenças (${pages.length}/${summary.pagesChecked})`,
+    `## Pages with differences (${pages.length}/${summary.pagesChecked})`,
     "",
   );
 
@@ -120,13 +120,13 @@ function buildHeader(
   );
   if (summary) {
     lines.push(
-      "## Sumário",
+      "## Summary",
       "",
-      `- **Páginas comparadas:** ${summary.pagesChecked}`,
-      `- **Com diferenças:** ${summary.pagesWithDiffs}`,
+      `- **Pages compared:** ${summary.pagesChecked}`,
+      `- **With differences:** ${summary.pagesWithDiffs}`,
       `- **OK:** ${summary.pagesPassed}`,
-      `- **Falha de análise:** ${summary.pagesFailed}`,
-      `- **Chamadas LLM Vision:** ${summary.llmCallsUsed}`,
+      `- **Analysis failures:** ${summary.pagesFailed}`,
+      `- **LLM Vision calls:** ${summary.llmCallsUsed}`,
       "",
     );
   }
@@ -144,7 +144,7 @@ function renderPageBlock(idx: number, page: VisualDiffPage, runDir: string): str
   lines.push(
     "---",
     "",
-    `### ${idx}. ${emoji} ${page.pageLabel} [${sevLabel} · ${diffsCount} diff(s)${missingSecs ? ` · ${missingSecs} section(s) ausente(s)` : ""}]`,
+    `### ${idx}. ${emoji} ${page.pageLabel} [${sevLabel} · ${diffsCount} diff(s)${missingSecs ? ` · ${missingSecs} missing section(s)` : ""}]`,
     "",
     `- **Path:** \`${page.pagePath}\``,
     `- **Viewport:** \`${page.viewport}\``,
@@ -163,7 +163,7 @@ function renderPageBlock(idx: number, page: VisualDiffPage, runDir: string): str
   if (page.sectionsOnlyInProd.length > 0) {
     lines.push(
       "",
-      "**Sections detectadas no DOM de prod e AUSENTES em cand (provavelmente faltam migrar):**",
+      "**Sections found in prod DOM but MISSING in cand (probably not yet migrated):**",
       ...page.sectionsOnlyInProd.map((s) => `- \`${s}\``),
     );
   }
@@ -171,20 +171,20 @@ function renderPageBlock(idx: number, page: VisualDiffPage, runDir: string): str
   if (page.sectionsOnlyInCand.length > 0) {
     lines.push(
       "",
-      "**Sections só em cand (sections novas/extras, suspeitas):**",
+      "**Sections only in cand (new/extra sections, suspicious):**",
       ...page.sectionsOnlyInCand.map((s) => `- \`${s}\``),
     );
   }
 
   if (page.differences.length > 0) {
-    lines.push("", "**Diferenças visuais identificadas pelo LLM Vision:**", "");
+    lines.push("", "**Visual differences identified by LLM Vision:**", "");
     for (const [i, d] of page.differences.entries()) {
       lines.push(`${i + 1}. ${SEVERITY_EMOJI[d.severity]} [${d.region} · ${d.type} · ${d.severity}] ${d.description}`);
     }
   }
 
   if (page.llmError) {
-    lines.push("", `> ⚠️ LLM Vision retornou erro: ${page.llmError}`);
+    lines.push("", `> ⚠️ LLM Vision returned an error: ${page.llmError}`);
   }
 
   lines.push("");
@@ -200,25 +200,25 @@ function buildInstructions(): string {
 For each page above, in order of severity:
 
 1. **Diagnose** the most likely root cause specific to a Fresh → TanStack Start migration of a Deco storefront. Common patterns:
-   - **Section ausente em cand** → não registrada em \`registerSections()\` em \`src/setup.ts\`, ou o CMS resolve a key mas não acha o componente
-   - **Section com layout diferente** → loader retorna shape diferente (\`@decocms/apps-start\` vs \`deco-cx/apps\`), props recebidas via JSDoc mudaram, ou \`useDevice()\` hidrata diferente
-   - **Imagem ausente / sem srcset** → image helper drift (perdeu \`preload\`, perdeu \`Picture\` ou usa \`<img>\` direto), CDN URL mudou
-   - **Texto/CTA diferente** → CMS draft vs published, ou copy hardcoded em código novo
-   - **Cor/estilo diferente** → CSS tokens não foram portados, Tailwind config drift, ou seletor mais específico em cand sobrescrevendo
-   - **Hero/banner errado** → loader VTEX/Shopify retornando dados diferentes, cookies (geo, cohort) não propagando, ou cache stale
-   - **Layout shift / hidratação** → \`useDevice\` divergente entre SSR e client, ou \`<Suspense>\` sem fallback adequado
+   - **Section missing in cand** → not registered in \`registerSections()\` in \`src/setup.ts\`, or the CMS resolves the key but can't find the component
+   - **Section with different layout** → loader returns a different shape (\`@decocms/apps-start\` vs \`deco-cx/apps\`), props received via JSDoc changed, or \`useDevice()\` hydrates differently
+   - **Missing image / no srcset** → image helper drift (lost \`preload\`, lost \`Picture\` or uses bare \`<img>\`), CDN URL changed
+   - **Different text/CTA** → CMS draft vs published, or copy hardcoded in new code
+   - **Different color/style** → CSS tokens not ported, Tailwind config drift, or a more specific selector in cand overriding
+   - **Wrong hero/banner** → VTEX/Shopify loader returning different data, cookies (geo, cohort) not propagating, or stale cache
+   - **Layout shift / hydration** → \`useDevice\` divergent between SSR and client, or \`<Suspense>\` without proper fallback
 
-2. **Propose concrete fix** — arquivo + mudança específica + por que. Se duas alternativas plausíveis, lista as duas.
+2. **Propose a concrete fix** — file + specific change + why. If two plausible alternatives, list both.
 
-3. **Group** páginas que provavelmente compartilham a mesma causa raiz (ex.: shelf quebrada em home E PLP → loader compartilhado, fix consolidado).
+3. **Group** pages that likely share the same root cause (e.g. broken shelf on home AND PLP → shared loader, consolidated fix).
 
 4. **Rank** execution order:
-   - Qual fix desbloqueia mais páginas (impacto)?
-   - Qual é mais barato implementar?
-   - Qual depende de migração ainda não feita (precisa portar primeiro)?
+   - Which fix unblocks the most pages (impact)?
+   - Which is cheapest to implement?
+   - Which depends on a migration that isn't done yet (must port first)?
 
-Sem preâmbulo. Se faltar contexto (código fonte de uma section, HAR, output de loader), peça com path específico e eu busco.
+No preamble. If you need extra context (a section's source code, HAR, loader output), ask for it with a specific path and I'll fetch it.
 
-Importante: **só sugira mudanças em cand**. Prod é fonte da verdade — nunca pedimos pra alterar prod.
+Important: **only suggest changes in cand**. Prod is the source of truth — never ask to modify prod.
 `;
 }

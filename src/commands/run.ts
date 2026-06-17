@@ -19,7 +19,7 @@ import {
   saveLearned,
 } from "../learned/repo.ts";
 import { aggregateIssues } from "../llm/aggregate-issues.ts";
-import { disableLlm, isLlmAvailable, providerLabel, setForcedProvider } from "../llm/client.ts";
+import { disableLlm, isLlmAvailable, providerLabel, setForcedProvider, setLlmLanguage } from "../llm/client.ts";
 import { applyModelOverrides, parseFeatureOverrides, type ModelTier, type Provider } from "../llm/models.ts";
 import { discoverSelectorsFromUrl } from "../llm/discover-selectors.ts";
 import { fingerprintPdp, matchPdps } from "../llm/match-pdp.ts";
@@ -134,6 +134,12 @@ export interface RunOptions {
    * scraping the HTML report. Issue #53.
    */
   json?: string;
+  /**
+   * Tell the LLM to respond in Brazilian Portuguese. Only affects
+   * LLM-generated content (issues, explain, prompts) — the static
+   * HTML report stays in English. Issue #67.
+   */
+  pt?: boolean;
   /**
    * Force LLM provider. `claude-code` uses the local `claude` CLI via the
    * Claude Agent SDK. Defaults to auto-detect. Issue #66.
@@ -268,6 +274,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   if (rawOpts.preset) {
     console.log(chalk.dim(`  preset: ${rawOpts.preset}`));
   }
+  if (opts.pt) setLlmLanguage("pt");
   const llmCfgErr = applyLlmOptions(opts);
   if (llmCfgErr) {
     console.error(chalk.red(`  ${llmCfgErr}`));

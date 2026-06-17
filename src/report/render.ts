@@ -22,7 +22,7 @@ function renderIssue(issue: Issue, runDir: string): string {
 
 function renderDashboard(run: Run): string {
   const v = run.verdict;
-  const statusLabel = v.status === "pass" ? "Excelente" : v.status === "warn" ? "Bom, com ressalvas" : "Crítico";
+  const statusLabel = v.status === "pass" ? "Excellent" : v.status === "warn" ? "Warnings" : "Critical";
   const ringColor = v.status === "pass" ? "var(--state-good)" : v.status === "warn" ? "var(--state-warn)" : "var(--state-bad)";
   const ringDeg = `${Math.round((v.score / 100) * 360)}deg`;
 
@@ -37,7 +37,7 @@ function renderDashboard(run: Run): string {
     </div>
     <div class="dash-hero-info">
       <div class="verdict-text ${v.status}">${statusLabel}</div>
-      <div class="verdict-sub">${v.critical + v.high} issue${v.critical + v.high !== 1 ? "s" : ""} bloqueante${v.critical + v.high !== 1 ? "s" : ""} ${v.critical > 0 ? `(${v.critical} crítica${v.critical !== 1 ? "s" : ""})` : ""}</div>
+      <div class="verdict-sub">${v.critical + v.high} blocking issue${v.critical + v.high !== 1 ? "s" : ""} ${v.critical > 0 ? `(${v.critical} critical)` : ""}</div>
       <div class="verdict-meta">
         <span><strong>${v.checksPassed}</strong> checks pass</span>
         <span><strong>${v.checksFailed}</strong> fail</span>
@@ -74,9 +74,9 @@ function buildTiles(run: Run): Tile[] {
     const failed = data.failedSteps ?? 0;
     tiles.push({
       icon: "🛒",
-      label: "Jornada",
+      label: "Journey",
       value: total > 0 ? `${total - failed}/${total}` : "—",
-      meta: failed > 0 ? `${failed} step(s) falhou` : "completou em ambos",
+      meta: failed > 0 ? `${failed} step(s) failed` : "completed in both",
       state: failed > 0 ? "fail" : "pass",
       href: "#issues",
     });
@@ -90,7 +90,7 @@ function buildTiles(run: Run): Tile[] {
       icon: "💾",
       label: "Cache",
       value: `${((data.hitRate ?? 0) * 100).toFixed(0)}%`,
-      meta: `${data.opportunityCount ?? 0} oportunidades`,
+      meta: `${data.opportunityCount ?? 0} opportunities`,
       state: (data.hitRate ?? 0) > 0.7 ? "pass" : (data.hitRate ?? 0) > 0.4 ? "warn" : "fail",
       href: "#cache",
     });
@@ -103,7 +103,7 @@ function buildTiles(run: Run): Tile[] {
       icon: "📊",
       label: "Vitals",
       value: vitals.status === "pass" ? "✓" : vitals.issues.length.toString(),
-      meta: vitals.status === "pass" ? "sem regressões" : `${vitals.issues.length} regressão(ões)`,
+      meta: vitals.status === "pass" ? "no regressions" : `${vitals.issues.length} regression(s)`,
       state: vitals.status === "pass" ? "pass" : "fail",
       href: "#vitals",
     });
@@ -130,7 +130,7 @@ function buildTiles(run: Run): Tile[] {
       icon: "🔧",
       label: "Console",
       value: console_.issues.length.toString(),
-      meta: console_.status === "pass" ? "sem erros novos" : "errors em cand",
+      meta: console_.status === "pass" ? "no new errors" : "errors in cand",
       state: console_.status === "pass" ? "pass" : "fail",
       href: "#console",
     });
@@ -143,11 +143,11 @@ function buildTiles(run: Run): Tile[] {
     const value = vd ? `${vd.pagesWithDiffs}/${vd.pagesChecked}` : visual.issues.length.toString();
     const meta = vd
       ? vd.pagesWithDiffs === 0
-        ? "todas as páginas OK"
-        : `${vd.pagesWithDiffs} página(s) com diff`
+        ? "all pages OK"
+        : `${vd.pagesWithDiffs} page(s) with diff`
       : visual.status === "pass"
-        ? "sem regressão visual"
-        : "diferenças detectadas";
+        ? "no visual regression"
+        : "differences detected";
     tiles.push({
       icon: "🖼",
       label: "Visual",
@@ -175,12 +175,12 @@ function renderTile(t: Tile): string {
 
 function renderTopIssues(run: Run, runDir: string): string {
   if (run.topIssues.length === 0) {
-    return `<div class="card"><div class="empty">Nenhuma issue prioritária 🎉</div></div>`;
+    return `<div class="card"><div class="empty">No priority issues 🎉</div></div>`;
   }
   return `
   <div class="card">
     <h2>Top issues</h2>
-    <div class="hint">Issues priorizadas e agregadas; veja a aba Issues para a lista completa.</div>
+    <div class="hint">Prioritized, aggregated issues; see the Issues tab for the complete list.</div>
     ${run.topIssues.map((i) => renderIssue(i, runDir)).join("")}
   </div>`;
 }
@@ -188,9 +188,9 @@ function renderTopIssues(run: Run, runDir: string): string {
 function renderChecksTable(run: Run): string {
   return `
   <div class="card">
-    <h2>Checks executados</h2>
+    <h2>Checks executed</h2>
     <table>
-      <thead><tr><th>Check</th><th>Status</th><th class="num">Issues</th><th class="num">Duração</th><th>Resumo</th></tr></thead>
+      <thead><tr><th>Check</th><th>Status</th><th class="num">Issues</th><th class="num">Duration</th><th>Summary</th></tr></thead>
       <tbody>
         ${run.checks
           .map(
@@ -211,7 +211,7 @@ function renderChecksTable(run: Run): string {
 
 function renderIssuesPanel(run: Run, runDir: string): string {
   if (run.issues.length === 0) {
-    return `<div class="empty">Nenhuma issue registrada.</div>`;
+    return `<div class="empty">No issues recorded.</div>`;
   }
   return run.issues.map((i) => renderIssue(i, runDir)).join("");
 }
@@ -262,7 +262,7 @@ function renderVitalsPanel(run: Run): string {
   void byPage; // unused placeholder
 
   if (pageVitals.size === 0) {
-    return `<div class="empty">Nenhuma medida de Web Vitals registrada para mobile.</div>`;
+    return `<div class="empty">No mobile Web Vitals measurements recorded.</div>`;
   }
 
   const metricRow = (
@@ -315,7 +315,7 @@ function renderVitalsPanel(run: Run): string {
           ${metricRow("CLS (Cumulative Layout Shift)", entry.prod?.cls, entry.cand?.cls, "score", true)}
         </tbody>
       </table>
-      <div class="hint">prod = Fresh (verdade) · cand = TanStack · Δ verde = cand melhor que prod · Δ vermelho = regressão</div>
+      <div class="hint">prod = Fresh (source of truth) · cand = TanStack · green Δ = cand better than prod · red Δ = regression</div>
     </div>`;
   });
   return cards.join("");
@@ -353,12 +353,12 @@ function renderPagesTable(run: Run): string {
       });
     }
   }
-  if (rows.length === 0) return `<div class="empty">Nenhuma página capturada.</div>`;
+  if (rows.length === 0) return `<div class="empty">No pages captured.</div>`;
   return `
   <div class="card">
-    <h2>Páginas capturadas</h2>
+    <h2>Captured pages</h2>
     <table>
-      <thead><tr><th>Página</th><th>Side</th><th>Viewport</th><th class="num">Status</th><th>URL</th></tr></thead>
+      <thead><tr><th>Page</th><th>Side</th><th>Viewport</th><th class="num">Status</th><th>URL</th></tr></thead>
       <tbody>${rows.map((r) => `<tr><td>${esc(r.key)}</td><td>${esc(r.side)}</td><td>${esc(r.viewport)}</td><td class="num">${esc(r.status)}</td><td><code>${esc(r.url)}</code></td></tr>`).join("")}</tbody>
     </table>
   </div>`;
@@ -367,7 +367,7 @@ function renderPagesTable(run: Run): string {
 function renderConsolePanel(run: Run, runDir: string): string {
   const c = run.checks.find((x) => x.name === "console-errors-baseline");
   if (!c || c.issues.length === 0) {
-    return `<div class="empty">Nenhum erro de console novo em cand vs prod.</div>`;
+    return `<div class="empty">No new console errors in cand vs prod.</div>`;
   }
   return c.issues.map((i) => renderIssue(i, runDir)).join("");
 }
@@ -384,7 +384,7 @@ function renderNetworkPanel(run: Run): string {
     }
   }
   if (candEntries.length === 0) {
-    return `<div class="empty">Nenhum request de network capturado.</div>`;
+    return `<div class="empty">No network requests captured.</div>`;
   }
   const report = buildCacheReport(candEntries, baseUrl);
   return renderNetworkTable(report);
@@ -408,11 +408,11 @@ function renderNetworkTable(report: CacheReport): string {
   return `
   <div class="card">
     <h2>Network · ${report.total} requests · ${(report.totalBytes / 1024).toFixed(0)} KB</h2>
-    <div class="hint">Hits, misses e categorias de cada request capturado em cand. Click no cabeçalho pra ordenar.</div>
+    <div class="hint">Hits, misses and categories per request captured in cand. Click a column header to sort.</div>
     <div class="net-toolbar">
-      <input id="net-search" type="search" placeholder="filtrar por URL…" class="net-input"/>
+      <input id="net-search" type="search" placeholder="filter by URL…" class="net-input"/>
       <select id="net-filter-cat" class="net-input">
-        <option value="">todas categorias</option>
+        <option value="">all categories</option>
         <option value="document">document</option>
         <option value="static-asset">static-asset</option>
         <option value="image">image</option>
@@ -422,10 +422,10 @@ function renderNetworkTable(report: CacheReport): string {
         <option value="other">other</option>
       </select>
       <select id="net-filter-cache" class="net-input">
-        <option value="">qualquer cache</option>
-        <option value="hit">só HIT</option>
-        <option value="miss">só MISS/unknown</option>
-        <option value="bypass">só BYPASS</option>
+        <option value="">any cache</option>
+        <option value="hit">HIT only</option>
+        <option value="miss">MISS/unknown only</option>
+        <option value="bypass">BYPASS only</option>
       </select>
       <span class="net-count" id="net-count">${rows.length} / ${rows.length} rows</span>
     </div>
@@ -433,7 +433,7 @@ function renderNetworkTable(report: CacheReport): string {
       <thead>
         <tr>
           <th data-sort="url">URL</th>
-          <th data-sort="cat">Tipo</th>
+          <th data-sort="cat">Type</th>
           <th data-sort="status" class="num">Status</th>
           <th data-sort="bytes" class="num">Bytes</th>
           <th data-sort="cache">Cache</th>
@@ -467,7 +467,7 @@ function renderCachePanel(run: Run): string {
     }
   }
   if (candEntries.length === 0) {
-    return `<div class="empty">Sem dados de network em cand.</div>`;
+    return `<div class="empty">No network data in cand.</div>`;
   }
   const report = buildCacheReport(candEntries, baseUrl);
   // Prod hit rate (informational only)
@@ -493,7 +493,7 @@ function renderCachePanel(run: Run): string {
     ? prodHitRate > report.hitRate
       ? `<span class="delta-bad">↓ ${((prodHitRate - report.hitRate) * 100).toFixed(0)}pp vs prod</span>`
       : `<span class="delta-good">↑ ${((report.hitRate - prodHitRate) * 100).toFixed(0)}pp vs prod</span>`
-    : `<span class="dim">sem comparação prod</span>`;
+    : `<span class="dim">no prod comparison</span>`;
 
   return `
   <div class="card cache-hero">
@@ -505,34 +505,34 @@ function renderCachePanel(run: Run): string {
       </div>
       <div class="hero-stat">
         <div class="big-num">${report.opportunities.length}</div>
-        <div class="big-label">oportunidades</div>
-        <div class="hero-meta">${(oppBytes / 1024).toFixed(0)} KB cacheável que vai MISS</div>
+        <div class="big-label">opportunities</div>
+        <div class="hero-meta">${(oppBytes / 1024).toFixed(0)} KB cacheable but MISS</div>
       </div>
       <div class="hero-stat">
         <div class="big-num">${report.total}</div>
-        <div class="big-label">requests analisados</div>
+        <div class="big-label">requests analyzed</div>
         <div class="hero-meta">${(report.totalBytes / 1024).toFixed(0)} KB total</div>
       </div>
     </div>
-    <div class="hint">Foco em cand — prod (Fresh) é só referência. Oportunidade = static-asset/image/font com hash na URL que está MISS em cand.</div>
+    <div class="hint">Focus on cand — prod (Fresh) is reference only. Opportunity = static-asset/image/font with hash in URL that is MISS in cand.</div>
   </div>
 
   ${renderCategoryBreakdown(report)}
 
   <details class="card" open>
-    <summary><h2 style="display:inline">❌ Oportunidades — ${report.opportunities.length} requests cacheable em MISS</h2></summary>
-    <div class="hint">Adicionar rule de cache pra essas URLs deve reduzir ${(oppBytes / 1024).toFixed(0)} KB / ${report.opportunities.length} requests.</div>
+    <summary><h2 style="display:inline">❌ Opportunities — ${report.opportunities.length} cacheable requests in MISS</h2></summary>
+    <div class="hint">Adding a cache rule for these URLs should save ${(oppBytes / 1024).toFixed(0)} KB / ${report.opportunities.length} requests.</div>
     ${renderRequestList(report.opportunities, true)}
   </details>
 
   <details class="card">
-    <summary><h2 style="display:inline">✅ Cacheando bem — ${report.byDecision.hit} HITs</h2></summary>
+    <summary><h2 style="display:inline">✅ Caching well — ${report.byDecision.hit} HITs</h2></summary>
     ${renderRequestList(report.all.filter((r) => r.decision === "hit").sort((a, b) => (b.entry.bytes ?? 0) - (a.entry.bytes ?? 0)).slice(0, 50), false)}
   </details>
 
   <details class="card">
-    <summary><h2 style="display:inline">⊘ Ignorados — third-party e dynamic</h2></summary>
-    <div class="hint">Requests que não devem ou não podem cachear (ads, analytics, APIs com dados dinâmicos).</div>
+    <summary><h2 style="display:inline">⊘ Ignored — third-party and dynamic</h2></summary>
+    <div class="hint">Requests that shouldn't or can't be cached (ads, analytics, dynamic APIs).</div>
     ${renderRequestList(report.all.filter((r) => r.category === "third-party" || r.category === "api").slice(0, 50), false)}
   </details>`;
 }
@@ -554,9 +554,9 @@ function renderCategoryBreakdown(report: CacheReport): string {
     .join("");
   return `
   <div class="card">
-    <h2>Por categoria</h2>
+    <h2>By category</h2>
     <table class="cat-table">
-      <thead><tr><th>Categoria</th><th class="num">Requests</th><th class="num">Bytes</th><th class="num">Hit rate</th></tr></thead>
+      <thead><tr><th>Category</th><th class="num">Requests</th><th class="num">Bytes</th><th class="num">Hit rate</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>`;
@@ -564,7 +564,7 @@ function renderCategoryBreakdown(report: CacheReport): string {
 
 function renderRequestList(reqs: ClassifiedRequest[], highlightOpportunity: boolean): string {
   if (reqs.length === 0) {
-    return `<div class="empty">Nenhum request nesta categoria.</div>`;
+    return `<div class="empty">No requests in this category.</div>`;
   }
   const rows = reqs.map((r) => {
     const sizeKb = r.entry.bytes != null ? (r.entry.bytes / 1024).toFixed(1) : "—";
@@ -577,22 +577,22 @@ function renderRequestList(reqs: ClassifiedRequest[], highlightOpportunity: bool
     </tr>`;
   });
   return `<table class="net-table">
-    <thead><tr><th class="num">Size</th><th>Tipo</th><th>Cache</th><th>URL</th></tr></thead>
+    <thead><tr><th class="num">Size</th><th>Type</th><th>Cache</th><th>URL</th></tr></thead>
     <tbody>${rows.join("")}</tbody>
   </table>`;
 }
 
 function renderDiffPanel(run: Run, runDir: string): string {
   if (!run.baseline) {
-    return `<div class="empty">Run executada sem baseline. Use <code>--baseline &lt;name&gt;</code> para comparação.</div>`;
+    return `<div class="empty">Run executed without baseline. Use <code>--baseline &lt;name&gt;</code> to enable comparison.</div>`;
   }
   const { resolved, new: created, regressions } = run.baseline.delta;
   return `
   <div class="card">
     <h2>Delta vs baseline <code>${esc(run.baseline.name)}</code></h2>
-    <p>✅ Resolvidos: ${resolved.length} · 🆕 Novos: ${created.length} · ⚠️ Regressões: ${regressions.length}</p>
-    ${created.length ? `<div class="label">Novos</div>${created.map((i) => renderIssue(i, runDir)).join("")}` : ""}
-    ${regressions.length ? `<div class="label">Regressões</div>${regressions.map((i) => renderIssue(i, runDir)).join("")}` : ""}
+    <p>✅ Resolved: ${resolved.length} · 🆕 New: ${created.length} · ⚠️ Regressions: ${regressions.length}</p>
+    ${created.length ? `<div class="label">New</div>${created.map((i) => renderIssue(i, runDir)).join("")}` : ""}
+    ${regressions.length ? `<div class="label">Regressions</div>${regressions.map((i) => renderIssue(i, runDir)).join("")}` : ""}
   </div>`;
 }
 
@@ -602,7 +602,7 @@ function renderVisualDiffPanel(run: Run, runDir: string): string {
     return `
     <div class="card">
       <h2>Visual Diff</h2>
-      <div class="empty">Nenhuma comparação visual rodou. Use <code>--visual-pages &lt;n&gt;</code> (default 5) e configure <code>ANTHROPIC_API_KEY</code> para a análise semântica via LLM Vision.</div>
+      <div class="empty">No visual comparison ran. Use <code>--visual-pages &lt;n&gt;</code> (default 5) and set <code>ANTHROPIC_API_KEY</code> (or have <code>claude</code> CLI logged in) for semantic LLM Vision analysis.</div>
     </div>`;
   }
 
@@ -622,18 +622,18 @@ function renderVisualDiffPanel(run: Run, runDir: string): string {
   <div class="card">
     <h2>Visual Diff <span class="hint-inline">prod (Fresh) vs cand (TanStack)</span></h2>
     <div class="vd-summary">
-      <span class="vd-badge total">${vd.pagesChecked} páginas</span>
-      <span class="vd-badge warn">${vd.pagesWithDiffs} com diff</span>
+      <span class="vd-badge total">${vd.pagesChecked} pages</span>
+      <span class="vd-badge warn">${vd.pagesWithDiffs} with diff</span>
       <span class="vd-badge good">${vd.pagesPassed} OK</span>
-      ${vd.pagesFailed > 0 ? `<span class="vd-badge bad">${vd.pagesFailed} falha de análise</span>` : ""}
-      <span class="vd-badge info">${vd.llmCallsUsed} chamadas LLM Vision</span>
+      ${vd.pagesFailed > 0 ? `<span class="vd-badge bad">${vd.pagesFailed} analysis failure</span>` : ""}
+      <span class="vd-badge info">${vd.llmCallsUsed} LLM Vision calls</span>
     </div>
     <div class="vd-filters">
-      <label class="label"><input type="checkbox" class="vd-filter" data-vd-show="diffs" checked/> com diffs</label>
+      <label class="label"><input type="checkbox" class="vd-filter" data-vd-show="diffs" checked/> with diffs</label>
       <label class="label"><input type="checkbox" class="vd-filter" data-vd-show="pass"/> OK</label>
-      <label class="label"><input type="checkbox" class="vd-filter" data-vd-show="failed" checked/> falha</label>
+      <label class="label"><input type="checkbox" class="vd-filter" data-vd-show="failed" checked/> failed</label>
       <select id="vd-viewport-filter">
-        <option value="">todos os viewports</option>
+        <option value="">all viewports</option>
         <option value="mobile">mobile</option>
         <option value="desktop">desktop</option>
         <option value="tablet">tablet</option>
@@ -645,10 +645,10 @@ function renderVisualDiffPanel(run: Run, runDir: string): string {
   </div>
 
   <div class="card">
-    <h2>Prompt para LLM (visual)</h2>
-    <div class="hint">Pronto pra colar em Claude / ChatGPT — lista as páginas com diffs, sections faltantes, screenshots referenciados, e instruções específicas pra corrigir migração Fresh → TanStack.</div>
+    <h2>LLM prompt (visual)</h2>
+    <div class="hint">Ready to paste into Claude / ChatGPT — lists pages with diffs, missing sections, referenced screenshots, and migration-specific guidance for Fresh → TanStack fixes.</div>
     <div class="prompt-toolbar">
-      <button id="vprompt-copy">📋 Copiar markdown</button>
+      <button id="vprompt-copy">📋 Copy markdown</button>
       <button class="secondary" id="vprompt-download">⬇ Download .md</button>
       <span class="feedback" id="vprompt-feedback"></span>
       <div class="right">${charCount.toLocaleString("en-US")} chars · ${(charCount / 1024).toFixed(1)} KB</div>
@@ -666,7 +666,7 @@ function renderFig(srcPath: string, alt: string, variantClass: string, label: st
             <img src="${safeSrc}" alt="${esc(alt)}" loading="lazy" class="vd-img" onerror="this.classList.add('broken'); var fb = this.nextElementSibling; if (fb) fb.classList.add('show');"/>
             <div class="vd-img-fallback">
               <span class="icon">🖼️</span>
-              <span class="msg">imagem não encontrada</span>
+              <span class="msg">image not found</span>
               <span class="path">${safeSrc}</span>
             </div>
           </div>
@@ -726,14 +726,14 @@ function renderVisualDiffPage(page: VisualDiffPage, runDir: string, openFirst: b
   const headerBadges: string[] = [];
   headerBadges.push(`<span class="vd-badge ${verdictClass}">${verdictLabel}</span>`);
   if (diffsCount > 0) headerBadges.push(`<span class="vd-badge info">${diffsCount} diff(s)</span>`);
-  if (sectionsMissing > 0) headerBadges.push(`<span class="vd-badge bad">${sectionsMissing} section(s) ausente(s)</span>`);
+  if (sectionsMissing > 0) headerBadges.push(`<span class="vd-badge bad">${sectionsMissing} missing section(s)</span>`);
   if (maxSev) headerBadges.push(`<span class="vd-badge sev-${maxSev}">${maxSev}</span>`);
   headerBadges.push(`<span class="vd-badge dim">${(page.pctDiff * 100).toFixed(2)}% pixels</span>`);
   if (page.cachedAt) headerBadges.push(`<span class="vd-badge dim" title="reused from cross-run cache">cached</span>`);
 
   const heatmapHtml = page.heatmapPath
     ? renderFig(relPath(runDir, page.heatmapPath), "heatmap", "vd-fig-heatmap", "HEATMAP (pixelmatch)")
-    : `<figure class="vd-fig vd-fig-heatmap vd-fig-empty"><figcaption>HEATMAP</figcaption><div class="vd-empty-cell"><span class="icon">🗺️</span><span>heatmap não gerado</span></div></figure>`;
+    : `<figure class="vd-fig vd-fig-heatmap vd-fig-empty"><figcaption>HEATMAP</figcaption><div class="vd-empty-cell"><span class="icon">🗺️</span><span>heatmap not generated</span></div></figure>`;
 
   const diffsList = page.differences
     .map(
@@ -751,7 +751,7 @@ function renderVisualDiffPage(page: VisualDiffPage, runDir: string, openFirst: b
 
   const sectionsHtml = page.sectionsOnlyInProd.length > 0
     ? `<div class="vd-sections">
-        <div class="vd-sections-title">Sections detectadas no DOM de prod e AUSENTES em cand:</div>
+        <div class="vd-sections-title">Sections found in prod DOM but MISSING in cand:</div>
         <ul class="vd-sections-list">
           ${page.sectionsOnlyInProd.map((s) => `<li><code>${esc(s)}</code></li>`).join("")}
         </ul>
@@ -759,7 +759,7 @@ function renderVisualDiffPage(page: VisualDiffPage, runDir: string, openFirst: b
     : "";
 
   const errorHtml = page.llmError
-    ? `<div class="vd-error">⚠️ LLM Vision retornou erro: ${esc(page.llmError)}</div>`
+    ? `<div class="vd-error">⚠️ LLM Vision returned an error: ${esc(page.llmError)}</div>`
     : "";
 
   // For pages with diffs, surface the exact CLI commands to drill in. This
@@ -773,19 +773,19 @@ function renderVisualDiffPage(page: VisualDiffPage, runDir: string, openFirst: b
   const cmdFix = buildVisualFixCommand(page);
   const deepDiveHtml = showDeepDive
     ? `<div class="vd-deepdive">
-        <div class="vd-deepdive-title">Esta página tem <strong>${pctLabel}</strong> de diferença. Pra detalhes completos:</div>
+        <div class="vd-deepdive-title">This page has <strong>${pctLabel}</strong> pixel difference. For full details:</div>
         <div class="vd-deepdive-cmd">
-          <div class="vd-deepdive-label">Re-rodar o visual-diff só nessa página (rápido, ~10s):</div>
+          <div class="vd-deepdive-label">Re-run the visual diff just on this page (fast, ~10s):</div>
           <div class="vd-deepdive-row">
             <code class="vd-deepdive-code" id="${deepDiveId}">${esc(cmdCheck)}</code>
-            <button class="copy-btn" data-copy-target="${deepDiveId}" type="button">copiar</button>
+            <button class="copy-btn" data-copy-target="${deepDiveId}" type="button">copy</button>
           </div>
         </div>
         <div class="vd-deepdive-cmd">
-          <div class="vd-deepdive-label">Investigar fundo (HTML + screenshot + computed-styles + heatmap + LLM summary):</div>
+          <div class="vd-deepdive-label">Deep investigation (HTML + screenshot + computed styles + heatmap + LLM summary):</div>
           <div class="vd-deepdive-row">
             <code class="vd-deepdive-code" id="${fixId}">${esc(cmdFix)}</code>
-            <button class="copy-btn" data-copy-target="${fixId}" type="button">copiar</button>
+            <button class="copy-btn" data-copy-target="${fixId}" type="button">copy</button>
           </div>
         </div>
       </div>`
@@ -799,15 +799,15 @@ function renderVisualDiffPage(page: VisualDiffPage, runDir: string, openFirst: b
     </summary>
     <div class="vd-page-body">
       <div class="vd-gallery">
-        ${renderFig(relPath(runDir, page.prodScreenshotPath), "prod", "vd-fig-prod", "PROD (Fresh — fonte da verdade)")}
+        ${renderFig(relPath(runDir, page.prodScreenshotPath), "prod", "vd-fig-prod", "PROD (Fresh — source of truth)")}
         ${renderFig(relPath(runDir, page.candScreenshotPath), "cand", "vd-fig-cand", "CAND (TanStack)")}
         ${heatmapHtml}
       </div>
       ${sectionsHtml}
-      ${diffsList ? `<div class="vd-diffs-block"><div class="vd-diffs-title">Diferenças visuais (LLM Vision):</div><ul class="vd-diffs-list">${diffsList}</ul></div>` : ""}
+      ${diffsList ? `<div class="vd-diffs-block"><div class="vd-diffs-title">Visual differences (LLM Vision):</div><ul class="vd-diffs-list">${diffsList}</ul></div>` : ""}
       ${errorHtml}
       ${page.differences.length === 0 && page.sectionsOnlyInProd.length === 0 && !page.llmError
-        ? `<div class="vd-empty-msg">Nenhuma diferença relevante detectada nesta página. ✅</div>`
+        ? `<div class="vd-empty-msg">No relevant differences detected on this page. ✅</div>`
         : ""
       }
       ${deepDiveHtml}
@@ -826,7 +826,7 @@ function renderSeoPanel(run: Run, runDir: string): string {
     return `
     <div class="card">
       <h2>SEO</h2>
-      <div class="empty">SEO audit não rodou neste run.</div>
+      <div class="empty">SEO audit did not run in this run.</div>
     </div>`;
   }
 
@@ -839,9 +839,9 @@ function renderSeoPanel(run: Run, runDir: string): string {
   <div class="card">
     <h2>SEO <span class="hint-inline">robots, sitemap, meta tags, JSON-LD</span></h2>
     <div class="vd-summary">
-      <span class="vd-badge total">${seo.pages.length} páginas auditadas</span>
+      <span class="vd-badge total">${seo.pages.length} pages audited</span>
       <span class="vd-badge ${seo.issues.length === 0 ? "good" : "warn"}">${seo.issues.length} issue(s)</span>
-      <span class="vd-badge ${seo.pagesWithIssues === 0 ? "good" : "warn"}">${seo.pagesWithIssues} página(s) afetada(s)</span>
+      <span class="vd-badge ${seo.pagesWithIssues === 0 ? "good" : "warn"}">${seo.pagesWithIssues} affected page(s)</span>
     </div>
   </div>
   ${robotsCard}
@@ -869,14 +869,14 @@ function renderSeoRobotsCard(robots: NonNullable<Run["seo"]>["robotsTxt"]): stri
         <tr><th>prod</th><td>${prodBadge}</td></tr>
         <tr><th>cand</th><td>${candBadge}</td></tr>
         <tr><th>Sitemap(s) declarado(s)</th><td>prod: ${robots.prodSitemaps.length} · cand: ${robots.candSitemaps.length}</td></tr>
-        <tr><th>Divergências por User-agent</th><td>${robots.uaDiffCount}</td></tr>
+        <tr><th>User-agent divergences</th><td>${robots.uaDiffCount}</td></tr>
       </tbody>
     </table>
     ${onlyProdSm.length > 0 ? `<div class="seo-sub">Sitemap(s) em prod e ausente(s) em cand: <code>${onlyProdSm.map(esc).join(", ")}</code></div>` : ""}
-    ${onlyCandSm.length > 0 ? `<div class="seo-sub">Sitemap(s) só em cand: <code>${onlyCandSm.map(esc).join(", ")}</code></div>` : ""}
+    ${onlyCandSm.length > 0 ? `<div class="seo-sub">Sitemap(s) only in cand: <code>${onlyCandSm.map(esc).join(", ")}</code></div>` : ""}
     ${
       robots.raw?.prod || robots.raw?.cand
-        ? `<details class="seo-raw"><summary>Ver conteúdo bruto (prod vs cand)</summary>
+        ? `<details class="seo-raw"><summary>View raw content (prod vs cand)</summary>
             <div class="seo-raw-pair">
               <div><div class="label">prod</div><pre>${esc(robots.raw?.prod ?? "—")}</pre></div>
               <div><div class="label">cand</div><pre>${esc(robots.raw?.cand ?? "—")}</pre></div>
@@ -909,7 +909,7 @@ function renderSeoSitemapCard(sitemap: NonNullable<Run["seo"]>["sitemap"]): stri
     }
     ${
       sitemap.onlyCandSample.length > 0
-        ? `<div class="seo-sub">URLs só em cand (amostra ${sitemap.onlyCandSample.length}):
+        ? `<div class="seo-sub">URLs only in cand (sample ${sitemap.onlyCandSample.length}):
             <ul class="seo-list">${sitemap.onlyCandSample.map((u) => `<li><code>${esc(u)}</code></li>`).join("")}</ul>
           </div>`
         : ""
@@ -919,7 +919,7 @@ function renderSeoSitemapCard(sitemap: NonNullable<Run["seo"]>["sitemap"]): stri
 
 function renderSeoPagesCard(pages: SeoPageMeta[]): string {
   if (pages.length === 0) {
-    return `<div class="card"><h2>Meta tags por página</h2><div class="empty">Nenhuma página pareada para auditoria.</div></div>`;
+    return `<div class="card"><h2>Per-page meta tags</h2><div class="empty">No page pairs available for audit.</div></div>`;
   }
   const rows = pages
     .map((p) => {
@@ -953,8 +953,8 @@ function renderSeoPagesCard(pages: SeoPageMeta[]): string {
     .join("");
   return `
   <div class="card">
-    <h2>Meta tags por página</h2>
-    <div class="hint">Comparação direta de title/description/canonical/robots/json-ld. Linhas em vermelho divergem entre prod e cand.</div>
+    <h2>Per-page meta tags</h2>
+    <div class="hint">Direct comparison of title/description/canonical/robots/json-ld. Red rows differ between prod and cand.</div>
     ${rows}
   </div>`;
 }
@@ -973,7 +973,7 @@ function seoMetaRow(label: string, prod: string | null, cand: string | null): st
 
 function renderSeoIssuesCard(issues: Issue[], runDir: string): string {
   if (issues.length === 0) {
-    return `<div class="card"><h2>Issues de SEO</h2><div class="empty">Nenhuma issue de SEO detectada 🎉</div></div>`;
+    return `<div class="card"><h2>SEO issues</h2><div class="empty">No SEO issues detected 🎉</div></div>`;
   }
   return `
   <div class="card">
@@ -987,10 +987,10 @@ function renderPromptPanel(run: Run): string {
   const charCount = md.length;
   return `
   <div class="card">
-    <h2>Prompt para LLM</h2>
-    <div class="hint">Pronto pra colar em Claude / ChatGPT / qualquer chat. Lista issues ranqueadas + contexto da migração + instruções específicas pra diagnose e fix.</div>
+    <h2>LLM prompt</h2>
+    <div class="hint">Ready to paste into Claude / ChatGPT / any chat. Lists ranked issues + migration context + specific diagnose-and-fix instructions.</div>
     <div class="prompt-toolbar">
-      <button id="prompt-copy">📋 Copiar markdown</button>
+      <button id="prompt-copy">📋 Copy markdown</button>
       <button class="secondary" id="prompt-download">⬇ Download .md</button>
       <span class="feedback" id="prompt-feedback"></span>
       <div class="right">${charCount.toLocaleString("en-US")} chars · ${(charCount / 1024).toFixed(1)} KB</div>
@@ -1052,17 +1052,17 @@ function buildSideBySidePairs(run: Run): SbsPair[] {
 function renderSideBySidePanel(run: Run): string {
   const pairs = buildSideBySidePairs(run);
   if (pairs.length === 0) {
-    return `<div class="empty">Nenhuma URL capturada para visualização lado-a-lado.</div>`;
+    return `<div class="empty">No captured URLs available for side-by-side view.</div>`;
   }
   return `
   <div class="card">
     <h2>Side-by-side mobile</h2>
-    <div class="hint">Compare prod (Fresh, esquerda) com cand (TanStack, direita) em viewport mobile. Scroll sync funciona quando proxy está ativo OU quando o site implementa <code>postMessage</code> handler.</div>
-    <div id="sbs-status" class="sbs-status warn">carregando…</div>
+    <div class="hint">Compare prod (Fresh, left) with cand (TanStack, right) in mobile viewport. Scroll sync works when the proxy is active OR when the site implements a <code>postMessage</code> handler.</div>
+    <div id="sbs-status" class="sbs-status warn">loading…</div>
     <div class="sbs-toolbar">
       ${pairs.map((p, i) => `<button data-sbs-btn="${i}">${esc(p.label)}</button>`).join("")}
-      <label class="label"><input type="checkbox" id="sbs-sync" checked/> Scroll sincronizado</label>
-      <div class="toolbar-right">dica: use <code>parity serve &lt;runId&gt;</code> pra contornar X-Frame-Options</div>
+      <label class="label"><input type="checkbox" id="sbs-sync" checked/> Synchronized scroll</label>
+      <div class="toolbar-right">tip: use <code>parity serve &lt;runId&gt;</code> to bypass X-Frame-Options</div>
     </div>
     <div class="sbs-container">
       <div class="sbs-frame">
@@ -1098,7 +1098,7 @@ function buildNav(run: Run): NavEntry[] {
     { tab: "cache", label: "Cache", icon: "💾" },
     { tab: "checks", label: "Checks", icon: "✓", count: run.checks.length },
     { tab: "prompt", label: "Prompt LLM", icon: "🤖" },
-    { tab: "pages", label: "Páginas", icon: "📄" },
+    { tab: "pages", label: "Pages", icon: "📄" },
     { tab: "console", label: "Console", icon: "🔧" },
     { tab: "network", label: "Network", icon: "🌐" },
   ];
@@ -1114,7 +1114,7 @@ function buildNav(run: Run): NavEntry[] {
 export function renderHtmlReport(run: Run, runDir: string): string {
   const nav = buildNav(run);
   return `<!DOCTYPE html>
-<html lang="pt-BR" data-theme="dark">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8"/>
   <title>parity — ${esc(run.id)}</title>
@@ -1155,10 +1155,10 @@ export function renderHtmlReport(run: Run, runDir: string): string {
       </div>
       <div class="header-actions">
         <button class="action-btn" id="theme-toggle">☀ Light</button>
-        <button class="action-btn" id="help-btn">? Atalhos</button>
+        <button class="action-btn" id="help-btn">? Shortcuts</button>
       </div>
     </header>
-    ${run.partial ? `<div style="background:#7c2d12;color:#fed7aa;padding:12px 24px;border-bottom:2px solid #ea580c;font-weight:600">⚠ Partial run — interrompido${run.partialReason ? ` (${esc(run.partialReason)})` : ""}. Verdict, top-issues e algumas seções podem estar incompletos.</div>` : ""}
+    ${run.partial ? `<div style="background:#7c2d12;color:#fed7aa;padding:12px 24px;border-bottom:2px solid #ea580c;font-weight:600">⚠ Partial run — interrupted${run.partialReason ? ` (${esc(run.partialReason)})` : ""}. Verdict, top-issues, and some sections may be incomplete.</div>` : ""}
     ${renderTimingsBar(run)}
     <main class="app-main">
       <section class="panel" data-panel="summary">
@@ -1202,17 +1202,17 @@ export function renderHtmlReport(run: Run, runDir: string): string {
   </div>
   <div class="help-modal" id="help-modal">
     <div class="modal-inner">
-      <h3>Atalhos de teclado</h3>
+      <h3>Keyboard shortcuts</h3>
       <table>
         <tbody>
-          <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Navegar entre abas</td></tr>
-          <tr><td><kbd>/</kbd></td><td>Foco no campo de busca da aba ativa</td></tr>
-          <tr><td><kbd>t</kbd></td><td>Alternar tema dark/light</td></tr>
-          <tr><td><kbd>?</kbd></td><td>Mostrar este painel</td></tr>
-          <tr><td><kbd>Esc</kbd></td><td>Fechar</td></tr>
+          <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Navigate between tabs</td></tr>
+          <tr><td><kbd>/</kbd></td><td>Focus the active tab's search field</td></tr>
+          <tr><td><kbd>t</kbd></td><td>Toggle dark/light theme</td></tr>
+          <tr><td><kbd>?</kbd></td><td>Show this panel</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Close</td></tr>
         </tbody>
       </table>
-      <div style="margin-top:16px;text-align:right"><button class="action-btn" id="help-close">Fechar</button></div>
+      <div style="margin-top:16px;text-align:right"><button class="action-btn" id="help-close">Close</button></div>
     </div>
   </div>
   <script>${REPORT_JS}</script>

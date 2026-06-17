@@ -19,7 +19,7 @@ describe("renderHtmlReport — structure", () => {
   it("returns a full HTML document with sidebar nav and panels", () => {
     const html = renderHtmlReport(makeRun(), "/tmp/run");
     expect(html).toMatch(/^<!DOCTYPE html>/);
-    expect(html).toMatch(/<html lang="pt-BR"/);
+    expect(html).toMatch(/<html lang="en"/);
     expect(html).toMatch(/<aside class="app-sidebar"/);
     expect(html).toMatch(/<main class="app-main"/);
     expect(html).toMatch(/<\/html>$/);
@@ -57,7 +57,7 @@ describe("renderHtmlReport — structure", () => {
       "/tmp/run",
     );
     expect(html).toContain("42");
-    expect(html).toMatch(/Crítico/);
+    expect(html).toMatch(/Critical/);
   });
 
   it("renders top issues with severity classes", () => {
@@ -110,7 +110,7 @@ describe("renderHtmlReport — structure", () => {
     expect(html).toMatch(/missing/);
     expect(html).toContain("vd-gallery");
     // sections-only-in-prod block
-    expect(html).toMatch(/AUSENTES em cand/);
+    expect(html).toMatch(/MISSING in cand/);
   });
 
   it("renders SEO tab with cards when run.seo is present", () => {
@@ -165,7 +165,7 @@ describe("renderHtmlReport — structure", () => {
 
   it("renders the LLM prompt panel with copy button", () => {
     const html = renderHtmlReport(makeRun(), "/tmp/run");
-    expect(html).toContain("Prompt para LLM");
+    expect(html).toContain("LLM prompt");
     expect(html).toMatch(/prompt-copy/);
     expect(html).toMatch(/prompt-download/);
   });
@@ -190,7 +190,7 @@ describe("renderHtmlReport — structure", () => {
     const html = renderHtmlReport(makeRun(), "/tmp/run");
     // Should still have the tab, but with an empty/intro message
     expect(html).toMatch(/visualdiff/);
-    expect(html).toMatch(/Nenhuma comparação visual rodou|Visual Diff/);
+    expect(html).toMatch(/No visual comparison ran|Visual Diff/);
   });
 
   it("escapes HTML in user-supplied strings to prevent injection", () => {
@@ -235,5 +235,32 @@ describe("renderHtmlReport — structure", () => {
     expect(html).toContain("stable");
     expect(html).toContain("new-issue");
     expect(html).toContain("regression-issue");
+  });
+
+  // Regression guard for Issue #67. If a future change adds Portuguese copy
+  // to render.ts, the diacritic scan catches it; the deny-list catches
+  // PT-BR strings that happen to have no accents. Keep both — diacritics
+  // alone wouldn't have caught "Prompt para LLM" / "Copiar markdown".
+  it("has no Portuguese-only diacritics in the rendered HTML", () => {
+    const html = renderHtmlReport(makeRun(), "/tmp/run");
+    const hits = html.match(/[áéíóúâêîôûãõçÁÉÍÓÚÂÊÎÔÛÃÕÇ]/g);
+    expect(hits, `unexpected diacritics in report HTML: ${hits?.slice(0, 5).join(" ")}`).toBeNull();
+  });
+
+  it("has no untranslated PT-BR substrings in the rendered HTML", () => {
+    const html = renderHtmlReport(makeRun(), "/tmp/run");
+    const banned = [
+      "Páginas",
+      "Atalhos",
+      "Copiar",
+      "Fechar",
+      "Coleta",
+      "carregando",
+      "Prompt para LLM",
+      "Pronto pra",
+    ];
+    for (const word of banned) {
+      expect(html, `unexpected PT-BR token "${word}" in report HTML`).not.toContain(word);
+    }
   });
 });

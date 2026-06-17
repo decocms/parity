@@ -46,7 +46,7 @@ describe("buildVisualPrompt", () => {
   it("emits a fallback header when visualDiff is missing", () => {
     const md = buildVisualPrompt(makeRun(), "/tmp/run");
     expect(md).toMatch(/Visual Diff Report/);
-    expect(md).toMatch(/Nenhuma comparação visual rodou/);
+    expect(md).toMatch(/No visual comparison ran/);
   });
 
   it("includes prod/cand URLs and run id", () => {
@@ -62,7 +62,7 @@ describe("buildVisualPrompt", () => {
   it("renders sections-only-in-prod as priority context", () => {
     const md = buildVisualPrompt(makeRun({ visualDiff: makeVisualDiff() }), "/tmp/run");
     expect(md).toContain("Hero");
-    expect(md).toMatch(/AUSENTES em cand/);
+    expect(md).toMatch(/MISSING in cand/);
   });
 
   it("includes relative screenshot paths", () => {
@@ -85,7 +85,7 @@ describe("buildVisualPrompt", () => {
       }),
       "/tmp/run",
     );
-    expect(md).toMatch(/Todas as páginas comparadas passaram/);
+    expect(md).toMatch(/All compared pages passed/);
   });
 
   it("filters out pages below minSeverity", () => {
@@ -154,6 +154,6 @@ describe("buildVisualPrompt", () => {
   it("includes Fresh→TanStack instruction block at the end", () => {
     const md = buildVisualPrompt(makeRun({ visualDiff: makeVisualDiff() }), "/tmp/run");
     expect(md).toMatch(/registerSections/);
-    expect(md).toMatch(/só sugira mudanças em cand/i);
+    expect(md).toMatch(/only suggest changes in cand/i);
   });
 });

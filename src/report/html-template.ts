@@ -1298,7 +1298,7 @@ export const REPORT_JS = `
       if (imgs.length === 0) return;
       var lb = document.createElement('div');
       lb.className = 'vd-lightbox';
-      lb.innerHTML = '<button class="vd-lightbox-close" aria-label="Fechar">✕</button><img alt="zoom"/>';
+      lb.innerHTML = '<button class="vd-lightbox-close" aria-label="Close">✕</button><img alt="zoom"/>';
       document.body.appendChild(lb);
       var lbImg = lb.querySelector('img');
       var lbClose = lb.querySelector('.vd-lightbox-close');
@@ -1325,8 +1325,8 @@ export const REPORT_JS = `
     var statusEl = document.getElementById('sbs-status');
     if (statusEl) {
       statusEl.textContent = proxyBase
-        ? '✓ servidor proxy ativo — iframes contornam X-Frame-Options'
-        : '⚠ sem proxy (file://) — sites com X-Frame-Options vão aparecer vazios. Use "parity serve <runId>" pra subir o proxy local.';
+        ? '✓ proxy server active — iframes bypass X-Frame-Options'
+        : '⚠ no proxy (file://) — sites with X-Frame-Options will appear empty. Run "parity serve <runId>" to start the local proxy.';
       statusEl.className = proxyBase ? 'sbs-status ok' : 'sbs-status warn';
     }
     if (sbsState.pairs && sbsState.pairs.length > 0) {

@@ -91,6 +91,33 @@ export function providerName(): string {
   return p ?? "none";
 }
 
+// Output language for LLM responses. Default `en`. Set to `pt` via the
+// `--pt` CLI flag — affects only LLM-generated content (responses + free-form
+// messages), not the static report HTML or CLI banners. Issue #67.
+type LlmLanguage = "en" | "pt";
+let llmLanguage: LlmLanguage = "en";
+
+export function setLlmLanguage(lang: LlmLanguage): void {
+  llmLanguage = lang;
+}
+
+export function getLlmLanguage(): LlmLanguage {
+  return llmLanguage;
+}
+
+/**
+ * Build the user-facing text for an LLM call, optionally appending a
+ * language directive. Centralized so every provider applies the same
+ * suffix in the same place. When the language is `en` (default) we don't
+ * append anything — the system prompts are already in English.
+ */
+function withLanguage(userText: string): string {
+  if (llmLanguage === "pt") {
+    return `${userText}\n\n---\nIMPORTANT: respond in Brazilian Portuguese.`;
+  }
+  return userText;
+}
+
 function defaultTimeout(params: { userImages?: unknown[] }): number {
   return params.userImages && params.userImages.length > 0 ? 120_000 : 60_000;
 }
@@ -122,7 +149,7 @@ export async function callTool<T = Record<string, unknown>>(
 
 async function callAnthropicTool<T>(params: ToolCallParams, model: string, timeoutMs: number): Promise<T | null> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? "" });
-  const userContent: Anthropic.ContentBlockParam[] = [{ type: "text", text: params.userText }];
+  const userContent: Anthropic.ContentBlockParam[] = [{ type: "text", text: withLanguage(params.userText) }];
   for (const img of params.userImages ?? []) {
     userContent.push({
       type: "image",
@@ -217,7 +244,7 @@ async function openRouterToolOnce<T>(
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return null;
 
-  const userContent: OpenAiContentBlock[] = [{ type: "text", text: params.userText }];
+  const userContent: OpenAiContentBlock[] = [{ type: "text", text: withLanguage(params.userText) }];
   for (const img of params.userImages ?? []) {
     userContent.push({
       type: "image_url",
@@ -388,7 +415,7 @@ async function callAnthropicMessage(params: MessageCallParams, model: string, ti
         system: [
           { type: "text", text: params.systemPrompt, cache_control: { type: "ephemeral" } },
         ],
-        messages: [{ role: "user", content: params.userText }],
+        messages: [{ role: "user", content: withLanguage(params.userText) }],
       },
       { signal },
     );
@@ -424,7 +451,7 @@ async function callOpenRouterMessage(params: MessageCallParams, model: string, t
         max_tokens: params.maxTokens ?? 1500,
         messages: [
           { role: "system", content: params.systemPrompt },
-          { role: "user", content: params.userText },
+          { role: "user", content: withLanguage(params.userText) },
         ],
       }),
     });
