@@ -52,10 +52,15 @@ describe("TimingRegistry", () => {
   it("totalMs cobre todas as fases acumuladas", async () => {
     const reg = new TimingRegistry();
     await reg.record("x", async () => {
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 30));
     });
     const t = reg.finalize();
-    expect(t.totalMs).toBeGreaterThanOrEqual(20);
+    // 25ms threshold gives the test ~17% slack vs the 30ms sleep. On busy
+    // CI runners setTimeout can fire ~1-3ms early due to timer scheduling
+    // (observed: 19.99ms after a 20ms sleep). Tightening the test to 25ms
+    // catches the "totalMs forgot to accumulate" bug while tolerating
+    // realistic scheduler jitter.
+    expect(t.totalMs).toBeGreaterThanOrEqual(25);
   });
 
   it("phases é uma cópia (não vaza estado interno)", async () => {
