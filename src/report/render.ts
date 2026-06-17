@@ -9,6 +9,7 @@ import {
 } from "./issue-html.ts";
 import { buildLlmPrompt } from "./prompt-builder.ts";
 import { buildVisualPrompt } from "./visual-prompt-builder.ts";
+import { renderWaterfall } from "./waterfall.ts";
 
 /**
  * Local alias preserved so the rest of this file keeps the original
@@ -446,18 +447,53 @@ function renderNetworkPanel(run: Run): string {
   // Aggregate cand requests across all captures
   const candEntries: NetworkEntry[] = [];
   let baseUrl = "";
+  // Per-page bundles for the waterfall section — keyed by page URL so we
+  // can render one waterfall block per captured page. Issue #78.
+  const perPage: Array<{ label: string; entries: NetworkEntry[] }> = [];
   for (const fc of run.flowCaptures) {
     for (const p of fc.pages) {
       if (p.side !== "cand") continue;
       if (!baseUrl) baseUrl = p.url;
       candEntries.push(...p.network);
+      if (p.network.length > 0) {
+        perPage.push({ label: `${pathOf(p.url)} · ${p.viewport}`, entries: p.network });
+      }
     }
   }
   if (candEntries.length === 0) {
     return `<div class="empty">No network requests captured.</div>`;
   }
   const report = buildCacheReport(candEntries, baseUrl);
-  return renderNetworkTable(report);
+  return `${renderWaterfallsSection(perPage)}${renderNetworkTable(report)}`;
+}
+
+/**
+ * Per-page waterfall blocks. Each `<details>` is collapsed by default so
+ * the page list stays scannable; clicking opens the SVG chart. The chart
+ * itself is rendered inline (no JS dependency). Issue #78.
+ */
+function renderWaterfallsSection(perPage: Array<{ label: string; entries: NetworkEntry[] }>): string {
+  if (perPage.length === 0) return "";
+  // De-dupe: a page captured under multiple flows shows up more than
+  // once; keep the largest capture by request count to avoid noise.
+  const byLabel = new Map<string, NetworkEntry[]>();
+  for (const p of perPage) {
+    const prev = byLabel.get(p.label);
+    if (!prev || prev.length < p.entries.length) byLabel.set(p.label, p.entries);
+  }
+  const blocks: string[] = [];
+  for (const [label, entries] of byLabel) {
+    const svg = renderWaterfall(entries);
+    if (!svg) continue;
+    blocks.push(`<details class="wf-page"><summary>${esc(label)} <span class="dim">· ${entries.length} requests</span></summary>${svg}</details>`);
+  }
+  if (blocks.length === 0) return "";
+  return `
+  <div class="card">
+    <h2>Waterfalls</h2>
+    <div class="hint">Per-page timing waterfall. Bars start at <code>requestStart</code> and end at <code>responseEnd</code>. Color-coded by resource type; faded bars = served from cache.</div>
+    ${blocks.join("")}
+  </div>`;
 }
 
 function renderNetworkTable(report: CacheReport): string {
