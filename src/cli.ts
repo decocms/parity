@@ -16,6 +16,7 @@ import { vitalsCommand } from "./commands/vitals.ts";
 import { listCommand } from "./commands/list.ts";
 import { promptCommand } from "./commands/prompt.ts";
 import { reportCommand } from "./commands/report.ts";
+import { prCommand } from "./commands/pr.ts";
 import { runCommand } from "./commands/run.ts";
 import { sectionCommand } from "./commands/section.ts";
 import { serveCommand } from "./commands/serve.ts";
@@ -293,6 +294,30 @@ program
   .description("Compare a run against a baseline")
   .action((runId, opts) => {
     process.exit(compareCommand(runId, opts.against, opts.output));
+  });
+
+program
+  .command("pr")
+  .description(
+    "CI/CD entry point: compare a PR preview URL against prod and emit a Markdown comment ready to paste into a PR (or write to $GITHUB_STEP_SUMMARY with --github). Internally a thin wrapper around `parity run` with sane PR defaults (preset=ci, mobile-only, purchase-journey). Issue #79.",
+  )
+  .requiredOption("--prod <url>", "Production URL (source of truth)")
+  .requiredOption("--preview <url>", "PR preview URL to compare against prod")
+  .option("--github", "Also write the Markdown to $GITHUB_STEP_SUMMARY", false)
+  .option("--out <path>", "Write the Markdown comment to this file instead of stdout")
+  .option("--preset <name>", "Preset bundle: smoke | ci | full", "ci")
+  .option("--output <dir>", "Output directory for runs/<id>/", "./parity-output")
+  .action(async (opts) => {
+    process.exit(
+      await prCommand({
+        prod: opts.prod,
+        preview: opts.preview,
+        github: opts.github,
+        out: opts.out,
+        preset: opts.preset,
+        output: opts.output,
+      }),
+    );
   });
 
 program
