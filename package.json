@@ -1,6 +1,6 @@
 {
   "name": "@decocms/parity",
-  "version": "0.11.6",
+  "version": "0.11.7",
   "description": "E2E parity validator for site migrations. Compares prod vs cand and reports UI, functional, SEO, visual, and Web Vitals deltas with an LLM-ranked HTML report.",
   "type": "module",
   "license": "MIT",
@@ -32,7 +32,7 @@
   "bin": {
     "parity": "dist/cli.js"
   },
-  "files": ["dist", "README.md", "AGENTS.md", "CHANGELOG.md", "LICENSE"],
+  "files": ["dist", "scripts/postinstall.js", "README.md", "AGENTS.md", "CHANGELOG.md", "LICENSE"],
   "scripts": {
     "dev": "bun run --hot src/cli.ts",
     "build": "bun build src/cli.ts --target=node --outfile=dist/cli.js --packages=external && bun run scripts/postbuild.ts",
@@ -44,7 +44,8 @@
     "deadcode": "knip",
     "lint": "biome lint .",
     "fmt": "biome format --write .",
-    "prepublishOnly": "bun run check && bun run build"
+    "prepublishOnly": "bun run check && bun run build",
+    "postinstall": "node scripts/postinstall.js"
   },
   "engines": {
     "node": ">=20",

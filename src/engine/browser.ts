@@ -79,11 +79,37 @@ export interface LaunchOptions {
 }
 
 export async function launchBrowser(opts: LaunchOptions = {}): Promise<Browser> {
-  return await chromium.launch({
-    headless: opts.headless ?? true,
-    slowMo: opts.slowMo ?? 0,
-    args: ["--disable-blink-features=AutomationControlled"],
-  });
+  try {
+    return await chromium.launch({
+      headless: opts.headless ?? true,
+      slowMo: opts.slowMo ?? 0,
+      args: ["--disable-blink-features=AutomationControlled"],
+    });
+  } catch (err) {
+    const msg = (err as Error).message ?? "";
+    // Playwright's own message starts with "Executable doesn't exist at ..."
+    // when the browser binary wasn't installed yet (e.g. fresh `npm install
+    // -g @decocms/parity` with no postinstall trigger). Replace it with a
+    // single clear instruction so the user doesn't have to parse a stack
+    // trace + Playwright's ASCII banner.
+    if (msg.includes("Executable doesn't exist")) {
+      const friendly = new Error(
+        [
+          "Playwright's Chromium binary is not installed yet. Run:",
+          "",
+          "    npx playwright install chromium",
+          "",
+          "(one-time, ~140 MB download). Then re-run parity. This usually happens",
+          "after a fresh `npm install -g @decocms/parity`.",
+        ].join("\n"),
+      );
+      // Preserve original error in `cause` so logs still have the full
+      // launcher path for debugging if needed.
+      (friendly as Error & { cause?: unknown }).cause = err;
+      throw friendly;
+    }
+    throw err;
+  }
 }
 
 export interface ContextOptions {
