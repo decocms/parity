@@ -96,7 +96,7 @@ export const StepCapture = z.object({
   url: z.string().optional(),
   screenshotPath: z.string(),
   note: z.string().optional(),
-  detail: z.record(z.unknown()).optional(),
+  detail: z.record(z.string(), z.unknown()).optional(),
   /** Selector key that this step used, if applicable (for learned-selectors promotion) */
   selectorKey: z.string().optional(),
   /** The actual selector string that worked for this step */
@@ -221,7 +221,7 @@ export const CheckResult = z.object({
   severity: Severity,
   durationMs: z.number(),
   summary: z.string(),
-  data: z.record(z.unknown()).optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
   issues: z.array(Issue),
 });
 export type CheckResult = z.infer<typeof CheckResult>;
@@ -517,6 +517,6 @@ export const ParityIgnore = z.object({
   ignoreRequestPatterns: z.array(z.string()).default([]),
   ignoreConsolePatterns: z.array(z.string()).default([]),
   ignoreMetaKeys: z.array(z.string()).default([]),
-  toleratedDomDrift: z.record(z.number()).default({}),
+  toleratedDomDrift: z.record(z.string(), z.number()).default({}),
 });
 export type ParityIgnore = z.infer<typeof ParityIgnore>;

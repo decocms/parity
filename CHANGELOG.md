@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.12](https://github.com/decocms/parity/compare/v0.11.11...v0.11.12) (2026-06-17)
+
+### Fixed
+
+* **Migrated to zod 4 to eliminate the `ERESOLVE overriding peer dependency` warning** on every `npm install`. `@anthropic-ai/claude-agent-sdk@0.3.x` peer-deps `zod@^4.0.0` and we were pinned to `zod@^3.24.1`. Both sibling deps (`@anthropic-ai/sdk@^0.100.1` and `@modelcontextprotocol/sdk`) already support `^3.25.0 || ^4.0.0`, so zod 4 was the safe direction. Migration touched two files (`src/types/schema.ts`, `src/learned/repo.ts`): `z.record(value)` → `z.record(z.string(), value)` (zod 4 requires explicit key type), and `z.record(enum, value)` → `z.partialRecord(enum, value)` (zod 4 made enum-keyed records require all enum members by default). All 701 tests still pass.
+* **Forced `encoding-sniffer@^1.0.0` via `overrides`** to drop the deprecated `whatwg-encoding@3.1.1` from our local dev tree. cheerio 1.2.0 still depends on `encoding-sniffer@^0.2.1` which uses `whatwg-encoding`; the newer `encoding-sniffer@1.x` swapped to `@exodus/bytes` with identical exports (`DecodeStream`, `getEncoding`, `decodeBuffer`) — verified API-compatible.
+
+### Known transient warning (upstream)
+
+`npm install -g @decocms/parity` still surfaces `npm warn deprecated whatwg-encoding@3.1.1: Use @exodus/bytes instead`. This is a transitive dep from `cheerio@1.2.0 → encoding-sniffer@0.2.1 → whatwg-encoding`. **`npm overrides` only applies to the consumer's root project, not to a published package's own deps**, so our `overrides` field works for our dev tree but cannot suppress this warning for end users. Tracking upstream: cheerio needs to bump `encoding-sniffer` to `^1.0.0`. No runtime impact — `whatwg-encoding@3.1.1` is functional, just superseded.
+
 ## [0.11.11](https://github.com/decocms/parity/compare/v0.11.10...v0.11.11) (2026-06-17)
 
 ### Fixed
