@@ -597,7 +597,16 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         await installVitalsCollector(ctx);
 
         for (const flow of flows) {
-          spinner.text = `[${viewport}/${side}] running flow "${flow}"…`;
+          const flowStart = Date.now();
+          // Per-step live progress: rewrite the spinner text every time a
+          // step starts so the user sees e.g. "[mobile/prod] purchase-journey
+          // 5/9 add-to-cart…" instead of a silent "running flow" for minutes.
+          // Print a one-line summary when the flow finishes so the user can
+          // see exactly where each side stopped (e.g. cand 5/9 add-to-cart).
+          let lastStepTotal = 0;
+          const sideTag = side === "prod" ? chalk.cyan("prod") : chalk.magenta("cand");
+          const prefix = `${chalk.dim(`[${viewport}/`)}${sideTag}${chalk.dim("]")}`;
+          spinner.text = `${prefix} ${flow}: starting…`;
           const cap = await runFlow(flow, {
             baseUrl,
             side,
@@ -610,7 +619,47 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
             platform,
             recoveryBudget: 3,
             acceptProdQuirks: opts.acceptProdQuirks,
+            onStep: (event) => {
+              if (event.phase === "start") {
+                lastStepTotal = event.total;
+                spinner.text = `${prefix} ${flow} ${chalk.dim(`${event.index}/${event.total}`)} ${event.name}…`;
+              }
+            },
           });
+          // Per-flow summary line: prints permanently above the live
+          // spinner so the user can see exactly where each side ended.
+          // `target` is the flow's declared total (e.g. 9 for
+          // purchase-journey) — falls back to recorded step count for
+          // flows that don't emit onStep total. Showing `2/9 stopped at
+          // open-minicart` is more useful than `2/3` because it makes the
+          // ratio meaningful across sides ("desk got further than mobile").
+          const okSteps = cap.steps?.filter((s) => s.status === "ok").length ?? 0;
+          const recorded = cap.steps?.length ?? 0;
+          const target = lastStepTotal || recorded;
+          const failed = cap.steps?.find((s) => s.status === "failed");
+          const lastStep = cap.steps?.[cap.steps.length - 1];
+          const elapsed = chalk.dim(`${((Date.now() - flowStart) / 1000).toFixed(1)}s`);
+          const counts = target > 0 ? chalk.dim(`${okSteps}/${target}`) : "";
+          let glyph: string;
+          let detail: string;
+          if (failed) {
+            glyph = chalk.red("✗");
+            detail = `stopped at ${chalk.yellow(failed.name)}`;
+          } else if (target > 0 && okSteps < target) {
+            // Early exit without explicit failure (e.g. PDP not found so
+            // the journey gave up at step 3) — surface it so the user
+            // doesn't think this side ran to completion.
+            glyph = chalk.yellow("▴");
+            detail = lastStep ? `ended at ${chalk.dim(lastStep.name)}` : "incomplete";
+          } else {
+            glyph = chalk.green("✓");
+            detail = "";
+          }
+          const summary = `${glyph} ${prefix} ${flow} ${counts} ${detail} ${elapsed}`
+            .replace(/\s+/g, " ")
+            .trim();
+          spinner.stopAndPersist({ symbol: "", text: summary });
+          spinner.start(`${prefix} ${flow} done — next…`);
           allFlowCaptures.push(cap);
           for (const p of cap.pages) allPageCaptures.push(p);
 

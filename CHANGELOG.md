@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.13](https://github.com/decocms/parity/compare/v0.11.12...v0.11.13) (2026-06-17)
+
+### Fixed
+
+* **`parity run` no longer crashes when a flow's `newPage()` errors.** A single rejected inner-flow promise (most commonly `browserContext.newPage: Target page, context or browser has been closed` raised from `flowSearch` when a prior flow corrupted the context) was bubbling through `Promise.race` in `runFlow` and aborting the entire run, throwing away 25+ minutes of work. The `.catch(() => undefined)` on the inner promise only silenced the unhandled-rejection warning — it didn't stop `Promise.race` from seeing the rejection. Wrapped the inner switch in a try/catch that returns a `flow-error` `FlowCapture` instead of throwing, so the surviving viewports/sides finish and the report still renders.
+
+### Added
+
+* **Live per-step progress in `parity run`.** Previously the terminal went silent for tens of minutes after "Launching browser…" with no feedback until the run ended or crashed — devs were stuck guessing whether the tool was making progress. Now the spinner updates on every step (`[mobile/prod] purchase-journey 5/9 add-to-cart…`) and prints a permanent per-flow summary line as each side finishes:
+  ```
+  ✓ [mobile/prod]  purchase-journey 9/9                       58.2s
+  ✓ [mobile/cand]  purchase-journey 9/9                       62.4s
+  ✗ [desk/prod]    purchase-journey 6/9 stopped at open-minicart  118s
+  ▴ [desk/cand]    purchase-journey 3/9 ended at enter-pdp        45s
+  ```
+  Glyphs: `✓` reached target, `✗` explicit failure at a step, `▴` early exit (e.g. PDP not found so journey never started checkout). Wires the existing `onStep` callback from `runFlow` (already used by `parity journey`) into `run.ts`.
+
 ## [0.11.12](https://github.com/decocms/parity/compare/v0.11.11...v0.11.12) (2026-06-17)
 
 ### Fixed

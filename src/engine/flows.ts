@@ -171,30 +171,69 @@ const FLOW_DEADLINE_MS: Record<FlowName, number> = {
 export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCapture> {
   const start = Date.now();
   const deadlineMs = FLOW_DEADLINE_MS[flow];
+  // Catch ANY inner error and convert to a failed FlowCapture. Without this
+  // a thrown error inside e.g. `flowSearch` (the most common being
+  // "browserContext.newPage: Target page, context or browser has been
+  // closed" when a previous flow corrupted the context) propagates through
+  // `Promise.race` below and aborts the entire run. Returning a failed
+  // capture instead means one bad flow doesn't kill the other 3 sides ×
+  // viewports — the report still renders with the surviving data.
   const inner = async (): Promise<FlowCapture> => {
-    switch (flow) {
-      case "homepage":
-        return finalize(flow, ctx, await flowHomepage(ctx), [], start);
-      case "plp":
-        return finalize(flow, ctx, await flowPlp(ctx), [], start);
-      case "pdp":
-        return finalize(flow, ctx, await flowPdp(ctx), [], start);
-      case "purchase-journey": {
-        const { pages, steps } = await flowPurchaseJourney(ctx);
-        return finalize(flow, ctx, pages, steps, start);
+    try {
+      switch (flow) {
+        case "homepage":
+          return finalize(flow, ctx, await flowHomepage(ctx), [], start);
+        case "plp":
+          return finalize(flow, ctx, await flowPlp(ctx), [], start);
+        case "pdp":
+          return finalize(flow, ctx, await flowPdp(ctx), [], start);
+        case "purchase-journey": {
+          const { pages, steps } = await flowPurchaseJourney(ctx);
+          return finalize(flow, ctx, pages, steps, start);
+        }
+        case "search": {
+          const { pages, steps } = await flowSearch(ctx);
+          return finalize(flow, ctx, pages, steps, start);
+        }
+        case "cart-interactions": {
+          const { pages, steps } = await flowCartInteractions(ctx);
+          return finalize(flow, ctx, pages, steps, start);
+        }
+        case "login": {
+          const { pages, steps } = await flowLogin(ctx);
+          return finalize(flow, ctx, pages, steps, start);
+        }
       }
-      case "search": {
-        const { pages, steps } = await flowSearch(ctx);
-        return finalize(flow, ctx, pages, steps, start);
-      }
-      case "cart-interactions": {
-        const { pages, steps } = await flowCartInteractions(ctx);
-        return finalize(flow, ctx, pages, steps, start);
-      }
-      case "login": {
-        const { pages, steps } = await flowLogin(ctx);
-        return finalize(flow, ctx, pages, steps, start);
-      }
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      ctx.onStep?.({
+        phase: "end",
+        name: "flow-error",
+        index: 0,
+        total: 1,
+        status: "failed",
+        durationMs: Date.now() - start,
+        note: msg.slice(0, 120),
+      });
+      return finalize(
+        flow,
+        ctx,
+        [],
+        [
+          {
+            step: 0,
+            name: "flow-error",
+            side: ctx.side,
+            viewport: ctx.viewport,
+            status: "failed",
+            durationMs: Date.now() - start,
+            screenshotPath: "",
+            note: msg.slice(0, 200),
+            actionDescription: `[flow-error] ${flow}: ${msg.slice(0, 200)}`,
+          },
+        ],
+        start,
+      );
     }
   };
 
