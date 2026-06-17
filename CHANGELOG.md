@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.10](https://github.com/decocms/parity/compare/v0.11.9...v0.11.10) (2026-06-17)
+
+### Fixed
+
+* **Runtime auto-install of Chromium when `postinstall` didn't run.** The 0.11.7 `postinstall` hook works when npm runs it — but plenty of installs skip lifecycle scripts (`npm config set ignore-scripts true`, `npm 11+` global-install default, monorepos with `--ignore-scripts`). Users saw a friendly "run `npx playwright install chromium`" message but still had to run a second command before `parity` worked. Now `launchBrowser` catches the missing-browser error and runs `npx --yes playwright install chromium` inline (with stdio inherited so the download progress is visible), then retries the launch once. The original "you must run X" path is preserved via `PARITY_SKIP_PLAYWRIGHT_INSTALL=1` for CI / Docker / monorepos that want explicit control. Net effect: a fresh `npm i -g @decocms/parity && parity run …` works in one command even when lifecycle scripts are disabled.
+
 ## [0.11.9](https://github.com/decocms/parity/compare/v0.11.8...v0.11.9) (2026-06-17)
 
 ### Fixed
