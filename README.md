@@ -1,39 +1,27 @@
 # @decocms/parity
 
-E2E parity validator for site migrations. CLI that runs comparative tests between two URLs — `prod` (source of truth) and `cand` (migrated version) — and produces a single HTML report flagging UI, functional, SEO, and Web Vitals regressions.
+> **Infrastructure for agents in loop to close migrations, PRs, and incidents without a dev on the critical path.**
 
-Built originally for Fresh → TanStack Start migrations of Deco storefronts, but the checks are generic enough for any side-by-side migration.
+`parity` is a CLI that runs deep comparative tests between two URLs — `prod` (source of truth) and `cand` (migrated version, PR preview, or staging) — and produces:
+
+- A standalone **HTML report** for humans to scan in 30 seconds
+- A normalized **JSON projection** (`parity report --section <name> --json`) that agents can consume without parsing HTML
+- A **JSONL stream** (`--json`) that streams each check result as it completes
+- A **PR comment** (`parity pr --prod ... --preview ...`) ready to drop into a CI/CD pipeline
+
+It checks UI, functional, SEO, performance, console, network, and cache regressions. Built originally for Fresh → TanStack Start migrations of Deco storefronts, but the checks are generic enough for any side-by-side migration.
 
 > **Status:** alpha. APIs and report layout may still change.
 
-## What it checks
+## Why parity exists
 
-| Check                         | What it catches                                                        |
-| ----------------------------- | ---------------------------------------------------------------------- |
-| HTTP status parity            | Routes that 404 / 500 in cand but worked in prod                       |
-| Console errors                | New hydration mismatches, failed fetches, JS exceptions                |
-| HTML structural diff          | Section / element counts drifting beyond tolerance                     |
-| Meta / SEO parity             | `<title>`, `<meta description>`, canonical, og:\*, twitter:\*, JSON-LD |
-| **Visual diff (LLM Vision)**  | Sections missing, wrong hero, broken shelf, layout shifts              |
-| Purchase journey              | Home → PLP → PDP → CEP → cart → checkout completes in both             |
-| Network summary               | Request count / bytes / cache hit rate                                 |
-| Web Vitals                    | LCP, FCP, TTFB, INP, CLS — mobile                                      |
-| Image loading health          | Missing alt text, no srcset, broken `<img>`                            |
-| Lazy section presence         | Deco `/deco/render` and `/_loader/*` routes responding                 |
-| SEO deep audit                | robots.txt, sitemap, noindex regressions                               |
-| Cache coverage                | Cache hit rate, opportunities to cache                                 |
-| **Search presence**           | Search input reachable from home in both                               |
-| **Search autocomplete**       | Typing reveals suggestions; cand keeps parity with prod                |
-| **Search results**            | Same keyword returns comparable product counts                         |
-| **Search no-results**         | Unicode garbage term shows empty state, doesn't match products         |
-| **Cart interactions**         | Increment / decrement / coupon / remove all behave in cand             |
-| **404 parity**                | Invalid URL returns 404 (no catch-all 200 in cand)                     |
-| **Cookie/CEP modal CLS**      | Modals don't introduce layout shifts >0.1 in cand                      |
-| **PDP gallery + related**     | Image gallery + "Related products" shelf still render                  |
-| **Footer links health**       | Institutional links (privacy, contact, etc.) aren't broken in cand     |
-| **Login flow** _(opt-in)_     | Valid credentials log in; invalid ones show a clear error              |
+Migrations, PR reviews, and incident triage all share the same workflow: take two versions of a site, find what's different, fix it. Doing this by hand is slow and error-prone; spinning up an LLM agent to do it requires a tool the agent can drive. `parity` is that tool.
 
-All results are aggregated (optionally via Claude) and ranked by severity. Each issue includes screenshots, reproduction, and a suggested fix.
+Three use cases drive the design:
+
+1. **Assisted migration** (Fresh → TanStack, Shopify → Hydrogen, etc.) — an agent runs `parity run` on the migrated branch every commit, picks the top issue, fixes it, runs again. The HTML report + visual-diff prompt are both designed to be paste-ready into Claude / ChatGPT.
+2. **CI/CD PR review** — `parity pr --prod ... --preview ...` outputs a Markdown comment with verdict, top issues, and a link back to the full report. Drop it into a workflow with `gh pr comment -F` or `actions/github-script`.
+3. **Continuous smoke** — `parity run --preset smoke` finishes in ~30s and runs no LLM. Cheap enough to ping after every deploy.
 
 ## Quickstart
 
@@ -44,125 +32,98 @@ npm install -g @decocms/parity
 npx @decocms/parity run --prod ... --cand ...
 
 # First-time smoke run (~30s, no LLM needed)
-parity run \
-  --prod https://oldsite.com \
-  --cand https://newsite.example.dev \
-  --preset smoke --open
+parity run --prod https://oldsite.com --cand https://newsite.example.dev --preset smoke --open
 
-# Full audit with visual diff (set ANTHROPIC_API_KEY for the LLM bits)
+# Full audit with visual diff
 ANTHROPIC_API_KEY=sk-... parity run \
   --prod https://oldsite.com \
   --cand https://newsite.example.dev \
   --preset full --open
+
+# CI/CD PR comment
+parity pr --prod https://oldsite.com --preview https://pr-123-preview.example.dev --github
 ```
 
-## Presets
+## Agent contract
 
-`--preset smoke` — homepage only, mobile only, no LLM, no extra crawl. Use to validate the pipeline runs at all (~30s).
+For agents driving `parity` in a loop, the stable surface is:
 
-`--preset full` — purchase journey, mobile + desktop, 5 visual diff pages, 10 vitals pages, LLM enabled if API key is set. Use for releases.
+| Need | Command | Output |
+| --- | --- | --- |
+| Run a full comparison | `parity run --prod X --cand Y --json runs.jsonl` | JSON-Lines, one line per check |
+| Extract one tab from a saved run | `parity report <runId> --section <name>` | HTML slice |
+| Extract one tab as structured JSON | `parity report <runId> --section <name> --json` | JSON projection |
+| Drive a CI/CD pipeline | `parity pr --prod X --preview Y --github` | Markdown comment + `$GITHUB_STEP_SUMMARY` |
+| Drill into one issue | `parity explain <runId> <issueId>` | LLM deep-dive (needs key) |
+| Build a paste-ready prompt | `parity prompt <runId>` | Markdown ready for Claude/ChatGPT |
+| Generate visual-fix bundle | `parity fix --prod X --cand Y --selector S` | Markdown + screenshots + computed-styles diff |
 
-`--preset ci` — purchase journey on mobile, smaller crawls (3 visual + 5 vitals). Tuned for CI runtime.
+See [`docs/cli.md`](./docs/cli.md) for every command, [`docs/checks.md`](./docs/checks.md) for every check.
 
-Individual flags always override the preset.
+## LLM providers
 
-## Commands
+Three providers, auto-detected in this order — **none required** if you have the `claude` CLI logged in locally:
 
-| Command            | What it does                                                                  |
-| ------------------ | ----------------------------------------------------------------------------- |
-| `parity run`       | Full comparison run between two URLs                                          |
-| `parity audit`     | **Single-site** absolute audit (no prod×cand). Console + Vitals + SEO + Imgs  |
-| `parity e2e`       | **Single-site** functional end-to-end: all flows + all checks. ONE URL.       |
-| `parity journey`   | CI-friendly: only the purchase journey, with JUnit / GitHub annotations       |
-| `parity vitals`    | Crawl N pages, compare Web Vitals prod vs cand                                |
-| `parity cache`     | CDN cache analysis, opportunities, request categorization                     |
-| `parity serve`     | Local HTTP server with iframe proxy so side-by-side tab works for any site    |
-| `parity report`    | Reopen an existing run's HTML report                                          |
-| `parity compare`   | Compare a run against a baseline                                              |
-| `parity baseline`  | Manage baselines (`set`, `list`, `unset`)                                     |
-| `parity list`      | List saved runs                                                               |
-| `parity check`     | Run a single check (`<name>`) — skips sitemap + LLM aggregation; sub-10s loop |
-| `parity console`   | Sub-10s capture of console errors/warnings + network failures for one URL     |
-| `parity html`      | Dump page/selector HTML or unified diff prod×cand (prettier + jsdiff)         |
-| `parity section`   | Focused prod×cand diff of a section: HTML + screenshot + computed styles      |
-| `parity fix`       | Pixel-perfect bundle: heatmap + CSS source + LLM-ready Markdown prompt        |
-| `parity prompt`    | Export issues as a Markdown prompt for any LLM                                |
-| `parity explain`   | LLM deep-dive on a specific issue (needs `ANTHROPIC_API_KEY`)                 |
-| `parity learned`   | Inspect the learned-selectors library                                         |
+1. `ANTHROPIC_API_KEY` — direct Anthropic API (fastest, billed to your API account)
+2. `OPENROUTER_API_KEY` — OpenRouter
+3. **Local `claude` CLI** — uses [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk); goes through your existing Claude plan. No env vars needed
 
-Run any command with `--help` for the full flag list.
+Force with `--llm <anthropic|openrouter|claude-code|none|auto>`. Override per-feature with `--llm-model selector-discovery=claude-haiku-4-5,visual-diff=claude-opus-4-7`. Default tiers: Haiku for short tasks (selector discovery, classification), Sonnet for vision/aggregation, Opus for `explain`.
+
+Without any provider, the CLI still runs and outputs raw check results — only the LLM-tagged tabs (Visual Diff, LLM Prompt) hide themselves and a banner explains why.
 
 ## Output
 
 ```
 ./parity-output/runs/<runId>/
 ├── report.html       # standalone, open in any browser
-├── report.json       # structured output for CI / tooling
+├── report.json       # structured output for agents / CI / tooling
 ├── screenshots/      # per-page, per-viewport, per-side; includes pixelmatch heatmaps
 ├── har/              # Playwright HARs (one per viewport/side)
 ├── traces/           # Playwright traces — drag into trace.playwright.dev
 └── console/          # console messages captured per page
 ```
 
-Plus `./parity-baselines/<name>.json` for git-trackable baseline manifests.
+## Presets
 
-## Visual Diff tab
+- `--preset smoke` — homepage only, mobile only, no LLM, no extra crawl. ~30s. Use for "did the pipeline even run?".
+- `--preset full` — purchase journey, mobile + desktop, 5 visual diff pages, 10 vitals pages. Use for releases.
+- `--preset ci` — purchase journey on mobile, smaller crawls (3 visual + 5 vitals). Tuned for CI runtime.
 
-When `--visual-pages > 0` and an LLM key is set, the report's **Visual Diff** tab shows, per page:
+Individual flags always override the preset. See `parity run --help` for the full default behavior breakdown.
 
-- prod screenshot · cand screenshot · pixelmatch heatmap, side-by-side
-- list of Deco sections present in prod but missing in cand (auto-detected from `data-section`)
-- semantic differences identified by Claude Vision (region, type, severity, description)
-- one-click "Export visual prompt" — Markdown ready to paste into Claude / ChatGPT to generate the fix
+## CI usage (GitHub Actions)
 
-The visual prompt focuses *only* on visual diffs, references the screenshot paths, and includes migration-specific guidance (register section in `setup.ts`, loader shape drift, useDevice hydration, etc).
-
-## Pixel-perfect fix loop
-
-When `parity run` flags a section but you want the LLM to actually patch it, `parity fix` bundles every signal into one Markdown prompt:
-
-```bash
-parity fix \
-  --prod https://www.example.com \
-  --cand https://example.deco-cx.workers.dev \
-  --selector 'header'
+```yaml
+- name: Parity check
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  run: |
+    npx @decocms/parity pr \
+      --prod ${{ vars.PROD_URL }} \
+      --preview ${{ env.PR_PREVIEW_URL }} \
+      --github
 ```
 
-Writes (under `./parity-output/sections/`):
+The `--github` flag writes the Markdown to `$GITHUB_STEP_SUMMARY` so it shows up under the workflow summary. To also post as a PR comment:
 
-- `section-<hash>-{prod,cand}.png` — locator screenshots, carousels stabilized
-- `section-<hash>-heatmap.png` — pixelmatch with bounding-box analysis
-- `section-<hash>-bundle.json` — machine-readable bundle (deltas + sources + bboxes)
-- `section-<hash>-prompt.md` — **paste-ready** Markdown with embedded images, computed-style deltas, CSS source per property, HTML diff, and an opinionated "summarize what you understand first, no code yet" instruction
-
-If `ANTHROPIC_API_KEY` is set, the LLM is invoked automatically and prints a one-paragraph diagnosis to stdout (uses Claude Vision on the screenshots). Pass `--no-llm` to stay offline.
-
-The same flags are available individually on `parity section`: `--heatmap`, `--css-source`, `--prompt`, `--llm-summary`. Use those when you only need one signal; `parity fix` is the "do everything" shortcut.
-
-## `parity e2e` — single-site functional run
-
-The `audit` command runs absolute checks (vitals, console, network, images, SEO) — useful but doesn't exercise interactions. `parity e2e` runs **all the functional flows** (homepage, plp, pdp, purchase-journey, search, cart-interactions, optionally login) against a single URL plus all parity checks in single-site mode.
-
-```bash
-# Quick e2e for a single site (no comparison, ~3-5min)
-parity e2e --url https://www.example.com
-
-# Pick specific flows
-parity e2e --url https://www.example.com --flows=search,cart-interactions
-
-# Override LLM-discovered search term
-parity e2e --url https://www.example.com --search-terms="camisa,promocao"
-
-# With login (credentials via env or flags)
-PARITY_LOGIN_EMAIL=test@example.com PARITY_LOGIN_PASSWORD=*** \
-  parity e2e --url https://www.example.com --flows=login
+```yaml
+    npx @decocms/parity pr ... --out parity-comment.md
+- uses: actions/github-script@v7
+  with:
+    script: |
+      const fs = require('fs');
+      const body = fs.readFileSync('parity-comment.md', 'utf8');
+      github.rest.issues.createComment({
+        ...context.repo,
+        issue_number: context.issue.number,
+        body,
+      });
 ```
-
-**Use `parity e2e` when** you want to validate "does this site actually work end-to-end?" — pre-launch, post-deploy, partner sites. **Use `parity run` when** you need to detect *regressions* between two versions (prod vs migration candidate).
 
 ## Configuration (optional)
 
-`.parityrc.json` at the project root — selector overrides and run defaults:
+`.parityrc.json` at the project root — selector overrides and run defaults. See [`docs/config.md`](./docs/config.md) for the full schema.
 
 ```json
 {
@@ -170,105 +131,15 @@ PARITY_LOGIN_EMAIL=test@example.com PARITY_LOGIN_PASSWORD=*** \
   "selectors": {
     "categoryLink": "header a[href*='/c/']",
     "productCard": "[data-product-card] a",
-    "buyButton": "button:has-text('Comprar')",
-    "minicartTrigger": "[data-minicart-trigger]",
-    "cepInputPdp": "input[name='shipping-zipcode']",
-    "cepInputCart": "input[name='cart-zipcode']",
-    "checkoutButton": "a:has-text('Finalizar compra')",
-    "searchInput": "input[type='search']",
-    "cartCouponInput": "input[name*='coupon']"
+    "buyButton": "button:has-text('Comprar')"
   },
-  "search": {
-    "terms": ["camisa", "promocao"]
-  },
-  "footer": {
-    "maxLinks": 20,
-    "followExternal": false
-  },
-  "notFound": {
-    "testUrl": "/this-page-definitely-does-not-exist"
-  },
-  "login": { "enabled": true }
+  "search": { "terms": ["camisa", "promocao"] }
 }
 ```
 
-> **Credentials are NEVER read from `.parityrc.json`.** Set `PARITY_LOGIN_EMAIL` and `PARITY_LOGIN_PASSWORD` as environment variables (`.parityrc.json` is for non-secret config only).
+`.parityignore` — noise suppression. See `docs/config.md`.
 
-`.parityignore` — noise suppression:
-
-```json
-{
-  "ignoreSelectorsVisual": [".banner-rotativo", "#trustvox-trustbar"],
-  "ignoreRequestPatterns": ["*.gif?t=*", "**/pixel*"],
-  "ignoreConsolePatterns": ["ERR_BLOCKED_BY_CLIENT"]
-}
-```
-
-Both files are gitignored by default — they're per-user, not per-repo.
-
-## LLM (optional)
-
-Parity supports **three providers**, auto-detected in this order — set **none** if you already have the `claude` CLI logged in locally:
-
-1. `ANTHROPIC_API_KEY` — direct Anthropic API (fastest, billed to your API account).
-2. `OPENROUTER_API_KEY` — OpenRouter (default Sonnet slug; override with `PARITY_OPENROUTER_MODEL`).
-3. **Local `claude` CLI** — uses [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) and goes through your existing Claude plan. No env vars needed. Higher latency than the direct API.
-
-Force a provider with `--llm <anthropic|openrouter|claude-code|none|auto>`.
-
-### Per-feature model routing (issue #66)
-
-Different tasks need different models. Defaults are picked to bias toward the cheapest model that does the job well:
-
-| Feature              | Default tier  | Why                            |
-| -------------------- | ------------- | ------------------------------ |
-| selector-discovery   | haiku-4.5     | fast/cheap, simple HTML→JSON   |
-| step-recovery        | haiku-4.5     | short, small context           |
-| search-terms         | haiku-4.5     | short                          |
-| plp-matching         | haiku-4.5     | short classification           |
-| pdp-matching         | haiku-4.5     | short classification           |
-| section-understanding| sonnet-4.6    | needs vision                   |
-| visual-diff          | sonnet-4.6    | needs vision                   |
-| issue-aggregation    | sonnet-4.6    | ranking + dedup                |
-| explain              | opus-4.7      | long reasoning + diagnosis     |
-
-Override per feature with `--llm-model <feat>=<model>,...`:
-
-```bash
-parity run --prod ... --cand ... \
-  --llm-model visual-diff=claude-opus-4-7,explain=claude-opus-4-7
-```
-
-Or flatten the whole map with `--llm-tier-default <haiku|sonnet|opus>`, or `--llm-model-default <model>` to pin one exact model for every call.
-
-### What LLM unlocks
-
-- **Issue aggregation** — flat raw issues become ranked, deduplicated top issues
-- **Selector discovery** — infers `categoryLink` / `productCard` / `buyButton` etc. from HTML
-- **Step recovery** — when a flow step fails, suggest a working selector
-- **Visual semantic diff** — Claude Vision interprets pixel diffs as missing sections / wrong layout / etc.
-- **PLP picker / PDP matcher** — cross-site disambiguation
-- **`parity explain <issue>`** — root-cause analysis on demand
-
-Without any provider, the CLI still runs and outputs raw check results — only the smart bits are skipped. Deterministic fallbacks always apply.
-
-**Cost** — A `--preset full` run with visual diff uses ~6-12 Claude calls (each with 2 screenshots). With per-feature routing the cheap calls (selectors, recovery, classification) hit Haiku and only the heavy ones (visual diff, aggregation, explain) hit Sonnet/Opus — roughly $0.02–$0.10 per run on the direct API.
-
-## CI usage
-
-```yaml
-- name: Parity check
-  env:
-    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-  run: |
-    npx @decocms/parity journey \
-      --prod ${{ vars.PROD_URL }} \
-      --cand ${{ env.PR_PREVIEW_URL }} \
-      --junit parity.junit.xml \
-      --github
-```
-
-`parity journey` emits GitHub Actions `::error` and `::warning` annotations for each failed step and writes JUnit XML.
+> **Credentials are NEVER read from `.parityrc.json`.** Set `PARITY_LOGIN_EMAIL` and `PARITY_LOGIN_PASSWORD` as environment variables.
 
 ## Development
 
