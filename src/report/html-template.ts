@@ -294,6 +294,23 @@ export const REPORT_CSS = `
   .card h2 { font-size: 15px; margin: 0 0 12px 0; font-weight: 600; }
   .card .hint { font-size: 12px; color: var(--text-muted); margin-top: -6px; margin-bottom: 12px; }
 
+  /* LLM-disabled banner — shown below the header when the run had no
+     LLM provider available and we hid the LLM-only tabs. Issue #75. */
+  .llm-disabled-banner {
+    background: var(--surface-overlay);
+    border-bottom: 1px solid var(--border-default);
+    padding: 10px 28px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .llm-disabled-banner code {
+    background: var(--surface-base);
+    border: 1px solid var(--border-default);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+  }
+
   /* Tab-help banner — one-line description shown at the top of each tab.
      Issue #73. Kept low-contrast so it never competes with the actual
      content. */
