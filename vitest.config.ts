@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
     exclude: ["node_modules", "dist", "tests/e2e/**"],
+    setupFiles: ["./tests/setup.ts"],
     testTimeout: 10_000,
     hookTimeout: 10_000,
     coverage: {

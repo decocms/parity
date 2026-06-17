@@ -257,6 +257,7 @@ export async function discoverSelectorsFromUrl(
 
   const compacted = compactHtmlForSelectors(html);
   const input = await callTool<Record<string, string>>({
+    feature: "selector-discovery",
     systemPrompt: SYSTEM_PROMPT,
     userText: `URL: ${url}\n\nHTML compactado da home:\n\`\`\`html\n${compacted}\n\`\`\``,
     maxTokens: 1500,

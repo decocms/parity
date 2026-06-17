@@ -102,6 +102,7 @@ export async function suggestRecovery(input: RecoverInput): Promise<RecoverySugg
     value?: string;
     reasoning?: string;
   }>({
+    feature: "step-recovery",
     systemPrompt: RECOVERY_SYSTEM_PROMPT,
     userText: `Step: ${input.stepName}\nAção desejada: ${input.intendedAction}\n${input.alreadyTried?.length ? `Já tentei (não repita estes): ${input.alreadyTried.join(", ")}\n` : ""}\nHTML compactado da página NESTE momento:\n\`\`\`html\n${compacted}\n\`\`\``,
     maxTokens: 400,

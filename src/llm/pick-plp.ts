@@ -64,6 +64,7 @@ async function llmPick(
   candidates: CategoryLinkCandidate[],
 ): Promise<CategoryLinkCandidate | null> {
   const input = await callTool<{ index?: number }>({
+    feature: "plp-matching",
     systemPrompt:
       "Você escolhe links de categoria reais em sites de e-commerce. Categoria real = página que lista produtos à venda. Evite: institucional, atendimento, blog, vale-presente, lojas físicas. Prefira URLs com /c/, /category/, /collections/ ou claramente vinculadas a tipos de produto.",
     userText: `Candidatos:\n${candidates.map((c, i) => `${i}. "${c.text}" → ${c.href}`).join("\n")}`,

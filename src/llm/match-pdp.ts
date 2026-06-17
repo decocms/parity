@@ -100,6 +100,7 @@ function levenshtein(a: string, b: string): number {
 
 async function llmMatch(prod: PdpFingerprint, cand: PdpFingerprint): Promise<MatchVerdict | null> {
   const input = await callTool<{ verdict?: string }>({
+    feature: "pdp-matching",
     systemPrompt:
       "Você classifica se duas páginas de produto (PDPs) mostram o mesmo produto. 'same' = mesmo SKU/produto idêntico. 'similar' = variação (mesma família, cor diferente, embalagem diferente). 'different' = produtos distintos.",
     userText: `prod: ${JSON.stringify(prod)}\ncand: ${JSON.stringify(cand)}`,

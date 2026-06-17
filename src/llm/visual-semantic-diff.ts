@@ -272,6 +272,7 @@ export async function visualSemanticDiff(
     userImages.push({ base64: heatmapB64, mediaType: "image/png" });
   }
   const result = await callTool<{ differences?: Partial<VisualDifference>[] }>({
+    feature: "visual-diff",
     systemPrompt: SYSTEM_PROMPT,
     userText,
     userImages,

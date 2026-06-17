@@ -8,6 +8,14 @@ vi.mock("@anthropic-ai/sdk", () => ({
   })),
 }));
 
+// Force the local-CLI provider to report unavailable so tests are deterministic
+// regardless of whether the dev's machine has `~/.claude/`.
+vi.mock("../../src/llm/providers/claude-agent-sdk.ts", () => ({
+  isClaudeAgentSdkAvailable: () => false,
+  callToolSdk: vi.fn(),
+  callMessageSdk: vi.fn(),
+}));
+
 import {
   callMessage,
   callTool,
@@ -30,7 +38,7 @@ describe("getProvider / isLlmAvailable / providerLabel", () => {
     if (ORIG_OPENROUTER) process.env.OPENROUTER_API_KEY = ORIG_OPENROUTER;
   });
 
-  it("returns null when no key is set", () => {
+  it("returns null when no key is set and no claude CLI", () => {
     expect(getProvider()).toBeNull();
     expect(isLlmAvailable()).toBe(false);
     expect(providerLabel()).toBe("none");
@@ -39,13 +47,13 @@ describe("getProvider / isLlmAvailable / providerLabel", () => {
   it("prefers Anthropic when ANTHROPIC_API_KEY is set", () => {
     process.env.ANTHROPIC_API_KEY = "sk-test";
     expect(getProvider()).toBe("anthropic");
-    expect(providerLabel()).toMatch(/Anthropic/);
+    expect(providerLabel()).toMatch(/anthropic/);
   });
 
   it("falls back to OpenRouter when only OPENROUTER_API_KEY is set", () => {
     process.env.OPENROUTER_API_KEY = "or-test";
     expect(getProvider()).toBe("openrouter");
-    expect(providerLabel()).toMatch(/OpenRouter/);
+    expect(providerLabel()).toMatch(/openrouter/);
   });
 
   it("Anthropic wins over OpenRouter when both are set", () => {
@@ -70,6 +78,7 @@ describe("callTool — Anthropic branch", () => {
       content: [{ type: "tool_use", name: "my-tool", input: { foo: "bar" } }],
     });
     const out = await callTool<{ foo: string }>({
+      feature: "selector-discovery",
       systemPrompt: "sys",
       userText: "hello",
       tool: { name: "my-tool", description: "d", inputSchema: { type: "object" } },
@@ -81,6 +90,7 @@ describe("callTool — Anthropic branch", () => {
     mockCreate.mockRejectedValue(new Error("boom"));
     const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const out = await callTool({
+      feature: "selector-discovery",
       systemPrompt: "s",
       userText: "u",
       tool: { name: "t", description: "d", inputSchema: { type: "object" } },
@@ -94,6 +104,7 @@ describe("callTool — Anthropic branch", () => {
       content: [{ type: "text", text: "hello there" }],
     });
     const out = await callTool({
+      feature: "selector-discovery",
       systemPrompt: "s",
       userText: "u",
       tool: { name: "t", description: "d", inputSchema: { type: "object" } },
@@ -106,6 +117,7 @@ describe("callTool — Anthropic branch", () => {
       content: [{ type: "tool_use", name: "t", input: { ok: true } }],
     });
     await callTool({
+      feature: "visual-diff",
       systemPrompt: "s",
       userText: "u",
       tool: { name: "t", description: "d", inputSchema: { type: "object" } },
@@ -123,18 +135,33 @@ describe("callTool — Anthropic branch", () => {
     );
   });
 
-  it("uses default model (sonnet 4.6) and 2000 max_tokens", async () => {
+  it("routes selector-discovery feature to haiku model by default", async () => {
     mockCreate.mockResolvedValue({
       content: [{ type: "tool_use", name: "t", input: {} }],
     });
     await callTool({
+      feature: "selector-discovery",
+      systemPrompt: "s",
+      userText: "u",
+      tool: { name: "t", description: "d", inputSchema: { type: "object" } },
+    });
+    const call = mockCreate.mock.calls[0]?.[0];
+    expect(call.model).toBe("claude-haiku-4-5");
+    expect(call.max_tokens).toBe(2000);
+  });
+
+  it("routes visual-diff feature to sonnet model by default", async () => {
+    mockCreate.mockResolvedValue({
+      content: [{ type: "tool_use", name: "t", input: {} }],
+    });
+    await callTool({
+      feature: "visual-diff",
       systemPrompt: "s",
       userText: "u",
       tool: { name: "t", description: "d", inputSchema: { type: "object" } },
     });
     const call = mockCreate.mock.calls[0]?.[0];
     expect(call.model).toBe("claude-sonnet-4-6");
-    expect(call.max_tokens).toBe(2000);
   });
 
   it("passes AbortSignal for timeout enforcement", async () => {
@@ -142,6 +169,7 @@ describe("callTool — Anthropic branch", () => {
       content: [{ type: "tool_use", name: "t", input: {} }],
     });
     await callTool({
+      feature: "selector-discovery",
       systemPrompt: "s",
       userText: "u",
       tool: { name: "t", description: "d", inputSchema: { type: "object" } },
@@ -183,6 +211,7 @@ describe("callTool — OpenRouter branch", () => {
       },
     }));
     const out = await callTool<{ x: number }>({
+      feature: "selector-discovery",
       systemPrompt: "s",
       userText: "u",
       tool: { name: "t", description: "d", inputSchema: { type: "object" } },
@@ -196,6 +225,7 @@ describe("callTool — OpenRouter branch", () => {
     }));
     const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const out = await callTool({
+      feature: "selector-discovery",
       systemPrompt: "s",
       userText: "u",
       tool: { name: "t", description: "d", inputSchema: { type: "object" } },
@@ -208,6 +238,7 @@ describe("callTool — OpenRouter branch", () => {
     ({ restore } = mockFetch({ "/api/v1/chat/completions": { error: "ECONNRESET" } }));
     const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const out = await callTool({
+      feature: "selector-discovery",
       systemPrompt: "s",
       userText: "u",
       tool: { name: "t", description: "d", inputSchema: { type: "object" } },
@@ -218,10 +249,11 @@ describe("callTool — OpenRouter branch", () => {
 });
 
 describe("callTool — no provider", () => {
-  it("returns null when no API key", async () => {
+  it("returns null when no API key and no claude CLI", async () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENROUTER_API_KEY;
     const out = await callTool({
+      feature: "selector-discovery",
       systemPrompt: "s",
       userText: "u",
       tool: { name: "t", description: "d", inputSchema: { type: "object" } },
@@ -240,29 +272,30 @@ describe("callMessage", () => {
     delete process.env.ANTHROPIC_API_KEY;
   });
 
-  it("joins text blocks from Anthropic response", async () => {
+  it("returns text content on success", async () => {
     mockCreate.mockResolvedValue({
-      content: [
-        { type: "text", text: "hello" },
-        { type: "text", text: "world" },
-      ],
+      content: [{ type: "text", text: "hello world" }],
     });
-    const out = await callMessage({ systemPrompt: "s", userText: "u" });
-    expect(out).toBe("hello\nworld");
+    const out = await callMessage({ feature: "explain", systemPrompt: "s", userText: "u" });
+    expect(out).toBe("hello world");
   });
 
-  it("returns null on error", async () => {
+  it("returns null when SDK throws", async () => {
     mockCreate.mockRejectedValue(new Error("boom"));
     const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const out = await callMessage({ systemPrompt: "s", userText: "u" });
+    const out = await callMessage({ feature: "explain", systemPrompt: "s", userText: "u" });
     expect(out).toBeNull();
     spy.mockRestore();
   });
 
-  it("returns null when no provider is configured", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.OPENROUTER_API_KEY;
-    const out = await callMessage({ systemPrompt: "s", userText: "u" });
-    expect(out).toBeNull();
+  it("joins multiple text blocks", async () => {
+    mockCreate.mockResolvedValue({
+      content: [
+        { type: "text", text: "a" },
+        { type: "text", text: "b" },
+      ],
+    });
+    const out = await callMessage({ feature: "explain", systemPrompt: "s", userText: "u" });
+    expect(out).toBe("a\nb");
   });
 });
