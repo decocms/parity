@@ -1,15 +1,10 @@
 import { describe, expect, it } from "vitest";
-import {
-  escapeHtml,
-  humanKey,
-  relPath,
-  renderIssueHtml,
-} from "../../src/report/issue-html.ts";
+import { escapeHtml, humanKey, relPath, renderIssueHtml } from "../../src/report/issue-html.ts";
 import type { Issue } from "../../src/types/schema.ts";
 
 describe("escapeHtml", () => {
   it("escapa caracteres HTML perigosos", () => {
-    expect(escapeHtml("<script>alert(\"x\")</script>")).toBe(
+    expect(escapeHtml('<script>alert("x")</script>')).toBe(
       "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;",
     );
   });

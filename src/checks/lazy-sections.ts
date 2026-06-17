@@ -4,7 +4,8 @@ import { pairCaptures } from "./lib/pairing.ts";
 
 const LAZY_URL_PATTERN = /\/(deco\/render|_loader)\b/;
 /** Marker the framework (or the user) can emit when ALL sections render eagerly by design. */
-const EAGER_RENDERING_MARKER = /data-deco-async-rendering=["']eager["']|<meta\s+name=["']parity:async-rendering["']\s+content=["']eager["']/i;
+const EAGER_RENDERING_MARKER =
+  /data-deco-async-rendering=["']eager["']|<meta\s+name=["']parity:async-rendering["']\s+content=["']eager["']/i;
 
 export function lazySectionPresence(ctx: CheckContext): CheckResult {
   const start = Date.now();
@@ -53,7 +54,7 @@ export function lazySectionPresence(ctx: CheckContext): CheckResult {
             "",
             "Pra confirmar:",
             "  1. Veja se src/setup.ts do site cand chama setAsyncRenderingConfig.",
-            "  2. Ou adicione `<html data-deco-async-rendering=\"eager\">` no SSR pra deixar",
+            '  2. Ou adicione `<html data-deco-async-rendering="eager">` no SSR pra deixar',
             "     explícito (parity respeitará).",
           ].join("\n"),
         });

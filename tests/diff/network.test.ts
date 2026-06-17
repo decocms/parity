@@ -20,14 +20,22 @@ function entry(partial: Partial<NetworkEntry>): NetworkEntry {
 
 describe("summarizeNetwork", () => {
   it("agrupa por bucket de status", () => {
-    const s = summarizeNetwork([entry({ status: 200 }), entry({ status: 404 }), entry({ status: 500 })]);
+    const s = summarizeNetwork([
+      entry({ status: 200 }),
+      entry({ status: 404 }),
+      entry({ status: 500 }),
+    ]);
     expect(s.status["2xx"]).toBe(1);
     expect(s.status["4xx"]).toBe(1);
     expect(s.status["5xx"]).toBe(1);
   });
 
   it("calcula cache hit rate", () => {
-    const s = summarizeNetwork([entry({ fromCache: true }), entry({ fromCache: true }), entry({ fromCache: false })]);
+    const s = summarizeNetwork([
+      entry({ fromCache: true }),
+      entry({ fromCache: true }),
+      entry({ fromCache: false }),
+    ]);
     expect(s.cacheHitRate).toBeCloseTo(2 / 3, 2);
   });
 
@@ -48,8 +56,14 @@ describe("summarizeNetwork", () => {
 
 describe("diffUrls", () => {
   it("aplica ignorePatterns glob", () => {
-    const prod = [entry({ url: "https://x.com/img.gif?t=1" }), entry({ url: "https://x.com/api/products" })];
-    const cand = [entry({ url: "https://x.com/img.gif?t=99" }), entry({ url: "https://x.com/api/products" })];
+    const prod = [
+      entry({ url: "https://x.com/img.gif?t=1" }),
+      entry({ url: "https://x.com/api/products" }),
+    ];
+    const cand = [
+      entry({ url: "https://x.com/img.gif?t=99" }),
+      entry({ url: "https://x.com/api/products" }),
+    ];
     const d = diffUrls(prod, cand, { ignorePatterns: ["**/img.gif*"] });
     expect(d.onlyProd).toEqual([]);
     expect(d.onlyCand).toEqual([]);

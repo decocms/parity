@@ -163,9 +163,11 @@ export async function stabilizeCarousels(page: Page): Promise<StabilizeResult> {
   };
   try {
     const counts = await page.evaluate(() => {
-      const fn = (window as unknown as {
-        __parityStabilizeCarousels?: () => Record<string, number>;
-      }).__parityStabilizeCarousels;
+      const fn = (
+        window as unknown as {
+          __parityStabilizeCarousels?: () => Record<string, number>;
+        }
+      ).__parityStabilizeCarousels;
       return fn ? fn() : null;
     });
     if (!counts) return empty;

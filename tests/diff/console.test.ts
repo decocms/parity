@@ -7,21 +7,31 @@ const e = (text: string, type: ConsoleEntry["type"] = "error"): ConsoleEntry => 
 describe("classify", () => {
   it("detecta hydration mismatch", () => {
     expect(classify(e("Warning: Text content did not match. server x client"))).toBe("hydration");
-    expect(classify(e("Hydration failed because the server-rendered HTML did not match"))).toBe("hydration");
-  });
-
-  it("detecta CSP", () => {
-    expect(classify(e("Refused to load the script 'https://x' because it violates the following Content Security Policy"))).toBe(
-      "csp",
+    expect(classify(e("Hydration failed because the server-rendered HTML did not match"))).toBe(
+      "hydration",
     );
   });
 
+  it("detecta CSP", () => {
+    expect(
+      classify(
+        e(
+          "Refused to load the script 'https://x' because it violates the following Content Security Policy",
+        ),
+      ),
+    ).toBe("csp");
+  });
+
   it("detecta 404", () => {
-    expect(classify(e("Failed to load resource: the server responded with a status of 404"))).toBe("not-found");
+    expect(classify(e("Failed to load resource: the server responded with a status of 404"))).toBe(
+      "not-found",
+    );
   });
 
   it("detecta request-failed prefix", () => {
-    expect(classify(e("[request-failed] https://x.com/foo — net::ERR_FAILED"))).toBe("request-failed");
+    expect(classify(e("[request-failed] https://x.com/foo — net::ERR_FAILED"))).toBe(
+      "request-failed",
+    );
   });
 
   it("classifica como generic se não reconhecer", () => {

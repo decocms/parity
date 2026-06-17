@@ -1,12 +1,14 @@
-import { buildCacheReport, type CacheReport, type ClassifiedRequest } from "../diff/cache.ts";
-import type { CheckResult, Issue, NetworkEntry, Run, SeoPageMeta, VisualDiffPage } from "../types/schema.ts";
+import { type CacheReport, type ClassifiedRequest, buildCacheReport } from "../diff/cache.ts";
+import type {
+  CheckResult,
+  Issue,
+  NetworkEntry,
+  Run,
+  SeoPageMeta,
+  VisualDiffPage,
+} from "../types/schema.ts";
 import { REPORT_CSS, REPORT_JS } from "./html-template.ts";
-import {
-  escapeHtml as esc,
-  humanKey,
-  relPath,
-  renderIssueHtml,
-} from "./issue-html.ts";
+import { escapeHtml as esc, humanKey, relPath, renderIssueHtml } from "./issue-html.ts";
 import { buildLlmPrompt } from "./prompt-builder.ts";
 import { buildVisualPrompt } from "./visual-prompt-builder.ts";
 import { renderWaterfall } from "./waterfall.ts";
@@ -27,18 +29,29 @@ function renderIssue(issue: Issue, runDir: string): string {
  * having to infer from the data. Issue #73.
  */
 const TAB_HELP: Record<string, string> = {
-  summary: "Migration health at a glance. Score, blocking issues, and a tile per check category. Click a tile to jump to the corresponding tab.",
-  visualdiff: "Per-page pixel + semantic diff between prod and cand screenshots. Pages that didn't change are auto-skipped via the cross-run cache. LLM Vision interprets the heatmap when ANTHROPIC_API_KEY or a local claude CLI is available.",
+  summary:
+    "Migration health at a glance. Score, blocking issues, and a tile per check category. Click a tile to jump to the corresponding tab.",
+  visualdiff:
+    "Per-page pixel + semantic diff between prod and cand screenshots. Pages that didn't change are auto-skipped via the cross-run cache. LLM Vision interprets the heatmap when ANTHROPIC_API_KEY or a local claude CLI is available.",
   seo: "Robots.txt, sitemap, and per-page meta-tag parity between prod and cand. Red rows diverge. Catches noindex / canonical / og:* / JSON-LD regressions that silently destroy organic traffic.",
-  sidebyside: "Live mobile iframe of prod vs cand, with synchronized scroll. Requires `parity serve <runId>` to bypass X-Frame-Options. Mobile viewport is forced via the proxy (Issue #70).",
-  issues: "Flat list of every issue surfaced by any check, sorted by severity. The Top issues block on the Dashboard is the LLM-aggregated, deduped version of this list.",
-  vitals: "Web Vitals (LCP / FCP / TTFB / INP / CLS) per page, prod vs cand. Δ green = cand better; Δ red = regression. Mobile is the default measurement viewport.",
-  cache: "Cache hit rate and missed opportunities on cand. Opportunities = static assets with hashed URLs returning MISS — adding a cache rule for them is usually free perf.",
-  checks: "Every check that ran in this run, with pass/fail status, duration, and one-line summary. Useful for narrowing down which check produced a confusing issue.",
-  prompt: "Copy-pasteable Markdown prompt that you can drop into any LLM (Claude, ChatGPT, etc.) to get a prioritized fix list. Includes issue context + migration-specific hints.",
-  pages: "Every URL parity actually captured during the run, with status code and viewport. Use this to confirm coverage when a check reports something unexpected.",
-  console: "JS console errors and network failures that fired on cand but not on prod. New errors are usually hydration mismatches, missing API endpoints, or broken third-party scripts.",
-  network: "Every request captured on cand: type, status, size, cache decision. Sortable + filterable. Use this to spot bundle bloat or unexpected third-party calls.",
+  sidebyside:
+    "Live mobile iframe of prod vs cand, with synchronized scroll. Requires `parity serve <runId>` to bypass X-Frame-Options. Mobile viewport is forced via the proxy (Issue #70).",
+  issues:
+    "Flat list of every issue surfaced by any check, sorted by severity. The Top issues block on the Dashboard is the LLM-aggregated, deduped version of this list.",
+  vitals:
+    "Web Vitals (LCP / FCP / TTFB / INP / CLS) per page, prod vs cand. Δ green = cand better; Δ red = regression. Mobile is the default measurement viewport.",
+  cache:
+    "Cache hit rate and missed opportunities on cand. Opportunities = static assets with hashed URLs returning MISS — adding a cache rule for them is usually free perf.",
+  checks:
+    "Every check that ran in this run, with pass/fail status, duration, and one-line summary. Useful for narrowing down which check produced a confusing issue.",
+  prompt:
+    "Copy-pasteable Markdown prompt that you can drop into any LLM (Claude, ChatGPT, etc.) to get a prioritized fix list. Includes issue context + migration-specific hints.",
+  pages:
+    "Every URL parity actually captured during the run, with status code and viewport. Use this to confirm coverage when a check reports something unexpected.",
+  console:
+    "JS console errors and network failures that fired on cand but not on prod. New errors are usually hydration mismatches, missing API endpoints, or broken third-party scripts.",
+  network:
+    "Every request captured on cand: type, status, size, cache decision. Sortable + filterable. Use this to spot bundle bloat or unexpected third-party calls.",
   diff: "Delta of this run vs the saved baseline (resolved / new / regressions). Only visible when `--baseline <name>` is loaded (Issue #68).",
 };
 
@@ -53,8 +66,14 @@ function tabHelp(text: string | undefined): string {
 
 function renderDashboard(run: Run): string {
   const v = run.verdict;
-  const statusLabel = v.status === "pass" ? "Excellent" : v.status === "warn" ? "Warnings" : "Critical";
-  const ringColor = v.status === "pass" ? "var(--state-good)" : v.status === "warn" ? "var(--state-warn)" : "var(--state-bad)";
+  const statusLabel =
+    v.status === "pass" ? "Excellent" : v.status === "warn" ? "Warnings" : "Critical";
+  const ringColor =
+    v.status === "pass"
+      ? "var(--state-good)"
+      : v.status === "warn"
+        ? "var(--state-warn)"
+        : "var(--state-bad)";
   const ringDeg = `${Math.round((v.score / 100) * 360)}deg`;
 
   // Build metric tiles from check results
@@ -147,7 +166,12 @@ function buildTiles(run: Run): Tile[] {
     tiles.push({
       icon: "🔍",
       label: "SEO",
-      value: critical > 0 ? `${critical} crit` : seo.status === "pass" ? "✓" : seo.issues.length.toString(),
+      value:
+        critical > 0
+          ? `${critical} crit`
+          : seo.status === "pass"
+            ? "✓"
+            : seo.issues.length.toString(),
       meta: critical > 0 ? "noindex / robots regression" : `${seo.issues.length} issue(s)`,
       state: critical > 0 ? "fail" : seo.status === "pass" ? "pass" : "warn",
       href: "#detail/seo-deep-audit",
@@ -226,9 +250,8 @@ function renderTopIssues(run: Run, runDir: string): string {
 function renderCheckDetailPanel(check: CheckResult, run: Run, runDir: string): string {
   const reproCmd = `parity check ${check.name} --prod ${run.prodUrl} --cand ${run.candUrl}`;
   const reproId = `repro-${check.name.replace(/[^a-zA-Z0-9]/g, "_")}`;
-  const dataJson = check.data && Object.keys(check.data).length > 0
-    ? JSON.stringify(check.data, null, 2)
-    : null;
+  const dataJson =
+    check.data && Object.keys(check.data).length > 0 ? JSON.stringify(check.data, null, 2) : null;
   return `
   <div class="card">
     <div class="check-detail-header">
@@ -318,7 +341,7 @@ function renderVitalsPanel(run: Run): string {
 
   // Aggregation: pair pages by (path, viewport) and side
   const byPage = new Map<string, { prod: number | null; cand: number | null }[]>();
-  type Vitals = NonNullable<typeof run.flowCaptures[number]["pages"][number]["vitals"]>;
+  type Vitals = NonNullable<(typeof run.flowCaptures)[number]["pages"][number]["vitals"]>;
   const pageVitals = new Map<string, { prod?: Vitals; cand?: Vitals; viewport: string }>();
   for (const fc of run.flowCaptures) {
     if (fc.viewport !== "mobile") continue;
@@ -352,7 +375,10 @@ function renderVitalsPanel(run: Run): string {
       const isBad = higherIsBad ? delta > 0 : delta < 0;
       const cls = Math.abs(delta) < 0.001 ? "delta-neutral" : isBad ? "delta-bad" : "delta-good";
       const sign = delta > 0 ? "+" : "";
-      const display = unit === "ms" ? `${sign}${delta.toFixed(0)}ms (${sign}${pct.toFixed(0)}%)` : `${sign}${delta.toFixed(3)}`;
+      const display =
+        unit === "ms"
+          ? `${sign}${delta.toFixed(0)}ms (${sign}${pct.toFixed(0)}%)`
+          : `${sign}${delta.toFixed(3)}`;
       deltaCell = `<td class="num ${cls}">${esc(display)}</td>`;
     }
     return `
@@ -472,7 +498,9 @@ function renderNetworkPanel(run: Run): string {
  * the page list stays scannable; clicking opens the SVG chart. The chart
  * itself is rendered inline (no JS dependency). Issue #78.
  */
-function renderWaterfallsSection(perPage: Array<{ label: string; entries: NetworkEntry[] }>): string {
+function renderWaterfallsSection(
+  perPage: Array<{ label: string; entries: NetworkEntry[] }>,
+): string {
   if (perPage.length === 0) return "";
   // De-dupe: a page captured under multiple flows shows up more than
   // once; keep the largest capture by request count to avoid noise.
@@ -485,7 +513,9 @@ function renderWaterfallsSection(perPage: Array<{ label: string; entries: Networ
   for (const [label, entries] of byLabel) {
     const svg = renderWaterfall(entries);
     if (!svg) continue;
-    blocks.push(`<details class="wf-page"><summary>${esc(label)} <span class="dim">· ${entries.length} requests</span></summary>${svg}</details>`);
+    blocks.push(
+      `<details class="wf-page"><summary>${esc(label)} <span class="dim">· ${entries.length} requests</span></summary>${svg}</details>`,
+    );
   }
   if (blocks.length === 0) return "";
   return `
@@ -501,7 +531,12 @@ function renderNetworkTable(report: CacheReport): string {
   const rows = report.all.map((r, idx) => {
     const url = r.entry.url;
     const sizeKb = r.entry.bytes != null ? (r.entry.bytes / 1024).toFixed(1) : "—";
-    const cacheCls = r.decision === "hit" ? "cache-hit" : r.decision === "miss" || r.decision === "unknown" ? "cache-miss" : "cache-bypass";
+    const cacheCls =
+      r.decision === "hit"
+        ? "cache-hit"
+        : r.decision === "miss" || r.decision === "unknown"
+          ? "cache-miss"
+          : "cache-bypass";
     const cacheLabel = r.decision === "unknown" ? "miss?" : r.decision;
     return `<tr data-cat="${r.category}" data-decision="${r.decision}" data-status="${r.entry.status}" data-bytes="${r.entry.bytes ?? 0}" data-url="${esc(url.toLowerCase())}" data-idx="${idx}">
       <td class="url-cell"><a href="${esc(url)}" target="_blank" rel="noreferrer" title="${esc(url)}">${esc(humanizeNetworkUrl(url))}</a></td>
@@ -553,7 +588,8 @@ function renderNetworkTable(report: CacheReport): string {
 function humanizeNetworkUrl(url: string): string {
   try {
     const u = new URL(url);
-    const path = u.pathname + (u.search ? `${u.search.slice(0, 40)}${u.search.length > 40 ? "…" : ""}` : "");
+    const path =
+      u.pathname + (u.search ? `${u.search.slice(0, 40)}${u.search.length > 40 ? "…" : ""}` : "");
     return `${u.hostname}${path}`;
   } catch {
     return url.slice(0, 120);
@@ -595,11 +631,12 @@ function renderCachePanel(run: Run): string {
 
   const oppBytes = report.opportunities.reduce((s, r) => s + (r.entry.bytes ?? 0), 0);
   const hitPct = (report.hitRate * 100).toFixed(0);
-  const deltaText = prodHitRate != null
-    ? prodHitRate > report.hitRate
-      ? `<span class="delta-bad">↓ ${((prodHitRate - report.hitRate) * 100).toFixed(0)}pp vs prod</span>`
-      : `<span class="delta-good">↑ ${((report.hitRate - prodHitRate) * 100).toFixed(0)}pp vs prod</span>`
-    : `<span class="dim">no prod comparison</span>`;
+  const deltaText =
+    prodHitRate != null
+      ? prodHitRate > report.hitRate
+        ? `<span class="delta-bad">↓ ${((prodHitRate - report.hitRate) * 100).toFixed(0)}pp vs prod</span>`
+        : `<span class="delta-good">↑ ${((report.hitRate - prodHitRate) * 100).toFixed(0)}pp vs prod</span>`
+      : `<span class="dim">no prod comparison</span>`;
 
   return `
   <div class="card cache-hero">
@@ -633,7 +670,13 @@ function renderCachePanel(run: Run): string {
 
   <details class="card">
     <summary><h2 style="display:inline">✅ Caching well — ${report.byDecision.hit} HITs</h2></summary>
-    ${renderRequestList(report.all.filter((r) => r.decision === "hit").sort((a, b) => (b.entry.bytes ?? 0) - (a.entry.bytes ?? 0)).slice(0, 50), false)}
+    ${renderRequestList(
+      report.all
+        .filter((r) => r.decision === "hit")
+        .sort((a, b) => (b.entry.bytes ?? 0) - (a.entry.bytes ?? 0))
+        .slice(0, 50),
+      false,
+    )}
   </details>
 
   <details class="card">
@@ -644,12 +687,17 @@ function renderCachePanel(run: Run): string {
 }
 
 function renderCategoryBreakdown(report: CacheReport): string {
-  const rows = (Object.entries(report.byCategory) as Array<[string, { count: number; bytes: number; hitRate: number }]>)
+  const rows = (
+    Object.entries(report.byCategory) as Array<
+      [string, { count: number; bytes: number; hitRate: number }]
+    >
+  )
     .filter(([, info]) => info.count > 0)
     .sort(([, a], [, b]) => b.bytes - a.bytes)
     .map(([cat, info]) => {
       const hr = (info.hitRate * 100).toFixed(0);
-      const hrClass = info.hitRate > 0.8 ? "delta-good" : info.hitRate > 0.4 ? "delta-neutral" : "delta-bad";
+      const hrClass =
+        info.hitRate > 0.8 ? "delta-good" : info.hitRate > 0.4 ? "delta-neutral" : "delta-bad";
       return `<tr>
         <td><span class="net-cat cat-${cat}">${cat}</span></td>
         <td class="num">${info.count}</td>
@@ -820,7 +868,8 @@ function buildVisualFixCommand(page: VisualDiffPage): string {
 
 function renderVisualDiffPage(page: VisualDiffPage, runDir: string, openFirst: boolean): string {
   const verdictClass = page.verdict === "pass" ? "ok" : page.verdict === "failed" ? "bad" : "warn";
-  const verdictLabel = page.verdict === "pass" ? "OK" : page.verdict === "failed" ? "FAIL" : "DIFFS";
+  const verdictLabel =
+    page.verdict === "pass" ? "OK" : page.verdict === "failed" ? "FAIL" : "DIFFS";
   const diffsCount = page.differences.length;
   const sectionsMissing = page.sectionsOnlyInProd.length;
   const maxSev = page.differences.reduce<string>((best, d) => {
@@ -832,13 +881,22 @@ function renderVisualDiffPage(page: VisualDiffPage, runDir: string, openFirst: b
   const headerBadges: string[] = [];
   headerBadges.push(`<span class="vd-badge ${verdictClass}">${verdictLabel}</span>`);
   if (diffsCount > 0) headerBadges.push(`<span class="vd-badge info">${diffsCount} diff(s)</span>`);
-  if (sectionsMissing > 0) headerBadges.push(`<span class="vd-badge bad">${sectionsMissing} missing section(s)</span>`);
+  if (sectionsMissing > 0)
+    headerBadges.push(`<span class="vd-badge bad">${sectionsMissing} missing section(s)</span>`);
   if (maxSev) headerBadges.push(`<span class="vd-badge sev-${maxSev}">${maxSev}</span>`);
   headerBadges.push(`<span class="vd-badge dim">${(page.pctDiff * 100).toFixed(2)}% pixels</span>`);
-  if (page.cachedAt) headerBadges.push(`<span class="vd-badge dim" title="reused from cross-run cache">cached</span>`);
+  if (page.cachedAt)
+    headerBadges.push(
+      `<span class="vd-badge dim" title="reused from cross-run cache">cached</span>`,
+    );
 
   const heatmapHtml = page.heatmapPath
-    ? renderFig(relPath(runDir, page.heatmapPath), "heatmap", "vd-fig-heatmap", "HEATMAP (pixelmatch)")
+    ? renderFig(
+        relPath(runDir, page.heatmapPath),
+        "heatmap",
+        "vd-fig-heatmap",
+        "HEATMAP (pixelmatch)",
+      )
     : `<figure class="vd-fig vd-fig-heatmap vd-fig-empty"><figcaption>HEATMAP</figcaption><div class="vd-empty-cell"><span class="icon">🗺️</span><span>heatmap not generated</span></div></figure>`;
 
   const diffsList = page.differences
@@ -855,14 +913,15 @@ function renderVisualDiffPage(page: VisualDiffPage, runDir: string, openFirst: b
     )
     .join("");
 
-  const sectionsHtml = page.sectionsOnlyInProd.length > 0
-    ? `<div class="vd-sections">
+  const sectionsHtml =
+    page.sectionsOnlyInProd.length > 0
+      ? `<div class="vd-sections">
         <div class="vd-sections-title">Sections found in prod DOM but MISSING in cand:</div>
         <ul class="vd-sections-list">
           ${page.sectionsOnlyInProd.map((s) => `<li><code>${esc(s)}</code></li>`).join("")}
         </ul>
       </div>`
-    : "";
+      : "";
 
   const errorHtml = page.llmError
     ? `<div class="vd-error">⚠️ LLM Vision returned an error: ${esc(page.llmError)}</div>`
@@ -912,9 +971,10 @@ function renderVisualDiffPage(page: VisualDiffPage, runDir: string, openFirst: b
       ${sectionsHtml}
       ${diffsList ? `<div class="vd-diffs-block"><div class="vd-diffs-title">Visual differences (LLM Vision):</div><ul class="vd-diffs-list">${diffsList}</ul></div>` : ""}
       ${errorHtml}
-      ${page.differences.length === 0 && page.sectionsOnlyInProd.length === 0 && !page.llmError
-        ? `<div class="vd-empty-msg">No relevant differences detected on this page. ✅</div>`
-        : ""
+      ${
+        page.differences.length === 0 && page.sectionsOnlyInProd.length === 0 && !page.llmError
+          ? `<div class="vd-empty-msg">No relevant differences detected on this page. ✅</div>`
+          : ""
       }
       ${deepDiveHtml}
       <div class="vd-meta">
@@ -994,7 +1054,12 @@ function renderSeoRobotsCard(robots: NonNullable<Run["seo"]>["robotsTxt"]): stri
 }
 
 function renderSeoSitemapCard(sitemap: NonNullable<Run["seo"]>["sitemap"]): string {
-  const deltaClass = sitemap.countPct < -0.05 ? "delta-bad" : sitemap.countPct > 0.05 ? "delta-good" : "delta-neutral";
+  const deltaClass =
+    sitemap.countPct < -0.05
+      ? "delta-bad"
+      : sitemap.countPct > 0.05
+        ? "delta-good"
+        : "delta-neutral";
   const deltaText = `${sitemap.countDelta > 0 ? "+" : ""}${sitemap.countDelta} (${(sitemap.countPct * 100).toFixed(1)}%)`;
   return `
   <div class="card">
@@ -1123,12 +1188,16 @@ interface SbsPair {
  * (PLP first, then a click into PDP); cart/checkout are recognized by
  * keyword.
  */
-function classifyPath(path: string, isFirstNonHome: boolean): "plp" | "pdp" | "cart" | "checkout" | "other" {
+function classifyPath(
+  path: string,
+  isFirstNonHome: boolean,
+): "plp" | "pdp" | "cart" | "checkout" | "other" {
   const lower = path.toLowerCase();
   if (/\/(checkout|finalizar|finalize)/.test(lower)) return "checkout";
   if (/\/(cart|carrinho|sacola|bag)/.test(lower)) return "cart";
   // PLP heuristics: typical category-listing URL conventions
-  if (/\/(c|category|collections|categoria|departamento)\//.test(lower) || /\/loja\//.test(lower)) return "plp";
+  if (/\/(c|category|collections|categoria|departamento)\//.test(lower) || /\/loja\//.test(lower))
+    return "plp";
   // PDP heuristics
   if (/\/(p|product|produto)\//.test(lower) || /\/dp\//.test(lower)) return "pdp";
   // Fallback ordering — first non-home page is usually PLP under purchase-journey
@@ -1138,7 +1207,9 @@ function classifyPath(path: string, isFirstNonHome: boolean): "plp" | "pdp" | "c
 function buildSideBySidePairs(run: Run): SbsPair[] {
   // Slot map keyed by the role (Home / PLP / PDP / Cart / Checkout) so each
   // role gets one button — first capture wins. Issue #77.
-  const slots: Partial<Record<"home" | "plp" | "pdp" | "cart" | "checkout", { prodPath?: string; candPath?: string }>> = {
+  const slots: Partial<
+    Record<"home" | "plp" | "pdp" | "cart" | "checkout", { prodPath?: string; candPath?: string }>
+  > = {
     home: { prodPath: "/", candPath: "/" },
   };
 
@@ -1152,7 +1223,9 @@ function buildSideBySidePairs(run: Run): SbsPair[] {
         const role = classifyPath(path, !seenNonHome);
         seenNonHome = true;
         if (role === "other") continue;
-        const slot = (slots[role] ??= {});
+        if (!slots[role]) slots[role] = {};
+        const slot = slots[role];
+        if (!slot) continue;
         const key = side === "prod" ? "prodPath" : "candPath";
         if (!slot[key]) slot[key] = path;
       }
@@ -1183,7 +1256,7 @@ function buildSideBySidePairs(run: Run): SbsPair[] {
       candUrl: new URL(candPath, run.candUrl).toString(),
       inferred: !bothCaptured,
       tooltip: !bothCaptured
-        ? `Path captured on one side only; the other iframe falls back to the same path. May 404 if the migrated site uses different routing.`
+        ? "Path captured on one side only; the other iframe falls back to the same path. May 404 if the migrated site uses different routing."
         : undefined,
     });
   }
@@ -1204,7 +1277,7 @@ function renderSideBySidePanel(run: Run): string {
       ${pairs
         .map(
           (p, i) =>
-            `<button data-sbs-btn="${i}"${p.inferred ? ' class="sbs-btn-inferred" title="' + esc(p.tooltip ?? "") + '"' : ""}>${esc(p.label)}${p.inferred ? " <span class=\"sbs-btn-flag\">?</span>" : ""}</button>`,
+            `<button data-sbs-btn="${i}"${p.inferred ? ` class="sbs-btn-inferred" title="${esc(p.tooltip ?? "")}"` : ""}>${esc(p.label)}${p.inferred ? ' <span class="sbs-btn-flag">?</span>' : ""}</button>`,
         )
         .join("")}
       <label class="label"><input type="checkbox" id="sbs-sync" checked/> Synchronized scroll</label>
@@ -1251,7 +1324,7 @@ interface NavEntry {
 const LLM_ONLY_TABS = new Set(["visualdiff", "prompt"]);
 
 function hasAnyLlmOutput(run: Run): boolean {
-  if (run.visualDiff && run.visualDiff.results.some((p) => p.llmCalled)) return true;
+  if (run.visualDiff?.results.some((p) => p.llmCalled)) return true;
   return false;
 }
 
@@ -1382,7 +1455,8 @@ export function renderHtmlReport(run: Run, runDir: string): string {
       ${run.baseline ? `<section class="panel" data-panel="diff">${tabHelp(TAB_HELP.diff)}${renderDiffPanel(run, runDir)}</section>` : ""}
       ${run.checks
         .map(
-          (c) => `<section class="panel detail-panel" data-detail="${esc(c.name)}">${renderCheckDetailPanel(c, run, runDir)}</section>`,
+          (c) =>
+            `<section class="panel detail-panel" data-detail="${esc(c.name)}">${renderCheckDetailPanel(c, run, runDir)}</section>`,
         )
         .join("")}
     </main>

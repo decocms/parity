@@ -152,7 +152,9 @@ export function diffRobots(prod: ParsedRobots | null, cand: ParsedRobots | null)
   out.sitemapDiff.onlyCand = setDiff(cand.sitemaps, prod.sitemaps);
 
   out.anyDivergence =
-    out.uaDiffs.length > 0 || out.sitemapDiff.onlyProd.length > 0 || out.sitemapDiff.onlyCand.length > 0;
+    out.uaDiffs.length > 0 ||
+    out.sitemapDiff.onlyProd.length > 0 ||
+    out.sitemapDiff.onlyCand.length > 0;
 
   return out;
 }

@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { Baseline, type Run } from "../types/schema.ts";
 
@@ -44,7 +51,9 @@ export function loadBaseline(name: string, dir: string = DEFAULT_DIR): Baseline 
   return Baseline.parse(raw);
 }
 
-export function listBaselines(dir: string = DEFAULT_DIR): { name: string; path: string; createdAt: string }[] {
+export function listBaselines(
+  dir: string = DEFAULT_DIR,
+): { name: string; path: string; createdAt: string }[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter((f) => f.endsWith(".json"))

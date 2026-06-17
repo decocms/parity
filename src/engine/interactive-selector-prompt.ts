@@ -15,8 +15,8 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { createInterface } from "node:readline";
 import { resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { isLlmAvailable } from "../llm/client.ts";
 
 let forceDisabled = false;
@@ -108,9 +108,7 @@ export async function promptForSelector(input: SelectorPromptInput): Promise<str
  * caller is responsible for emitting this somewhere visible (stderr, the
  * JSONL stream, etc.) and exiting.
  */
-export function buildStructuredError(
-  input: SelectorPromptInput,
-): SelectorPromptStructuredError {
+export function buildStructuredError(input: SelectorPromptInput): SelectorPromptStructuredError {
   return {
     kind: "missing-selector",
     selectorKey: input.selectorKey,

@@ -1,4 +1,4 @@
-import { sectionCommand, type SectionOptions } from "./section.ts";
+import { type SectionOptions, sectionCommand } from "./section.ts";
 
 export interface FixOptions {
   prod: string;

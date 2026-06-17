@@ -47,14 +47,9 @@ export function diffScreenshots(
   const candCropped = cropPng(cand, width, height);
   const diff = new PNG({ width, height });
 
-  const diffPixels = pixelmatch(
-    prodCropped.data,
-    candCropped.data,
-    diff.data,
-    width,
-    height,
-    { threshold: cfg.threshold },
-  );
+  const diffPixels = pixelmatch(prodCropped.data, candCropped.data, diff.data, width, height, {
+    threshold: cfg.threshold,
+  });
 
   writeFileSync(heatmapPath, PNG.sync.write(diff));
 

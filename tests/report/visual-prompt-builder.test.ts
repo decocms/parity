@@ -21,7 +21,12 @@ function makeVisualPage(over: Partial<VisualDiffPage> = {}): VisualDiffPage {
     sectionsOnlyInProd: ["Hero"],
     sectionsOnlyInCand: [],
     differences: [
-      { type: "missing-component", region: "hero", severity: "critical", description: "hero missing" },
+      {
+        type: "missing-component",
+        region: "hero",
+        severity: "critical",
+        description: "hero missing",
+      },
     ],
     llmCalled: true,
     ...over,
@@ -76,9 +81,7 @@ describe("buildVisualPrompt", () => {
     const md = buildVisualPrompt(
       makeRun({
         visualDiff: makeVisualDiff({
-          results: [
-            makeVisualPage({ verdict: "pass", differences: [], sectionsOnlyInProd: [] }),
-          ],
+          results: [makeVisualPage({ verdict: "pass", differences: [], sectionsOnlyInProd: [] })],
           pagesWithDiffs: 0,
           pagesPassed: 1,
         }),
@@ -105,7 +108,12 @@ describe("buildVisualPrompt", () => {
               pageKey: "/crit::mobile",
               pageLabel: "Crit · mobile",
               differences: [
-                { type: "missing-component", region: "hero", severity: "critical", description: "huge" },
+                {
+                  type: "missing-component",
+                  region: "hero",
+                  severity: "critical",
+                  description: "huge",
+                },
               ],
               sectionsOnlyInProd: [],
             }),
@@ -136,7 +144,12 @@ describe("buildVisualPrompt", () => {
               pageKey: "/critical::mobile",
               pageLabel: "CRIT-PAGE",
               differences: [
-                { type: "missing-component", region: "hero", severity: "critical", description: "x" },
+                {
+                  type: "missing-component",
+                  region: "hero",
+                  severity: "critical",
+                  description: "x",
+                },
               ],
               sectionsOnlyInProd: [],
             }),

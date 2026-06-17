@@ -74,12 +74,13 @@ export function bannerAspectRatio(ctx: CheckContext): CheckResult {
     if (issues.length > pageIssuesBefore) pagesWithIssues++;
   }
 
-  const status: CheckResult["status"] =
-    issues.some((i) => i.severity === "high" || i.severity === "critical")
-      ? "fail"
-      : issues.length > 0
-        ? "warn"
-        : "pass";
+  const status: CheckResult["status"] = issues.some(
+    (i) => i.severity === "high" || i.severity === "critical",
+  )
+    ? "fail"
+    : issues.length > 0
+      ? "warn"
+      : "pass";
 
   return {
     name: "banner-aspect-ratio",

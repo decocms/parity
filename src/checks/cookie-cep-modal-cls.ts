@@ -18,9 +18,7 @@ export function cookieCepModalCls(ctx: CheckContext): CheckResult {
   const issues: Issue[] = [];
 
   // Only pair captures at the same pathname+viewport (avoid noise).
-  const candByKey = new Map(
-    ctx.candPages.map((p) => [keyFor(p), p] as const),
-  );
+  const candByKey = new Map(ctx.candPages.map((p) => [keyFor(p), p] as const));
 
   for (const prod of ctx.prodPages) {
     const cand = candByKey.get(keyFor(prod));
@@ -73,12 +71,13 @@ export function cookieCepModalCls(ctx: CheckContext): CheckResult {
     }
   }
 
-  const status: CheckResult["status"] =
-    issues.some((i) => i.severity === "critical" || i.severity === "high")
-      ? "fail"
-      : issues.length > 0
-        ? "warn"
-        : "pass";
+  const status: CheckResult["status"] = issues.some(
+    (i) => i.severity === "critical" || i.severity === "high",
+  )
+    ? "fail"
+    : issues.length > 0
+      ? "warn"
+      : "pass";
 
   return {
     name: "cookie-cep-modal-cls",
@@ -101,7 +100,7 @@ function keyFor(p: PageCapture): string {
 function hasDialogLikeMarkup(page: PageCapture): boolean {
   const html = page.html.toLowerCase();
   return (
-    html.includes("role=\"dialog\"") ||
+    html.includes('role="dialog"') ||
     html.includes("role='dialog'") ||
     /class="[^"]*(cookie|cep|newsletter|consent)[^"]*"/i.test(page.html) ||
     /id="[^"]*(cookie|cep|newsletter|consent)[^"]*"/i.test(page.html)

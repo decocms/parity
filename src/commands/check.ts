@@ -11,13 +11,7 @@ import {
 import { launchBrowser, newContext } from "../engine/browser.ts";
 import { capturePage, installVitalsCollector } from "../engine/collect.ts";
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
-import type {
-  CheckResult,
-  Issue,
-  PageCapture,
-  Side,
-  Viewport,
-} from "../types/schema.ts";
+import type { CheckResult, Issue, PageCapture, Side, Viewport } from "../types/schema.ts";
 
 export interface CheckCommandOptions {
   name: string;
@@ -77,13 +71,14 @@ export async function checkCommand(opts: CheckCommandOptions): Promise<number> {
   // "false-confidence-producing"): `parity check x --viewports phone`
   // would have proceeded with no viewports → exit 2 with a generic
   // message, instead of the precise "phone is not a valid viewport".
-  const rawViewports = opts.viewports.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  const rawViewports = opts.viewports
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
   const invalid = rawViewports.filter((v) => !VALID_VIEWPORTS.has(v));
   if (invalid.length > 0) {
     console.error(
-      chalk.red(
-        `viewport(s) inválido(s): ${invalid.join(", ")} (use mobile, desktop ou tablet)`,
-      ),
+      chalk.red(`viewport(s) inválido(s): ${invalid.join(", ")} (use mobile, desktop ou tablet)`),
     );
     return 2;
   }
@@ -110,7 +105,9 @@ export async function checkCommand(opts: CheckCommandOptions): Promise<number> {
   const pagePath = (opts.page || "/").trim();
   if (/^[a-z][a-z0-9+.-]*:/i.test(pagePath)) {
     console.error(
-      chalk.red(`--page deve ser um caminho relativo (e.g. "/bota-tudao-2025"), recebido: ${pagePath}`),
+      chalk.red(
+        `--page deve ser um caminho relativo (e.g. "/bota-tudao-2025"), recebido: ${pagePath}`,
+      ),
     );
     return 2;
   }

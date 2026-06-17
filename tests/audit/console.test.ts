@@ -36,9 +36,7 @@ describe("auditConsole", () => {
   });
 
   it("warnings → low", () => {
-    const r = auditConsole("/::mobile", [
-      { type: "warning", text: "deprecated API usage" },
-    ]);
+    const r = auditConsole("/::mobile", [{ type: "warning", text: "deprecated API usage" }]);
     expect(r[0]?.severity).toBe("low");
   });
 

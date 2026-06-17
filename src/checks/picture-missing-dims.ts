@@ -96,7 +96,9 @@ export function scanForPictureMissingDims(page: PageCapture): string[] {
         if (hasReservedSpace($img)) return;
         const src = $img.attr("src") ?? $img.attr("data-src") ?? "(no src)";
         const cls = $img.attr("class");
-        const desc = cls ? `<img class="${cls.slice(0, 40)}"… src="${src.slice(0, 80)}">` : `<img src="${src.slice(0, 80)}">`;
+        const desc = cls
+          ? `<img class="${cls.slice(0, 40)}"… src="${src.slice(0, 80)}">`
+          : `<img src="${src.slice(0, 80)}">`;
         offenders.push(desc);
       });
   });

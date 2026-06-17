@@ -231,7 +231,10 @@ function buildContextBlock(input: VisualDiffInput): string {
     );
   }
   if (input.prodSections && input.prodSections.length > 0) {
-    lines.push("", `Total sections em prod: ${input.prodSections.length}; em cand: ${input.candSections?.length ?? 0}.`);
+    lines.push(
+      "",
+      `Total sections em prod: ${input.prodSections.length}; em cand: ${input.candSections?.length ?? 0}.`,
+    );
   }
   return lines.join("\n");
 }

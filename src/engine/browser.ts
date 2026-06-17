@@ -108,7 +108,7 @@ export async function newContext(browser: Browser, opts: ContextOptions): Promis
     bypassCSP: true,
     ignoreHTTPSErrors: true,
     extraHTTPHeaders: opts.noCache
-      ? { "Cache-Control": "no-cache", "Pragma": "no-cache" }
+      ? { "Cache-Control": "no-cache", Pragma: "no-cache" }
       : undefined,
   });
 

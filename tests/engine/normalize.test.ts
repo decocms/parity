@@ -70,7 +70,9 @@ describe("normalizeUrl", () => {
 
 describe("normalizeForCompare", () => {
   it("aplica timestamps + dynamic IDs + hashes + whitespace", () => {
-    const out = normalizeForCompare("  timestamp 2026-01-15T10:30:00Z id r-abc123 file app.a1b2c3d4.js  ");
+    const out = normalizeForCompare(
+      "  timestamp 2026-01-15T10:30:00Z id r-abc123 file app.a1b2c3d4.js  ",
+    );
     expect(out).toContain("__TS__");
     expect(out).toContain("__DYN__");
     expect(out).toContain("__HASH__");

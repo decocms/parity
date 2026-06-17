@@ -51,7 +51,9 @@ describe("consoleErrorsBaseline", () => {
           makePageCapture({
             url: "https://x.com/",
             side: "cand",
-            console: [{ type: "error", text: "Hydration mismatch: server rendered X, client rendered Y" }],
+            console: [
+              { type: "error", text: "Hydration mismatch: server rendered X, client rendered Y" },
+            ],
           }),
         ],
       }),

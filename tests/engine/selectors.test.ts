@@ -10,7 +10,9 @@ describe("selectorsFor", () => {
   });
 
   it("user rc override comes first", () => {
-    const out = selectorsFor("categoryLink", { rc: { cep: "", selectors: { categoryLink: "#cat" }, skipSteps: [] } });
+    const out = selectorsFor("categoryLink", {
+      rc: { cep: "", selectors: { categoryLink: "#cat" }, skipSteps: [] },
+    });
     expect(out[0]).toBe("#cat");
   });
 
@@ -20,8 +22,20 @@ describe("selectorsFor", () => {
       platforms: {
         vtex: {
           categoryLink: [
-            { selector: ".learned-a", confirmedHosts: [], successRate: 0.9, totalAttempts: 10, lastValidated: "2026-01-01" },
-            { selector: ".learned-b", confirmedHosts: [], successRate: 0.5, totalAttempts: 10, lastValidated: "2026-01-01" },
+            {
+              selector: ".learned-a",
+              confirmedHosts: [],
+              successRate: 0.9,
+              totalAttempts: 10,
+              lastValidated: "2026-01-01",
+            },
+            {
+              selector: ".learned-b",
+              confirmedHosts: [],
+              successRate: 0.5,
+              totalAttempts: 10,
+              lastValidated: "2026-01-01",
+            },
           ],
         },
       },
@@ -39,7 +53,11 @@ describe("selectorsFor", () => {
   });
 
   it("backwards-compat: accepts ParityRc directly as second arg", () => {
-    const out = selectorsFor("buyButton", { cep: "", selectors: { buyButton: "#buy" }, skipSteps: [] });
+    const out = selectorsFor("buyButton", {
+      cep: "",
+      selectors: { buyButton: "#buy" },
+      skipSteps: [],
+    });
     expect(out[0]).toBe("#buy");
   });
 

@@ -5,19 +5,14 @@ import ora from "ora";
 import type { Browser } from "playwright";
 import { launchBrowser, newContext, stopTracing, userAgentFor } from "../engine/browser.ts";
 import { installVitalsCollector } from "../engine/collect.ts";
-import { runFlow, type StepProgressEvent } from "../engine/flows.ts";
+import { type StepProgressEvent, runFlow } from "../engine/flows.ts";
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
-import { detectPlatform, type Platform } from "../learned/platform.ts";
+import { type Platform, detectPlatform } from "../learned/platform.ts";
 import { promoteStepsFromFlow } from "../learned/promote.ts";
 import { loadLearned, saveLearned } from "../learned/repo.ts";
 import { isLlmAvailable, providerLabel } from "../llm/client.ts";
 import { discoverSelectorsFromUrl } from "../llm/discover-selectors.ts";
-import {
-  createRunDir,
-  newRunId,
-  writeRunReportHtml,
-  writeRunReportJson,
-} from "../storage/fs.ts";
+import { createRunDir, newRunId, writeRunReportHtml, writeRunReportJson } from "../storage/fs.ts";
 import type {
   FlowCapture,
   FlowName,
@@ -164,7 +159,9 @@ export async function journeyCommand(opts: JourneyOptions): Promise<number> {
     const sideTag = side === "prod" ? chalk.cyan("prod") : chalk.magenta("cand");
     const prefix = `  ${chalk.dim(`[${viewport}/`)}${sideTag}${chalk.dim("]")}`;
     if (event.phase === "start") {
-      console.log(`${prefix} ${chalk.dim(`${event.index}/${event.total}`)} ▶ ${chalk.bold(stepLabel(event.name))}`);
+      console.log(
+        `${prefix} ${chalk.dim(`${event.index}/${event.total}`)} ▶ ${chalk.bold(stepLabel(event.name))}`,
+      );
     } else {
       const glyph =
         event.status === "ok"
@@ -219,7 +216,8 @@ export async function journeyCommand(opts: JourneyOptions): Promise<number> {
     spinner?.succeed("Browser pronto");
 
     for (const viewport of viewports) {
-      if (!opts.json) console.log(chalk.bold(`\n  ── ${viewport} ─────────────────────────────────────────────`));
+      if (!opts.json)
+        console.log(chalk.bold(`\n  ── ${viewport} ─────────────────────────────────────────────`));
       // Run prod and cand in PARALLEL (cuts wall time ~2x)
       const [prodCap, candCap] = await Promise.all([
         runOneSide(browser, viewport, "prod"),
@@ -260,12 +258,15 @@ export async function journeyCommand(opts: JourneyOptions): Promise<number> {
           if (totalPromoted > 0) bits.push(`${totalPromoted} promovido(s) via LLM`);
           if (totalRecorded > 0) bits.push(`${totalRecorded} reforçado(s)`);
           if (totalDeprecated > 0) bits.push(`${totalDeprecated} depreciado(s)`);
-          if (bits.length > 0) console.log(chalk.dim(`  learned-selectors atualizado: ${bits.join(", ")}`));
+          if (bits.length > 0)
+            console.log(chalk.dim(`  learned-selectors atualizado: ${bits.join(", ")}`));
         }
       } catch (err) {
         // Don't fail the journey for a learned-selectors write hiccup.
         if (!opts.json) {
-          console.warn(chalk.yellow(`  warn: failed to persist learned-selectors: ${(err as Error).message}`));
+          console.warn(
+            chalk.yellow(`  warn: failed to persist learned-selectors: ${(err as Error).message}`),
+          );
         }
       }
     }
@@ -515,12 +516,11 @@ function buildJourneyHtml(
   failures: JourneyFailure[],
 ): string {
   const failed = failures.length;
-  const headerStatus =
-    failures.some((f) => f.critical)
-      ? '<span class="status fail">FAIL</span>'
-      : failed > 0
-        ? '<span class="status warn">WARN</span>'
-        : '<span class="status pass">PASS</span>';
+  const headerStatus = failures.some((f) => f.critical)
+    ? '<span class="status fail">FAIL</span>'
+    : failed > 0
+      ? '<span class="status warn">WARN</span>'
+      : '<span class="status pass">PASS</span>';
   void flowCaptures;
 
   const viewports = [...new Set(rows.map((r) => r.viewport))];
@@ -648,7 +648,11 @@ function renderStepCard(r: StepRow): string {
   </div>`;
 }
 
-function renderShot(side: "prod" | "cand", path: string | undefined, when: "before" | "after" = "after"): string {
+function renderShot(
+  side: "prod" | "cand",
+  path: string | undefined,
+  when: "before" | "after" = "after",
+): string {
   if (!path) {
     return `<div class="shot missing"><span class="label" style="position:static;background:var(--muted)">${side}</span>&nbsp;sem screenshot</div>`;
   }
@@ -667,7 +671,10 @@ function renderSummaryBlock(rows: StepRow[], failures: JourneyFailure[]): string
     byVp.set(r.viewport, cur);
   }
   const rowsHtml = [...byVp]
-    .map(([vp, { passed, total }]) => `<div class="row"><span>${vp}</span><span>${passed}/${total} steps em cand</span></div>`)
+    .map(
+      ([vp, { passed, total }]) =>
+        `<div class="row"><span>${vp}</span><span>${passed}/${total} steps em cand</span></div>`,
+    )
     .join("");
   const failList = failures
     .map(

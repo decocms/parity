@@ -56,7 +56,8 @@ export function cacheDecision(entry: NetworkEntry): CacheDecision {
   return "unknown";
 }
 
-const HASH_IN_FILENAME = /\.[a-f0-9]{8,32}\.(js|css|woff2?|png|jpe?g|webp|avif|svg|gif|mp4|webm)(\?|$)/i;
+const HASH_IN_FILENAME =
+  /\.[a-f0-9]{8,32}\.(js|css|woff2?|png|jpe?g|webp|avif|svg|gif|mp4|webm)(\?|$)/i;
 const HASH_AT_END = /-[a-f0-9]{8,32}\.(js|css|woff2?|png|jpe?g|webp|avif|svg|gif|mp4|webm)(\?|$)/i;
 
 export function isStaticAssetWithHash(url: string): boolean {
@@ -130,7 +131,13 @@ export function classifyResource(entry: NetworkEntry, baseHost: string | null): 
   if (rt === "font" || /\.woff2?(\?|$)/i.test(url)) return "font";
   if (rt === "stylesheet" || /\.css(\?|$)/i.test(url)) return "static-asset";
   if (rt === "script") return "static-asset";
-  if (rt === "xhr" || rt === "fetch" || /\/api\//.test(url) || /\/_loader\//.test(url) || /\/deco\/render/.test(url))
+  if (
+    rt === "xhr" ||
+    rt === "fetch" ||
+    /\/api\//.test(url) ||
+    /\/_loader\//.test(url) ||
+    /\/deco\/render/.test(url)
+  )
     return "api";
   return "other";
 }
@@ -198,7 +205,13 @@ const EMPTY_CATEGORY: ResourceCategory[] = [
 
 export function buildCacheReport(entries: NetworkEntry[], baseUrl: string): CacheReport {
   const all = classifyAll(entries, baseUrl);
-  const byDecision: Record<CacheDecision, number> = { hit: 0, miss: 0, bypass: 0, cacheable: 0, unknown: 0 };
+  const byDecision: Record<CacheDecision, number> = {
+    hit: 0,
+    miss: 0,
+    bypass: 0,
+    cacheable: 0,
+    unknown: 0,
+  };
   const byCategoryAcc: Record<ResourceCategory, { count: number; bytes: number; hits: number }> = {
     document: { count: 0, bytes: 0, hits: 0 },
     "static-asset": { count: 0, bytes: 0, hits: 0 },

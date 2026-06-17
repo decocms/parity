@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  Issue,
-  Run,
-  SeoSummary,
-  VisualDiffSummary,
-} from "../../src/types/schema.ts";
+import { Issue, Run, SeoSummary, VisualDiffSummary } from "../../src/types/schema.ts";
 
 describe("Issue schema", () => {
   it("accepts a minimal issue", () => {
@@ -107,7 +102,13 @@ describe("SeoSummary schema", () => {
           issueCount: 0,
         },
       ],
-      robotsTxt: { prodPresent: true, candPresent: true, prodSitemaps: [], candSitemaps: [], uaDiffCount: 0 },
+      robotsTxt: {
+        prodPresent: true,
+        candPresent: true,
+        prodSitemaps: [],
+        candSitemaps: [],
+        uaDiffCount: 0,
+      },
       sitemap: {
         prodPresent: true,
         candPresent: true,
@@ -172,7 +173,18 @@ describe("Run schema", () => {
         viewports: [],
         cep: "",
         durationMs: 0,
-        verdict: { status: "pass", score: 0, critical: 0, high: 0, medium: 0, low: 0, checksRun: 0, checksPassed: 0, checksFailed: 0, checksSkipped: 0 },
+        verdict: {
+          status: "pass",
+          score: 0,
+          critical: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+          checksRun: 0,
+          checksPassed: 0,
+          checksFailed: 0,
+          checksSkipped: 0,
+        },
         topIssues: [],
         issues: [],
         checks: [],
@@ -194,7 +206,18 @@ describe("Run schema", () => {
       viewports: [],
       cep: "",
       durationMs: 0,
-      verdict: { status: "pass", score: 0, critical: 0, high: 0, medium: 0, low: 0, checksRun: 0, checksPassed: 0, checksFailed: 0, checksSkipped: 0 },
+      verdict: {
+        status: "pass",
+        score: 0,
+        critical: 0,
+        high: 0,
+        medium: 0,
+        low: 0,
+        checksRun: 0,
+        checksPassed: 0,
+        checksFailed: 0,
+        checksSkipped: 0,
+      },
       topIssues: [],
       issues: [],
       checks: [],

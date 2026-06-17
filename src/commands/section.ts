@@ -4,11 +4,14 @@ import { resolve } from "node:path";
 import chalk from "chalk";
 import * as cheerio from "cheerio";
 import * as diff from "diff";
-import prettier from "prettier";
 import type { BrowserContext, Page } from "playwright";
-import { stabilizeCarousels } from "../engine/carousel-stabilizer.ts";
+import prettier from "prettier";
+import { analyzeHeatmapRegions } from "../diff/heatmap-regions.ts";
+import { assembleSectionDiffBundle } from "../diff/section-bundle.ts";
+import { diffScreenshots } from "../diff/visual.ts";
 import { launchBrowser, newContext } from "../engine/browser.ts";
 import { cropPngBuffer } from "../engine/capture-utils.ts";
+import { stabilizeCarousels } from "../engine/carousel-stabilizer.ts";
 import { scrollFullPage, waitForSkeletonsToResolve } from "../engine/collect.ts";
 import {
   type ComputedStylesNotFound,
@@ -16,16 +19,13 @@ import {
   SECTION_STYLE_KEYS,
   readComputedStyles,
 } from "../engine/computed-styles.ts";
-import { traceLoadedPage } from "./css-trace.ts";
 import { type CssSource, resolveFromTrace } from "../engine/css-source-resolver.ts";
-import { diffScreenshots } from "../diff/visual.ts";
-import { analyzeHeatmapRegions } from "../diff/heatmap-regions.ts";
-import { assembleSectionDiffBundle } from "../diff/section-bundle.ts";
 import {
   invokeUnderstandingSummary,
   isUnderstandingAvailable,
 } from "../llm/section-understanding.ts";
 import type { Viewport } from "../types/schema.ts";
+import { traceLoadedPage } from "./css-trace.ts";
 
 export interface SectionOptions {
   prod: string;
@@ -300,12 +300,10 @@ async function gatherSide(
     }
 
     if (opts.wantScreenshot) {
-      await captureSectionScreenshot(page, opts.selector, opts.screenshotPath).then(
-        (err) => {
-          if (err) result.screenshotError = err;
-          else result.screenshotTaken = true;
-        },
-      );
+      await captureSectionScreenshot(page, opts.selector, opts.screenshotPath).then((err) => {
+        if (err) result.screenshotError = err;
+        else result.screenshotTaken = true;
+      });
     }
   } finally {
     await page.close().catch(() => undefined);
@@ -489,7 +487,11 @@ function printStylesDiff(prod: SideData, cand: SideData): void {
   }
   const prodRect = prod.styles.rect;
   const candRect = cand.styles.rect;
-  if (prodRect && candRect && (prodRect.width !== candRect.width || prodRect.height !== candRect.height)) {
+  if (
+    prodRect &&
+    candRect &&
+    (prodRect.width !== candRect.width || prodRect.height !== candRect.height)
+  ) {
     rows.unshift({
       key: "(boundingRect)",
       prod: `${prodRect.width}×${prodRect.height} @ ${prodRect.x},${prodRect.y}`,

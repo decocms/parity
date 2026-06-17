@@ -1,4 +1,4 @@
-import { buildCacheReport, type CacheReport } from "../diff/cache.ts";
+import { type CacheReport, buildCacheReport } from "../diff/cache.ts";
 import type { CheckResult, Issue, NetworkEntry } from "../types/schema.ts";
 import type { CheckContext } from "./index.ts";
 
@@ -38,7 +38,8 @@ export function cacheCoverage(ctx: CheckContext): CheckResult {
   const report = buildCacheReport(candEntries, baseUrl);
   const prodEntries: NetworkEntry[] = [];
   for (const p of ctx.prodPages) prodEntries.push(...p.network);
-  const prodReport = prodEntries.length > 0 ? buildCacheReport(prodEntries, ctx.prodPages[0]?.url ?? "") : undefined;
+  const prodReport =
+    prodEntries.length > 0 ? buildCacheReport(prodEntries, ctx.prodPages[0]?.url ?? "") : undefined;
 
   // Top-level summary issue (informational unless many opportunities)
   const oppCount = report.opportunities.length;
@@ -82,12 +83,11 @@ export function cacheCoverage(ctx: CheckContext): CheckResult {
     });
   }
 
-  const status: CheckResult["status"] =
-    issues.some((i) => i.severity === "high")
-      ? "fail"
-      : issues.length > 0
-        ? "warn"
-        : "pass";
+  const status: CheckResult["status"] = issues.some((i) => i.severity === "high")
+    ? "fail"
+    : issues.length > 0
+      ? "warn"
+      : "pass";
 
   return {
     name: "cache-coverage",

@@ -3,7 +3,8 @@ import { cookieCepModalCls } from "../../src/checks/cookie-cep-modal-cls.ts";
 import { makeContext } from "../helpers/make-context.ts";
 import { makePageCapture } from "../helpers/make-page-capture.ts";
 
-const MODAL_HTML = '<html><body><div role="dialog" class="cookie-banner">Accept cookies</div></body></html>';
+const MODAL_HTML =
+  '<html><body><div role="dialog" class="cookie-banner">Accept cookies</div></body></html>';
 
 describe("cookieCepModalCls", () => {
   it("passa quando ambos têm CLS baixo", () => {

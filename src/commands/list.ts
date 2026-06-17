@@ -12,7 +12,11 @@ export function listCommand(output: string): number {
       const run = loadRun(output, r.id);
       const v = run.verdict;
       const status =
-        v.status === "pass" ? chalk.green(v.status) : v.status === "warn" ? chalk.yellow(v.status) : chalk.red(v.status);
+        v.status === "pass"
+          ? chalk.green(v.status)
+          : v.status === "warn"
+            ? chalk.yellow(v.status)
+            : chalk.red(v.status);
       console.log(
         `  ${chalk.bold(r.id)}  ${status}  score=${v.score}  critical=${v.critical} high=${v.high}  ${chalk.dim(r.timestamp)}`,
       );

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { networkSummaryDelta } from "../../src/checks/network-summary.ts";
+import type { NetworkEntry } from "../../src/types/schema.ts";
 import { makeContext } from "../helpers/make-context.ts";
 import { makePageCapture } from "../helpers/make-page-capture.ts";
-import type { NetworkEntry } from "../../src/types/schema.ts";
 
 function net(over: Partial<NetworkEntry> = {}): NetworkEntry {
   return {
@@ -39,8 +39,12 @@ describe("networkSummaryDelta", () => {
     const candRequests: NetworkEntry[] = [net({ url: "https://x.com/c.js" })];
     const r = networkSummaryDelta(
       makeContext({
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", network: prodRequests })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", network: candRequests })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", network: prodRequests }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", network: candRequests }),
+        ],
       }),
     );
     expect(r.status).toBe("warn");
@@ -83,8 +87,12 @@ describe("networkSummaryDelta", () => {
     const candRequests: NetworkEntry[] = [net({ url: "https://x.com/main.js" })];
     const r = networkSummaryDelta(
       makeContext({
-        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", network: prodRequests })],
-        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", network: candRequests })],
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod", network: prodRequests }),
+        ],
+        candPages: [
+          makePageCapture({ url: "https://x.com/", side: "cand", network: candRequests }),
+        ],
         ignore: { ignoreRequestPatterns: ["**/pixel/*"] },
       }),
     );

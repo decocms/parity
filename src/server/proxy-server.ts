@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { extname, join, normalize, resolve, sep } from "node:path";
 
@@ -98,7 +98,11 @@ export async function startProxyServer(
   };
 }
 
-async function handleRequest(req: IncomingMessage, res: ServerResponse, runDir: string): Promise<void> {
+async function handleRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  runDir: string,
+): Promise<void> {
   const reqUrl = new URL(req.url ?? "/", "http://placeholder");
   const path = decodeURIComponent(reqUrl.pathname);
 
@@ -146,7 +150,9 @@ function serveReportHtml(res: ServerResponse, runDir: string): void {
   // Inject the proxy hint so the report's JS knows it's being served (not file://).
   // The SBS controller picks it up and routes iframe src through /proxy.
   const inject = `<script>window.__parity_proxy = "/proxy?url=";</script>`;
-  const out = html.includes("</head>") ? html.replace("</head>", `${inject}</head>`) : `${inject}${html}`;
+  const out = html.includes("</head>")
+    ? html.replace("</head>", `${inject}</head>`)
+    : `${inject}${html}`;
   res.statusCode = 200;
   res.setHeader("content-type", "text/html; charset=utf-8");
   res.setHeader("cache-control", "no-store");

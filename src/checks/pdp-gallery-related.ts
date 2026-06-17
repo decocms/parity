@@ -49,9 +49,7 @@ export function pdpGalleryRelated(ctx: CheckContext): CheckResult {
   const sourcePages = single ? (candPdps.length > 0 ? candPdps : prodPdps) : candPdps;
 
   for (const page of sourcePages) {
-    const pair = single
-      ? undefined
-      : prodPdps.find((p) => p.viewport === page.viewport);
+    const pair = single ? undefined : prodPdps.find((p) => p.viewport === page.viewport);
 
     const hasGalleryMain = matchAny(page.html, GALLERY_MAIN_PATTERNS);
     const hasThumb = matchAny(page.html, GALLERY_THUMB_PATTERNS);
@@ -126,12 +124,11 @@ export function pdpGalleryRelated(ctx: CheckContext): CheckResult {
     }
   }
 
-  const status: CheckResult["status"] =
-    issues.some((i) => i.severity === "critical")
-      ? "fail"
-      : issues.length > 0
-        ? "warn"
-        : "pass";
+  const status: CheckResult["status"] = issues.some((i) => i.severity === "critical")
+    ? "fail"
+    : issues.length > 0
+      ? "warn"
+      : "pass";
 
   return {
     name: "pdp-gallery-related",

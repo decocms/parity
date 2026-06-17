@@ -161,12 +161,8 @@ export const StepCapture = z.object({
   cartItemValidation: z
     .object({
       action: z.enum(["increment", "decrement", "remove", "apply-coupon"]),
-      before: z
-        .object({ qty: z.number().optional(), price: z.string().optional() })
-        .optional(),
-      after: z
-        .object({ qty: z.number().optional(), price: z.string().optional() })
-        .optional(),
+      before: z.object({ qty: z.number().optional(), price: z.string().optional() }).optional(),
+      after: z.object({ qty: z.number().optional(), price: z.string().optional() }).optional(),
       succeeded: z.boolean(),
     })
     .optional(),

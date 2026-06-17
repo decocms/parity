@@ -75,9 +75,7 @@ export async function invokeUnderstandingSummary(
   try {
     markdown = readFileSync(input.markdownPath, "utf8");
   } catch (err) {
-    console.error(
-      `[section-understanding] failed to read markdown: ${(err as Error).message}`,
-    );
+    console.error(`[section-understanding] failed to read markdown: ${(err as Error).message}`);
     return null;
   }
 
@@ -88,9 +86,7 @@ export async function invokeUnderstandingSummary(
       const buf = readFileSync(p);
       images.push({ base64: buf.toString("base64"), mediaType: "image/png" });
     } catch (err) {
-      console.error(
-        `[section-understanding] skipping image ${p}: ${(err as Error).message}`,
-      );
+      console.error(`[section-understanding] skipping image ${p}: ${(err as Error).message}`);
     }
   }
 

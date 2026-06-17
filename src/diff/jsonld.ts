@@ -93,7 +93,11 @@ export function diffProductSchema(
   for (const path of PRODUCT_REQUIRED_PATHS) {
     const prodValue = getPath(p, path);
     const candValue = getPath(c, path);
-    if (prodValue !== undefined && prodValue !== null && (candValue === undefined || candValue === null)) {
+    if (
+      prodValue !== undefined &&
+      prodValue !== null &&
+      (candValue === undefined || candValue === null)
+    ) {
       out.missingFieldsInCand.push(path);
       continue;
     }

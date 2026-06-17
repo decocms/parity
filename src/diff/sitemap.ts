@@ -16,7 +16,10 @@ export async function fetchSitemap(
 ): Promise<{ url: string; xml: string } | null> {
   const candidates = hintUrl
     ? [hintUrl]
-    : [new URL("/sitemap.xml", baseUrl).toString(), new URL("/sitemap_index.xml", baseUrl).toString()];
+    : [
+        new URL("/sitemap.xml", baseUrl).toString(),
+        new URL("/sitemap_index.xml", baseUrl).toString(),
+      ];
 
   for (const url of candidates) {
     const controller = new AbortController();

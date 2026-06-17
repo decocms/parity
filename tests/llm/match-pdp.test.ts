@@ -48,13 +48,19 @@ describe("matchPdps", () => {
   afterEach(() => delete process.env.ANTHROPIC_API_KEY);
 
   it("returns 'same' when SKUs match exactly (no LLM call)", async () => {
-    const v = await matchPdps({ name: "A", price: 100, sku: "X-1" }, { name: "B", price: 200, sku: "X-1" });
+    const v = await matchPdps(
+      { name: "A", price: 100, sku: "X-1" },
+      { name: "B", price: 200, sku: "X-1" },
+    );
     expect(v).toBe("same");
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
   it("returns 'different' when one name is missing", async () => {
-    const v = await matchPdps({ name: "A", price: 100, sku: null }, { name: null, price: null, sku: null });
+    const v = await matchPdps(
+      { name: "A", price: 100, sku: null },
+      { name: null, price: null, sku: null },
+    );
     expect(v).toBe("different");
   });
 

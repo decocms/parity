@@ -61,9 +61,7 @@ describe("resolveFromTrace", () => {
   });
 
   it("propriedade inheritable vinda de ancestral é considerada", () => {
-    const t = trace(
-      rule("theme.css", "body", [{ name: "color", value: "rgb(51,51,51)" }], 1),
-    );
+    const t = trace(rule("theme.css", "body", [{ name: "color", value: "rgb(51,51,51)" }], 1));
     const r = resolveFromTrace(t, ["color"]);
     expect(r.get("color")?.value).toBe("rgb(51,51,51)");
     expect(r.get("color")?.inheritedFromDistance).toBe(1);

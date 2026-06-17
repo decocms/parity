@@ -1,4 +1,4 @@
-import { classify, type ConsoleClass } from "../diff/console.ts";
+import { type ConsoleClass, classify } from "../diff/console.ts";
 import type { ConsoleEntry, Issue, Severity } from "../types/schema.ts";
 
 /**

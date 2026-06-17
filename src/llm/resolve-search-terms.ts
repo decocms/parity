@@ -79,10 +79,7 @@ REGRAS:
 Responda SEMPRE via tool_use suggest_search_term.
 `.trim();
 
-async function suggestTermViaLlm(
-  url: string,
-  html: string,
-): Promise<string | null> {
+async function suggestTermViaLlm(url: string, html: string): Promise<string | null> {
   if (!isLlmAvailable()) return null;
   const compacted = compactHtmlForSelectors(html, 18_000);
   const input = await callTool<{ term?: string }>({

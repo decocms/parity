@@ -3,7 +3,12 @@ import { metaSeoParity } from "../../src/checks/meta-seo.ts";
 import { makeContext } from "../helpers/make-context.ts";
 import { makePageCapture } from "../helpers/make-page-capture.ts";
 
-const buildHtml = (title: string, desc: string, canonical: string, og: Record<string, string> = {}) => `
+const buildHtml = (
+  title: string,
+  desc: string,
+  canonical: string,
+  og: Record<string, string> = {},
+) => `
 <!doctype html>
 <html><head>
   <title>${title}</title>
@@ -30,10 +35,18 @@ describe("metaSeoParity", () => {
     const r = metaSeoParity(
       makeContext({
         prodPages: [
-          makePageCapture({ url: "https://x.com/", side: "prod", html: buildHtml("Loja X", "d", "https://x.com/") }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "prod",
+            html: buildHtml("Loja X", "d", "https://x.com/"),
+          }),
         ],
         candPages: [
-          makePageCapture({ url: "https://x.com/", side: "cand", html: buildHtml("WRONG", "d", "https://x.com/") }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "cand",
+            html: buildHtml("WRONG", "d", "https://x.com/"),
+          }),
         ],
       }),
     );
@@ -46,10 +59,18 @@ describe("metaSeoParity", () => {
     const r = metaSeoParity(
       makeContext({
         prodPages: [
-          makePageCapture({ url: "https://x.com/", side: "prod", html: buildHtml("X", "d", "https://x.com/") }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "prod",
+            html: buildHtml("X", "d", "https://x.com/"),
+          }),
         ],
         candPages: [
-          makePageCapture({ url: "https://x.com/", side: "cand", html: buildHtml("X", "d", "https://other.com/") }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "cand",
+            html: buildHtml("X", "d", "https://other.com/"),
+          }),
         ],
       }),
     );
@@ -60,10 +81,18 @@ describe("metaSeoParity", () => {
     const r = metaSeoParity(
       makeContext({
         prodPages: [
-          makePageCapture({ url: "https://x.com/", side: "prod", html: buildHtml("X", "DESC PROD", "https://x.com/") }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "prod",
+            html: buildHtml("X", "DESC PROD", "https://x.com/"),
+          }),
         ],
         candPages: [
-          makePageCapture({ url: "https://x.com/", side: "cand", html: buildHtml("X", "DESC CAND", "https://x.com/") }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "cand",
+            html: buildHtml("X", "DESC CAND", "https://x.com/"),
+          }),
         ],
       }),
     );
@@ -96,10 +125,18 @@ describe("metaSeoParity", () => {
     const r = metaSeoParity(
       makeContext({
         prodPages: [
-          makePageCapture({ url: "https://x.com/", side: "prod", html: buildHtml("OLD", "d", "https://x.com/") }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "prod",
+            html: buildHtml("OLD", "d", "https://x.com/"),
+          }),
         ],
         candPages: [
-          makePageCapture({ url: "https://x.com/", side: "cand", html: buildHtml("NEW", "d", "https://x.com/") }),
+          makePageCapture({
+            url: "https://x.com/",
+            side: "cand",
+            html: buildHtml("NEW", "d", "https://x.com/"),
+          }),
         ],
         ignore: { ignoreMetaKeys: ["title"] },
       }),

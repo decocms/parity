@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { lazySectionPresence } from "../../src/checks/lazy-sections.ts";
+import type { NetworkEntry } from "../../src/types/schema.ts";
 import { makeContext } from "../helpers/make-context.ts";
 import { makePageCapture } from "../helpers/make-page-capture.ts";
-import type { NetworkEntry } from "../../src/types/schema.ts";
 
 function net(over: Partial<NetworkEntry> = {}): NetworkEntry {
   return {

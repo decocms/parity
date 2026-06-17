@@ -66,7 +66,7 @@ export function auditSeo(pageKey: string, html: string): Issue[] {
       category: "seo",
       page: pageKey,
       check: "audit-seo",
-      summary: "<meta name=\"description\"> ausente",
+      summary: '<meta name="description"> ausente',
       details:
         "Sem description o Google gera um snippet automático do conteúdo, geralmente menos " +
         "atrativo. Ação: adicionar description única (50-160 chars) por rota.",
@@ -99,7 +99,7 @@ export function auditSeo(pageKey: string, html: string): Issue[] {
       category: "seo",
       page: pageKey,
       check: "audit-seo",
-      summary: "<link rel=\"canonical\"> ausente",
+      summary: '<link rel="canonical"> ausente',
       details:
         "Sem canonical, o Google decide sozinho qual URL é canônica (especialmente " +
         "problemático em sites com filtros / query strings). Ação: emitir " +
@@ -110,11 +110,7 @@ export function auditSeo(pageKey: string, html: string): Issue[] {
   // 4. Robots noindex (red flag — usually accidental)
   // Some URL patterns SHOULD be noindex by best practice — search empty
   // states, account areas, checkout, 404s, etc. Don't flag those.
-  if (
-    meta.robots &&
-    /noindex/i.test(meta.robots) &&
-    !isPageWhereNoindexIsExpected(pageKey)
-  ) {
+  if (meta.robots && /noindex/i.test(meta.robots) && !isPageWhereNoindexIsExpected(pageKey)) {
     out.push({
       id: `audit:seo:noindex:${pageKey}`,
       severity: "high",
@@ -138,7 +134,7 @@ export function auditSeo(pageKey: string, html: string): Issue[] {
       category: "seo",
       page: pageKey,
       check: "audit-seo",
-      summary: "<meta property=\"og:image\"> ausente",
+      summary: '<meta property="og:image"> ausente',
       details:
         "Sem og:image, links compartilhados no WhatsApp/Twitter/Facebook aparecem sem " +
         "preview visual — CTR cai drasticamente. Ação: adicionar imagem 1200×630 com " +

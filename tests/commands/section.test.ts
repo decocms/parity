@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hashSelector, parseViewport, type SideData, verdict } from "../../src/commands/section.ts";
+import { type SideData, hashSelector, parseViewport, verdict } from "../../src/commands/section.ts";
 import { SECTION_STYLE_KEYS } from "../../src/engine/computed-styles.ts";
 
 describe("parseViewport (section)", () => {

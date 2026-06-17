@@ -70,8 +70,22 @@ describe("httpStatusParity", () => {
   it("emits evidence screenshots on divergence", () => {
     const r = httpStatusParity(
       makeContext({
-        prodPages: [makePageCapture({ url: "https://x.com/", status: 200, side: "prod", screenshotPath: "/p.png" })],
-        candPages: [makePageCapture({ url: "https://x.com/", status: 500, side: "cand", screenshotPath: "/c.png" })],
+        prodPages: [
+          makePageCapture({
+            url: "https://x.com/",
+            status: 200,
+            side: "prod",
+            screenshotPath: "/p.png",
+          }),
+        ],
+        candPages: [
+          makePageCapture({
+            url: "https://x.com/",
+            status: 500,
+            side: "cand",
+            screenshotPath: "/c.png",
+          }),
+        ],
       }),
     );
     expect(r.issues[0]?.evidence?.map((e) => e.path)).toEqual(["/p.png", "/c.png"]);

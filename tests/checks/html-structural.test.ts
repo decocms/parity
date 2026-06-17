@@ -60,9 +60,7 @@ describe("htmlStructuralDiff", () => {
   });
 
   it("emits both count and deco issues when both fail", () => {
-    const prodHtml = baseHtml(
-      `<div data-section="Hero"></div>${"<a href='/a'>a</a>".repeat(20)}`,
-    );
+    const prodHtml = baseHtml(`<div data-section="Hero"></div>${"<a href='/a'>a</a>".repeat(20)}`);
     const candHtml = baseHtml("");
     const r = htmlStructuralDiff(
       makeContext({

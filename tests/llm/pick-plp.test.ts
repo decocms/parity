@@ -52,9 +52,7 @@ describe("pickCategoryLink", () => {
   it("falls back to LLM when multiple strong candidates exist", async () => {
     process.env.ANTHROPIC_API_KEY = "sk-test";
     mockCreate.mockResolvedValue({
-      content: [
-        { type: "tool_use", name: "pick_category", input: { index: 1, reasoning: "" } },
-      ],
+      content: [{ type: "tool_use", name: "pick_category", input: { index: 1, reasoning: "" } }],
     });
     const cands = [
       { text: "Lar e Decoração", href: "/c/lar" },

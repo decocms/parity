@@ -129,7 +129,10 @@ export function parseFeatureOverrides(spec: string): {
   const overrides: Partial<Record<Feature, string>> = {};
   const errors: string[] = [];
   const known = new Set<string>(ALL_FEATURES);
-  for (const pair of spec.split(",").map((s) => s.trim()).filter(Boolean)) {
+  for (const pair of spec
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)) {
     const eq = pair.indexOf("=");
     if (eq < 0) {
       errors.push(`malformed override "${pair}" (expected feature=model)`);

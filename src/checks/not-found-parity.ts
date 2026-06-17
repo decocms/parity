@@ -31,7 +31,8 @@ export function notFoundParity(ctx: CheckContext): CheckResult {
       status: "skipped",
       severity: "high",
       durationMs: Date.now() - start,
-      summary: "Nenhuma captura de URL de teste 404 — flow não capturou /this-page-... (configurar rc.notFound.testUrl)",
+      summary:
+        "Nenhuma captura de URL de teste 404 — flow não capturou /this-page-... (configurar rc.notFound.testUrl)",
       issues: [],
     };
   }
@@ -100,12 +101,11 @@ export function notFoundParity(ctx: CheckContext): CheckResult {
     }
   }
 
-  const status: CheckResult["status"] =
-    issues.some((i) => i.severity === "critical")
-      ? "fail"
-      : issues.length > 0
-        ? "warn"
-        : "pass";
+  const status: CheckResult["status"] = issues.some((i) => i.severity === "critical")
+    ? "fail"
+    : issues.length > 0
+      ? "warn"
+      : "pass";
 
   return {
     name: "not-found-parity",

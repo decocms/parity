@@ -10,10 +10,7 @@ export function findFlow(
 }
 
 /** Look up a step by name inside a flow capture (or undefined). */
-export function findStep(
-  flow: FlowCapture | undefined,
-  stepName: string,
-): StepCapture | undefined {
+export function findStep(flow: FlowCapture | undefined, stepName: string): StepCapture | undefined {
   return flow?.steps?.find((s) => s.name === stepName);
 }
 
@@ -21,16 +18,15 @@ export function findStep(
  * Are we in single-site mode? Set when only one side has any captures —
  * used by `parity e2e` to make checks run in absolute mode (no comparison).
  */
-export function isSingleSite(
-  prodFlows: FlowCapture[],
-  candFlows: FlowCapture[],
-): boolean {
+export function isSingleSite(prodFlows: FlowCapture[], candFlows: FlowCapture[]): boolean {
   return prodFlows.length === 0 || candFlows.length === 0;
 }
 
 export function buildPairEvidence(prod?: StepCapture, cand?: StepCapture) {
   const out: { kind: "screenshot"; path: string; label?: string }[] = [];
-  if (prod?.screenshotPath) out.push({ kind: "screenshot", path: prod.screenshotPath, label: "prod" });
-  if (cand?.screenshotPath) out.push({ kind: "screenshot", path: cand.screenshotPath, label: "cand" });
+  if (prod?.screenshotPath)
+    out.push({ kind: "screenshot", path: prod.screenshotPath, label: "prod" });
+  if (cand?.screenshotPath)
+    out.push({ kind: "screenshot", path: cand.screenshotPath, label: "cand" });
   return out;
 }

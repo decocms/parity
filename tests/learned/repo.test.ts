@@ -2,6 +2,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  type LearnedSelectors,
   getLearnedSelectors,
   loadLearned,
   promoteFromLlm,
@@ -9,7 +10,6 @@ import {
   recordSuccess,
   saveLearned,
   statsFromLib,
-  type LearnedSelectors,
 } from "../../src/learned/repo.ts";
 import { makeTmpDir } from "../helpers/tmp-dir.ts";
 

@@ -1,6 +1,6 @@
 import type { BrowserContext, Locator, Page } from "playwright";
-import type { LearnedSelectors } from "../learned/repo.ts";
 import type { Platform } from "../learned/platform.ts";
+import type { LearnedSelectors } from "../learned/repo.ts";
 import { pickCategoryLink } from "../llm/pick-plp.ts";
 import { suggestRecovery } from "../llm/recover-step.ts";
 import { resolveSearchTerms } from "../llm/resolve-search-terms.ts";
@@ -13,8 +13,8 @@ import type {
   StepCapture,
   Viewport,
 } from "../types/schema.ts";
-import { capturePage } from "./collect.ts";
 import { stabilizeCarousels } from "./carousel-stabilizer.ts";
+import { capturePage } from "./collect.ts";
 import { selectorsFor } from "./selectors.ts";
 import type { SelectorKey } from "./selectors.ts";
 
@@ -44,7 +44,15 @@ async function screenshotStable(
 
 export type StepProgressEvent =
   | { phase: "start"; name: string; index: number; total: number }
-  | { phase: "end"; name: string; index: number; total: number; status: StepCapture["status"]; durationMs: number; note?: string };
+  | {
+      phase: "end";
+      name: string;
+      index: number;
+      total: number;
+      status: StepCapture["status"];
+      durationMs: number;
+      note?: string;
+    };
 
 export interface FlowContext {
   baseUrl: string;
@@ -403,7 +411,8 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       screenshotPath: screenshotPath(ctx, "pj-1-home"),
     });
     pages.push(homeCap);
-    const step1Status: StepCapture["status"] = homeCap.status >= 200 && homeCap.status < 400 ? "ok" : "failed";
+    const step1Status: StepCapture["status"] =
+      homeCap.status >= 200 && homeCap.status < 400 ? "ok" : "failed";
     steps.push({
       step: 1,
       name: "visit-home",
@@ -415,7 +424,8 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       screenshotPath: homeCap.screenshotPath,
     });
     reportEnd(1, "visit-home", step1Status, homeCap.durationMs);
-    steps[steps.length - 1]!.actionDescription = `Navegou pra home \`${ctx.baseUrl}\` (HTTP ${homeCap.status})`;
+    steps[steps.length - 1]!.actionDescription =
+      `Navegou pra home \`${ctx.baseUrl}\` (HTTP ${homeCap.status})`;
     if (homeCap.status >= 400 || homeCap.status === 0) {
       return { pages, steps };
     }
@@ -438,7 +448,8 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       screenshotPath: screenshotPath(ctx, "pj-2-plp"),
     });
     pages.push(plpCap);
-    const step2Status: StepCapture["status"] = plpCap.status >= 200 && plpCap.status < 400 ? "ok" : "failed";
+    const step2Status: StepCapture["status"] =
+      plpCap.status >= 200 && plpCap.status < 400 ? "ok" : "failed";
     steps.push({
       step: 2,
       name: "navigate-plp",
@@ -453,7 +464,8 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     });
     reportEnd(2, "navigate-plp", step2Status, Date.now() - t2);
     // Annotate step with what we did
-    steps[steps.length - 1]!.actionDescription = `Navegou pra categoria \`${plpHit.url}\` (via \`${plpHit.selector}\`)`;
+    steps[steps.length - 1]!.actionDescription =
+      `Navegou pra categoria \`${plpHit.url}\` (via \`${plpHit.selector}\`)`;
     steps[steps.length - 1]!.beforeUrl = ctx.baseUrl;
 
     // Step 3: enter PDP
@@ -467,7 +479,8 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       if (html) {
         const suggestion = await suggestRecovery({
           stepName: "enter-pdp",
-          intendedAction: "Encontrar um link <a> que leve para a página de detalhes (PDP) de algum produto listado na PLP atual",
+          intendedAction:
+            "Encontrar um link <a> que leve para a página de detalhes (PDP) de algum produto listado na PLP atual",
           html,
           alreadyTried: selFor(ctx, "productCard"),
         });
@@ -502,7 +515,8 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       screenshotPath: screenshotPath(ctx, "pj-3-pdp"),
     });
     pages.push(pdpCap);
-    const step3Status: StepCapture["status"] = pdpCap.status >= 200 && pdpCap.status < 400 ? "ok" : "failed";
+    const step3Status: StepCapture["status"] =
+      pdpCap.status >= 200 && pdpCap.status < 400 ? "ok" : "failed";
     steps.push({
       step: 3,
       name: "enter-pdp",
@@ -517,7 +531,8 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       recoveredByLlm: pdpRecoveredByLlm || undefined,
     });
     reportEnd(3, "enter-pdp", step3Status, Date.now() - t3);
-    steps[steps.length - 1]!.actionDescription = `Abriu PDP \`${pdpHit.url}\` (via \`${pdpHit.selector}\`${pdpRecoveredByLlm ? " — recovery LLM" : ""})`;
+    steps[steps.length - 1]!.actionDescription =
+      `Abriu PDP \`${pdpHit.url}\` (via \`${pdpHit.selector}\`${pdpRecoveredByLlm ? " — recovery LLM" : ""})`;
     steps[steps.length - 1]!.beforeUrl = plpHit.url;
 
     // Pull the product title while we're still on the PDP — used later
@@ -525,7 +540,10 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     // drawer and on the checkout page. Validates the cart actually has
     // what we added (not a phantom item, not empty due to lost session).
     const expectedProductTitle = await extractProductTitle(page);
-    dlog(ctx, `step 3 enter-pdp: extracted product title → ${expectedProductTitle ? `"${expectedProductTitle.slice(0, 60)}"` : "null"}`);
+    dlog(
+      ctx,
+      `step 3 enter-pdp: extracted product title → ${expectedProductTitle ? `"${expectedProductTitle.slice(0, 60)}"` : "null"}`,
+    );
     if (expectedProductTitle) {
       steps[steps.length - 1]!.detail = {
         ...(steps[steps.length - 1]!.detail ?? {}),
@@ -545,7 +563,11 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     // LLM fallback ONLY when the page explicitly demands a variant choice
     // and the heuristic found nothing. This avoids burning budget on
     // single-SKU PDPs where the heuristic correctly skips.
-    if (variantResult.actions.length === 0 && variantResult.variantRequired && budget.remaining > 0) {
+    if (
+      variantResult.actions.length === 0 &&
+      variantResult.variantRequired &&
+      budget.remaining > 0
+    ) {
       variantLlmAction = await attemptStepAction({
         page,
         ctx,
@@ -563,9 +585,10 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       const llmDesc = variantLlmAction?.performed
         ? `Recovery LLM: ${variantLlmAction.action} em \`${variantLlmAction.selector}\``
         : null;
-      const desc = variantResult.actions.length > 0
-        ? variantResult.actions.join("; ")
-        : llmDesc ?? "(variante selecionada)";
+      const desc =
+        variantResult.actions.length > 0
+          ? variantResult.actions.join("; ")
+          : (llmDesc ?? "(variante selecionada)");
       steps.push({
         step: 4,
         name: "select-variant",
@@ -577,7 +600,8 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         screenshotPath: sp4,
         screenshotBeforePath: spBefore4,
         beforeUrl: beforeUrl4,
-        actionDescription: llmDesc && variantResult.actions.length > 0 ? `${desc}; ${llmDesc}` : desc,
+        actionDescription:
+          llmDesc && variantResult.actions.length > 0 ? `${desc}; ${llmDesc}` : desc,
         selectorKey: variantLlmAction?.performed
           ? "quantityIncrement"
           : variantResult.primarySelectorKey,
@@ -649,7 +673,9 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       });
       reportEnd(5, "shipping-calc-pdp", step5Status, Date.now() - t5);
     } else {
-      steps.push(makeSkipStep(5, "shipping-calc-pdp", ctx, "no CEP input on PDP (recovery exhausted)"));
+      steps.push(
+        makeSkipStep(5, "shipping-calc-pdp", ctx, "no CEP input on PDP (recovery exhausted)"),
+      );
       reportEnd(5, "shipping-calc-pdp", "skipped", 0, "no CEP input on PDP");
     }
 
@@ -658,7 +684,13 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     let buyHit = await firstVisibleLocator(page, selFor(ctx, "buyButton"));
     let buyRecovered = false;
     if (!buyHit && budget.remaining > 0) {
-      const recovery = await attemptRecovery(page, ctx, "add-to-cart", "Clicar no botão de comprar/adicionar ao carrinho", selFor(ctx, "buyButton"));
+      const recovery = await attemptRecovery(
+        page,
+        ctx,
+        "add-to-cart",
+        "Clicar no botão de comprar/adicionar ao carrinho",
+        selFor(ctx, "buyButton"),
+      );
       if (recovery) {
         buyHit = recovery;
         buyRecovered = true;
@@ -736,9 +768,19 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       usedSelector: buyHit.selector,
       recoveredByLlm: buyRecovered || undefined,
       note: validation.status === "ok" ? undefined : validation.note,
-      detail: { signal: validation.signal, errorText: validation.errorText, variantRetry: variantRetryNote },
+      detail: {
+        signal: validation.signal,
+        errorText: validation.errorText,
+        variantRetry: variantRetryNote,
+      },
     });
-    reportEnd(6, "add-to-cart", validation.status, Date.now() - t6, validation.status === "ok" ? undefined : validation.note);
+    reportEnd(
+      6,
+      "add-to-cart",
+      validation.status,
+      Date.now() - t6,
+      validation.status === "ok" ? undefined : validation.note,
+    );
     // If add-to-cart silently failed, downstream steps will be meaningless;
     // bail early so we don't report cascading "minicart not found" noise.
     if (validation.status === "failed") {
@@ -756,7 +798,13 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     let miniHit = await firstVisibleLocator(page, selFor(ctx, "minicartTrigger"));
     let miniRecovered = false;
     if (!miniHit && budget.remaining > 0) {
-      const recovery = await attemptRecovery(page, ctx, "open-minicart", "Abrir o minicart/drawer do carrinho", selFor(ctx, "minicartTrigger"));
+      const recovery = await attemptRecovery(
+        page,
+        ctx,
+        "open-minicart",
+        "Abrir o minicart/drawer do carrinho",
+        selFor(ctx, "minicartTrigger"),
+      );
       if (recovery) {
         miniHit = recovery;
         miniRecovered = true;
@@ -814,7 +862,10 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         observedTitles: v.observedTitles.slice(0, 8),
         reason: reasonText,
       };
-      dlog(ctx, `step 7 open-minicart: validation → found=${v.found} (${v.method})${reasonText ? ` — ${reasonText.slice(0, 80)}` : ""}`);
+      dlog(
+        ctx,
+        `step 7 open-minicart: validation → found=${v.found} (${v.method})${reasonText ? ` — ${reasonText.slice(0, 80)}` : ""}`,
+      );
     }
     const sp7 = screenshotPath(ctx, "pj-7-minicart");
     await screenshotStable(page, { path: sp7, fullPage: false });
@@ -881,8 +932,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     // instead of producing a misleading `failed`. The check
     // `cart-reveal-mode-divergence` is independent and still runs.
     if (isProdCartEmptyQuirk) {
-      const quirkNote =
-        "cart-empty-prod-quirk: skipped (depende do cart que prod não persistiu)";
+      const quirkNote = "cart-empty-prod-quirk: skipped (depende do cart que prod não persistiu)";
       reportStart(8, "shipping-calc-cart");
       steps.push(makeSkipStep(8, "shipping-calc-cart", ctx, quirkNote));
       reportEnd(8, "shipping-calc-cart", "skipped", 0, quirkNote);
@@ -944,7 +994,9 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       });
       reportEnd(8, "shipping-calc-cart", step8Status, Date.now() - t8);
     } else {
-      steps.push(makeSkipStep(8, "shipping-calc-cart", ctx, "no CEP input in cart (recovery exhausted)"));
+      steps.push(
+        makeSkipStep(8, "shipping-calc-cart", ctx, "no CEP input in cart (recovery exhausted)"),
+      );
       reportEnd(8, "shipping-calc-cart", "skipped", 0, "no CEP input in cart");
     }
 
@@ -966,7 +1018,9 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
           found: v.found,
           method: v.method,
           observedTitles: v.observedTitles.slice(0, 8),
-          reason: v.found ? undefined : `expected title not found among ${v.observedTitles.length} observed on checkout`,
+          reason: v.found
+            ? undefined
+            : `expected title not found among ${v.observedTitles.length} observed on checkout`,
         };
       }
       const sp9early = screenshotPath(ctx, "pj-9-checkout-reached");
@@ -998,7 +1052,13 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     let checkoutHit = await firstVisibleLocator(page, selFor(ctx, "checkoutButton"));
     let checkoutRecovered = false;
     if (!checkoutHit && budget.remaining > 0) {
-      const recovery = await attemptRecovery(page, ctx, "go-checkout", "Clicar no botão 'Finalizar compra' / 'Ir para o checkout' / 'Finalizar'", selFor(ctx, "checkoutButton"));
+      const recovery = await attemptRecovery(
+        page,
+        ctx,
+        "go-checkout",
+        "Clicar no botão 'Finalizar compra' / 'Ir para o checkout' / 'Finalizar'",
+        selFor(ctx, "checkoutButton"),
+      );
       if (recovery) {
         checkoutHit = recovery;
         checkoutRecovered = true;
@@ -1006,7 +1066,9 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       }
     }
     if (!checkoutHit) {
-      steps.push(makeSkipStep(9, "go-checkout", ctx, "no checkout button found (recovery exhausted)"));
+      steps.push(
+        makeSkipStep(9, "go-checkout", ctx, "no checkout button found (recovery exhausted)"),
+      );
       reportEnd(9, "go-checkout", "skipped", 0, "no checkout button found");
       return { pages, steps };
     }
@@ -1033,7 +1095,10 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
       // selector before giving up. Some sites have a non-checkout button that
       // happens to match generic text selectors.
       if (budget.remaining <= 0) break;
-      dlog(ctx, `step 9 go-checkout: click on \`${usedSelector}\` didn't navigate (attempt ${attempt}). URL still ${page.url()}. Asking LLM for another selector.`);
+      dlog(
+        ctx,
+        `step 9 go-checkout: click on \`${usedSelector}\` didn't navigate (attempt ${attempt}). URL still ${page.url()}. Asking LLM for another selector.`,
+      );
       const triedList = Array.from(triedSelectors);
       const recovery = await attemptRecovery(
         page,
@@ -1060,13 +1125,18 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
         found: v.found,
         method: v.method,
         observedTitles: v.observedTitles.slice(0, 8),
-        reason: v.found ? undefined : `expected title not found among ${v.observedTitles.length} observed on checkout`,
+        reason: v.found
+          ? undefined
+          : `expected title not found among ${v.observedTitles.length} observed on checkout`,
       };
     }
     const sp9 = screenshotPath(ctx, "pj-9-checkout-reached");
     await screenshotStable(page, { path: sp9, fullPage: false });
-    const step9Status: StepCapture["status"] =
-      !reachedCheckout ? "failed" : step9Validation && !step9Validation.found ? "failed" : "ok";
+    const step9Status: StepCapture["status"] = !reachedCheckout
+      ? "failed"
+      : step9Validation && !step9Validation.found
+        ? "failed"
+        : "ok";
     steps.push({
       step: 9,
       name: "go-checkout",
@@ -1098,12 +1168,7 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
   }
 }
 
-function makeSkipStep(
-  step: number,
-  name: string,
-  ctx: FlowContext,
-  note: string,
-): StepCapture {
+function makeSkipStep(step: number, name: string, ctx: FlowContext, note: string): StepCapture {
   return {
     step,
     name,
@@ -1229,7 +1294,11 @@ export async function collectCandidateLinks(
 async function fillCep(page: Page, selector: string, cep: string): Promise<boolean> {
   try {
     await page.locator(selector).first().fill(cep, { timeout: 3_000 });
-    await page.locator(selector).first().press("Enter").catch(() => undefined);
+    await page
+      .locator(selector)
+      .first()
+      .press("Enter")
+      .catch(() => undefined);
     await page.waitForTimeout(3_000);
     return true;
   } catch {
@@ -1285,7 +1354,9 @@ async function selectVariant(page: Page, ctx: FlowContext): Promise<VariantSelec
           if (await plus.isDisabled().catch(() => false)) continue;
           await plus.click({ timeout: 2_000 }).catch(() => undefined);
           await page.waitForTimeout(400);
-          actions.push(`Incrementou quantidade da variante \`${rowSel}\`[${i}]${rowText ? ` (${rowText.slice(0, 40)})` : ""} via \`${incSel}\``);
+          actions.push(
+            `Incrementou quantidade da variante \`${rowSel}\`[${i}]${rowText ? ` (${rowText.slice(0, 40)})` : ""} via \`${incSel}\``,
+          );
           trackPrimary("variantRow", rowSel);
           break rowLoop;
         }
@@ -1302,7 +1373,9 @@ async function selectVariant(page: Page, ctx: FlowContext): Promise<VariantSelec
       const sizeText = (await sizeHit.locator.innerText().catch(() => "")).slice(0, 20).trim();
       await sizeHit.locator.click({ timeout: 2_000 }).catch(() => undefined);
       await page.waitForTimeout(400);
-      actions.push(`Selecionou tamanho${sizeText ? ` '${sizeText}'` : ""} (\`${sizeHit.selector}\`)`);
+      actions.push(
+        `Selecionou tamanho${sizeText ? ` '${sizeText}'` : ""} (\`${sizeHit.selector}\`)`,
+      );
       trackPrimary("sizeSwatch", sizeHit.selector);
     }
   }
@@ -1311,10 +1384,13 @@ async function selectVariant(page: Page, ctx: FlowContext): Promise<VariantSelec
   const colorHit = await firstVisibleLocator(page, selFor(ctx, "colorSwatch"));
   if (colorHit && !(await colorHit.locator.isDisabled().catch(() => false))) {
     const colorText = (await colorHit.locator.innerText().catch(() => "")).slice(0, 20).trim();
-    const colorLabel = colorText || (await colorHit.locator.getAttribute("aria-label").catch(() => null)) || "";
+    const colorLabel =
+      colorText || (await colorHit.locator.getAttribute("aria-label").catch(() => null)) || "";
     await colorHit.locator.click({ timeout: 2_000 }).catch(() => undefined);
     await page.waitForTimeout(400);
-    actions.push(`Selecionou cor${colorLabel ? ` '${colorLabel}'` : ""} (\`${colorHit.selector}\`)`);
+    actions.push(
+      `Selecionou cor${colorLabel ? ` '${colorLabel}'` : ""} (\`${colorHit.selector}\`)`,
+    );
     trackPrimary("colorSwatch", colorHit.selector);
   }
 
@@ -1333,7 +1409,10 @@ async function selectVariant(page: Page, ctx: FlowContext): Promise<VariantSelec
 
   let variantRequired = false;
   try {
-    const bodyText = await page.locator("body").innerText({ timeout: 1_000 }).catch(() => "");
+    const bodyText = await page
+      .locator("body")
+      .innerText({ timeout: 1_000 })
+      .catch(() => "");
     variantRequired = VARIANT_REQUIRED_TEXT_PATTERNS.some((re) => re.test(bodyText));
   } catch {
     /* ignore */
@@ -1390,7 +1469,12 @@ async function findAndIncrementZeroQtyInput(
   const scopeRoots: Array<{ root: Locator | null; tag: "main" | "page" }> = [];
   for (const sel of scopeSelectors) {
     const cand = page.locator(sel).first();
-    if (await cand.count().then((n) => n > 0).catch(() => false)) {
+    if (
+      await cand
+        .count()
+        .then((n) => n > 0)
+        .catch(() => false)
+    ) {
       scopeRoots.push({ root: cand, tag: "main" });
       break;
     }
@@ -1564,7 +1648,10 @@ async function validateAddToCart(
     // unrelated "out of stock" or "selecione" copy already exists in
     // descriptions/related products.
     try {
-      const bodyText = await page.locator("body").innerText({ timeout: 500 }).catch(() => "");
+      const bodyText = await page
+        .locator("body")
+        .innerText({ timeout: 500 })
+        .catch(() => "");
       for (const re of ADD_TO_CART_SUCCESS_PATTERNS) {
         const match = bodyText.match(re);
         if (match) {
@@ -1862,9 +1949,17 @@ async function extractProductTitle(page: Page): Promise<string | null> {
   for (const sel of visibleSelectors) {
     try {
       const el = page.locator(sel).first();
-      const visible = await withCap(el.isVisible({ timeout: 250 }).catch(() => false), 400, false);
+      const visible = await withCap(
+        el.isVisible({ timeout: 250 }).catch(() => false),
+        400,
+        false,
+      );
       if (!visible) continue;
-      const text = await withCap(el.innerText().catch(() => ""), 500, "");
+      const text = await withCap(
+        el.innerText().catch(() => ""),
+        500,
+        "",
+      );
       const clean = text.trim();
       if (clean.length > 3 && !looksGeneric(clean)) return clean;
     } catch {
@@ -1881,7 +1976,9 @@ async function extractProductTitle(page: Page): Promise<string | null> {
             const data = JSON.parse((s as HTMLScriptElement).textContent ?? "{}");
             const items = Array.isArray(data) ? data : [data];
             for (const item of items) {
-              const product = item?.["@graph"]?.find?.((x: { "@type"?: string }) => x?.["@type"] === "Product") ?? item;
+              const product =
+                item?.["@graph"]?.find?.((x: { "@type"?: string }) => x?.["@type"] === "Product") ??
+                item;
               if (product?.["@type"] === "Product" && typeof product.name === "string") {
                 return product.name as string;
               }
@@ -1903,7 +2000,11 @@ async function extractProductTitle(page: Page): Promise<string | null> {
   }
   try {
     const og = await withCap(
-      page.locator("meta[property='og:title']").first().getAttribute("content").catch(() => null),
+      page
+        .locator("meta[property='og:title']")
+        .first()
+        .getAttribute("content")
+        .catch(() => null),
       500,
       null,
     );
@@ -1911,7 +2012,11 @@ async function extractProductTitle(page: Page): Promise<string | null> {
   } catch {
     /* fall through */
   }
-  const docTitle = await withCap(page.title().catch(() => ""), 500, "");
+  const docTitle = await withCap(
+    page.title().catch(() => ""),
+    500,
+    "",
+  );
   if (docTitle.trim().length > 3 && !looksGeneric(docTitle)) return docTitle.trim();
   return null;
 }
@@ -2013,7 +2118,11 @@ async function detectCartRevealMode(
                   return;
                 }
               }
-              if (m.type === "attributes" && m.target instanceof Element && selectorMatch(m.target)) {
+              if (
+                m.type === "attributes" &&
+                m.target instanceof Element &&
+                selectorMatch(m.target)
+              ) {
                 observer.disconnect();
                 resolve(true);
                 return;
@@ -2075,7 +2184,14 @@ async function validateCartContainsTitleQuick(
     try {
       const scopeLoc = page.locator(scope);
       if ((await withCap(scopeLoc.count(), 800, 0)) === 0) continue;
-      const text = await withCap(scopeLoc.first().innerText().catch(() => ""), 800, "");
+      const text = await withCap(
+        scopeLoc
+          .first()
+          .innerText()
+          .catch(() => ""),
+        800,
+        "",
+      );
       if (text && titlesMatch(text, expectedTitle)) return scope;
     } catch {
       /* try next */
@@ -2099,11 +2215,26 @@ async function dismissOverlays(page: Page, ctx: FlowContext): Promise<void> {
   for (const sel of overlaySelectors) {
     try {
       const overlay = page.locator(sel).first();
-      if (!(await withCap(overlay.isVisible({ timeout: 200 }).catch(() => false), 400, false))) continue;
-      const closer = overlay.locator(
-        "button[aria-label*='close' i], button[aria-label*='fechar' i], button[class*='close' i], [data-close], [aria-label='Close']",
-      ).first();
-      if (await withCap(closer.isVisible({ timeout: 200 }).catch(() => false), 400, false)) {
+      if (
+        !(await withCap(
+          overlay.isVisible({ timeout: 200 }).catch(() => false),
+          400,
+          false,
+        ))
+      )
+        continue;
+      const closer = overlay
+        .locator(
+          "button[aria-label*='close' i], button[aria-label*='fechar' i], button[class*='close' i], [data-close], [aria-label='Close']",
+        )
+        .first();
+      if (
+        await withCap(
+          closer.isVisible({ timeout: 200 }).catch(() => false),
+          400,
+          false,
+        )
+      ) {
         await closer.click({ timeout: 1_500 }).catch(() => undefined);
         dismissedAny = true;
         continue;
@@ -2129,7 +2260,9 @@ async function waitForCartHydration(page: Page): Promise<void> {
       )
       .catch(() => undefined),
     page
-      .waitForSelector(".cart-items, [class*='cart-item' i], #cart-fixed .item, [data-cart-item]", { timeout: 8_000 })
+      .waitForSelector(".cart-items, [class*='cart-item' i], #cart-fixed .item, [data-cart-item]", {
+        timeout: 8_000,
+      })
       .catch(() => undefined),
   ]);
   await page.waitForTimeout(800);
@@ -2140,7 +2273,11 @@ async function openMinicart(
   trigger: { locator: Locator; selector: string },
   ctx: FlowContext,
   expectedProductTitle: string | null,
-): Promise<{ method: NonNullable<StepCapture["cartOpenMethod"]>; url: string; visibleMarker: string | null }> {
+): Promise<{
+  method: NonNullable<StepCapture["cartOpenMethod"]>;
+  url: string;
+  visibleMarker: string | null;
+}> {
   const beforeUrl = page.url();
   await dismissOverlays(page, ctx);
   await page.waitForTimeout(800);
@@ -2154,7 +2291,10 @@ async function openMinicart(
 
   // Strategy 1: hover FIRST on desktop (Miess prod opens drawer on hover).
   if (ctx.viewport === "desktop") {
-    dlog(ctx, `  openMinicart: trying hover first on ${trigger.selector}${triggerHref ? ` (href=${triggerHref})` : ""}`);
+    dlog(
+      ctx,
+      `  openMinicart: trying hover first on ${trigger.selector}${triggerHref ? ` (href=${triggerHref})` : ""}`,
+    );
     await trigger.locator.hover({ timeout: 3_000 }).catch(() => undefined);
     await page.waitForTimeout(1_500);
     const hoverOpened = await isCartRevealed(page, expectedProductTitle);
@@ -2168,7 +2308,9 @@ async function openMinicart(
   if (ctx.viewport === "mobile") {
     dlog(ctx, `  openMinicart: trying tap (mobile) on ${trigger.selector}`);
     await Promise.all([
-      page.waitForURL((url) => url.toString() !== beforeUrl, { timeout: 4_000 }).catch(() => undefined),
+      page
+        .waitForURL((url) => url.toString() !== beforeUrl, { timeout: 4_000 })
+        .catch(() => undefined),
       trigger.locator.tap({ timeout: 4_000 }).catch(() => undefined),
     ]);
     if (page.url() !== beforeUrl) {
@@ -2186,9 +2328,14 @@ async function openMinicart(
   }
 
   // Strategy 2b: force click + URL race.
-  dlog(ctx, `  openMinicart: trying force-click on ${trigger.selector}${triggerHref ? ` (href=${triggerHref})` : ""}`);
+  dlog(
+    ctx,
+    `  openMinicart: trying force-click on ${trigger.selector}${triggerHref ? ` (href=${triggerHref})` : ""}`,
+  );
   await Promise.all([
-    page.waitForURL((url) => url.toString() !== beforeUrl, { timeout: 4_000 }).catch(() => undefined),
+    page
+      .waitForURL((url) => url.toString() !== beforeUrl, { timeout: 4_000 })
+      .catch(() => undefined),
     trigger.locator.click({ force: true, timeout: 4_000 }).catch(() => undefined),
   ]);
   const afterClickUrl = page.url();
@@ -2225,7 +2372,10 @@ async function openMinicart(
       }
     })();
     if (targetUrl) {
-      dlog(ctx, `  openMinicart: all interactive strategies failed; navigating directly to ${targetUrl}`);
+      dlog(
+        ctx,
+        `  openMinicart: all interactive strategies failed; navigating directly to ${targetUrl}`,
+      );
       await page.goto(targetUrl, { waitUntil: "load", timeout: 15_000 }).catch(() => undefined);
       await waitForCartHydration(page);
       if (page.url() !== beforeUrl) {
@@ -2310,9 +2460,17 @@ async function validateCartContainsTitle(
         const limit = Math.min(count, 10);
         for (let i = 0; i < limit; i++) {
           const el = loc.nth(i);
-          const visible = await withCap(el.isVisible({ timeout: 200 }).catch(() => false), 400, false);
+          const visible = await withCap(
+            el.isVisible({ timeout: 200 }).catch(() => false),
+            400,
+            false,
+          );
           if (!visible) continue;
-          const text = await withCap(el.innerText().catch(() => ""), 500, "");
+          const text = await withCap(
+            el.innerText().catch(() => ""),
+            500,
+            "",
+          );
           const clean = text.trim().slice(0, 200);
           if (clean.length > 2) observed.push(clean);
         }
@@ -2351,8 +2509,18 @@ async function detectEmptyCartBanner(page: Page): Promise<string | null> {
   for (const sel of bannerSelectors) {
     try {
       const loc = page.locator(sel).first();
-      if (await withCap(loc.isVisible({ timeout: 300 }).catch(() => false), 500, false)) {
-        const text = await withCap(loc.innerText().catch(() => ""), 500, "");
+      if (
+        await withCap(
+          loc.isVisible({ timeout: 300 }).catch(() => false),
+          500,
+          false,
+        )
+      ) {
+        const text = await withCap(
+          loc.innerText().catch(() => ""),
+          500,
+          "",
+        );
         if (text.trim()) return text.trim().slice(0, 120);
       }
     } catch {
@@ -2410,7 +2578,14 @@ const PRODUCT_CARD_HEURISTIC_SELECTORS: string[] = [
  */
 async function countProductCards(page: Page): Promise<number> {
   for (const sel of PRODUCT_CARD_HEURISTIC_SELECTORS) {
-    const count = await withCap(page.locator(sel).count().catch(() => 0), 1_500, 0);
+    const count = await withCap(
+      page
+        .locator(sel)
+        .count()
+        .catch(() => 0),
+      1_500,
+      0,
+    );
     if (count > 0) return count;
   }
   return 0;
@@ -2433,7 +2608,10 @@ async function detectNoResultsEmptyState(
   term?: string,
 ): Promise<boolean> {
   const innerText = await withCap(
-    page.locator("body").innerText().catch(() => ""),
+    page
+      .locator("body")
+      .innerText()
+      .catch(() => ""),
     2_000,
     "",
   );
@@ -2545,7 +2723,11 @@ async function flowSearch(ctx: FlowContext): Promise<FlowResult> {
       if (triggerHit) {
         usedTrigger = triggerHit.selector;
         triggerRecoveredByLlm = triggerHit.recoveredByLlm;
-        await withCap(triggerHit.locator.click({ timeout: 3_000 }).catch(() => undefined), 4_000, undefined);
+        await withCap(
+          triggerHit.locator.click({ timeout: 3_000 }).catch(() => undefined),
+          4_000,
+          undefined,
+        );
         await page.waitForTimeout(500);
         // Try cascade again now that the input might be visible.
         inputHit = await findElement(page, ctx, {
@@ -2560,7 +2742,12 @@ async function flowSearch(ctx: FlowContext): Promise<FlowResult> {
     }
     if (!inputHit) {
       steps.push({
-        ...makeSkipStep(2, "open-search", ctx, "search input not detected (incluindo recovery LLM)"),
+        ...makeSkipStep(
+          2,
+          "open-search",
+          ctx,
+          "search input not detected (incluindo recovery LLM)",
+        ),
         actionDescription: "Não encontramos input de busca — flow skipado.",
       });
       reportEnd(2, "open-search", "skipped", Date.now() - t2, "search input not detected");
@@ -2612,7 +2799,10 @@ async function flowSearch(ctx: FlowContext): Promise<FlowResult> {
         try {
           const loc = page.locator(sel).first();
           const visible = await withCap(
-            loc.waitFor({ state: "visible", timeout: 3_000 }).then(() => true).catch(() => false),
+            loc
+              .waitFor({ state: "visible", timeout: 3_000 })
+              .then(() => true)
+              .catch(() => false),
             3_500,
             false,
           );
@@ -2658,7 +2848,8 @@ async function flowSearch(ctx: FlowContext): Promise<FlowResult> {
         suggestionCount,
       },
     });
-    if (inputHit) await screenshotStable(page, { path: screenshotPath(ctx, "search-3-autocomplete") });
+    if (inputHit)
+      await screenshotStable(page, { path: screenshotPath(ctx, "search-3-autocomplete") });
     reportEnd(3, "type-and-autocomplete", step3Status, Date.now() - t3);
 
     // Step 4: submit-results — press Enter or navigate URL-based
@@ -2726,11 +2917,7 @@ async function flowSearch(ctx: FlowContext): Promise<FlowResult> {
     await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
     await page.waitForTimeout(800);
     const nrResultCount = await countProductCards(page);
-    const hasEmptyState = await detectNoResultsEmptyState(
-      page,
-      noResultsCap.html,
-      terms.noResults,
-    );
+    const hasEmptyState = await detectNoResultsEmptyState(page, noResultsCap.html, terms.noResults);
     const step5Status: StepCapture["status"] =
       noResultsCap.status >= 200 && noResultsCap.status < 400 ? "ok" : "failed";
     steps.push({
@@ -2804,7 +2991,11 @@ async function parseCartTotals(
   ];
   for (const sel of qtySelectors) {
     const value = await withCap(
-      page.locator(sel).first().inputValue().catch(() => ""),
+      page
+        .locator(sel)
+        .first()
+        .inputValue()
+        .catch(() => ""),
       1_000,
       "",
     );
@@ -2817,7 +3008,11 @@ async function parseCartTotals(
   // Price: cartTotalPrice innerText
   for (const sel of selFor(ctx, "cartTotalPrice")) {
     const text = await withCap(
-      page.locator(sel).first().innerText().catch(() => ""),
+      page
+        .locator(sel)
+        .first()
+        .innerText()
+        .catch(() => ""),
       1_000,
       "",
     );
@@ -2894,7 +3089,11 @@ async function seedCartForInteractions(
 
   // Heuristic confirmation: at least one cart item row visible
   const rowHit = await firstVisibleLocator(page, selFor(ctx, "cartItemRow"));
-  return { pages, opened: !!rowHit, note: rowHit ? undefined : "no cart item visible after add-to-cart" };
+  return {
+    pages,
+    opened: !!rowHit,
+    note: rowHit ? undefined : "no cart item visible after add-to-cart",
+  };
 }
 
 async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult> {
@@ -2939,7 +3138,21 @@ async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult> {
     if (!seed.opened) {
       // Skip all subsequent steps
       for (let i = 2; i <= 7; i++) {
-        steps.push(makeSkipStep(i, ["read-baseline", "increment-qty", "decrement-qty", "apply-invalid-coupon", "remove-item", "verify-empty-state"][i - 2]!, ctx, "cart-not-seeded"));
+        steps.push(
+          makeSkipStep(
+            i,
+            [
+              "read-baseline",
+              "increment-qty",
+              "decrement-qty",
+              "apply-invalid-coupon",
+              "remove-item",
+              "verify-empty-state",
+            ][i - 2]!,
+            ctx,
+            "cart-not-seeded",
+          ),
+        );
       }
       return { pages, steps };
     }
@@ -3008,8 +3221,7 @@ async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult> {
     const t4 = Date.now();
     const decHit = await findElement(page, ctx, {
       key: "cartQuantityDecrement",
-      intent:
-        "Encontrar o botão '-' / 'diminuir quantidade' dentro de um item do carrinho aberto.",
+      intent: "Encontrar o botão '-' / 'diminuir quantidade' dentro de um item do carrinho aberto.",
       budget,
       stepName: "cart-decrement",
     });
@@ -3072,11 +3284,16 @@ async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult> {
         await page.waitForTimeout(1_500);
         // Detect error: page text mentions inválido/invalid/não encontrado
         const text = await withCap(
-          page.locator("body").innerText().catch(() => ""),
+          page
+            .locator("body")
+            .innerText()
+            .catch(() => ""),
           1_500,
           "",
         );
-        couponErrorShown = /(inv[aá]lid|n[aã]o encontrado|n[aã]o existe|expired|expirado)/i.test(text);
+        couponErrorShown = /(inv[aá]lid|n[aã]o encontrado|n[aã]o existe|expired|expirado)/i.test(
+          text,
+        );
       }
     }
     const after5 = await parseCartTotals(page, ctx);
@@ -3154,7 +3371,12 @@ async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult> {
       },
     });
     await screenshotStable(page, { path: screenshotPath(ctx, "cart-6-remove") });
-    reportEnd(6, "remove-item", removeHit ? (removed ? "ok" : "failed") : "skipped", Date.now() - t6);
+    reportEnd(
+      6,
+      "remove-item",
+      removeHit ? (removed ? "ok" : "failed") : "skipped",
+      Date.now() - t6,
+    );
 
     // Step 7: verify-empty-state
     reportStart(7, "verify-empty-state");
@@ -3266,14 +3488,16 @@ async function flowLogin(ctx: FlowContext): Promise<FlowResult> {
     const t2 = Date.now();
     let emailHit = await findElement(page, ctx, {
       key: "loginEmailInput",
-      intent: "Encontrar o <input> de email no formulário de login (NÃO confundir com input de newsletter ou cadastro).",
+      intent:
+        "Encontrar o <input> de email no formulário de login (NÃO confundir com input de newsletter ou cadastro).",
       budget,
       stepName: "login-email-input",
     });
     if (!emailHit) {
       const triggerHit = await findElement(page, ctx, {
         key: "loginTrigger",
-        intent: "Encontrar o link/botão 'Entrar' / 'Login' / 'Minha conta' no header que abre o formulário de login.",
+        intent:
+          "Encontrar o link/botão 'Entrar' / 'Login' / 'Minha conta' no header que abre o formulário de login.",
         budget,
         stepName: "login-trigger",
       });
@@ -3290,7 +3514,9 @@ async function flowLogin(ctx: FlowContext): Promise<FlowResult> {
     }
     if (!emailHit) {
       // Last resort: navigate to /login
-      await page.goto(new URL("/login", ctx.baseUrl).toString(), { timeout: 15_000 }).catch(() => undefined);
+      await page
+        .goto(new URL("/login", ctx.baseUrl).toString(), { timeout: 15_000 })
+        .catch(() => undefined);
       await page.waitForTimeout(1_000);
       emailHit = await findElement(page, ctx, {
         key: "loginEmailInput",
@@ -3343,11 +3569,14 @@ async function flowLogin(ctx: FlowContext): Promise<FlowResult> {
     // Step 3: submit-invalid — wrong credentials, expect error
     reportStart(3, "submit-invalid");
     const t3 = Date.now();
-    await emailHit!.locator.fill(`invalid-${Date.now()}@parity-test.invalid`).catch(() => undefined);
+    await emailHit!.locator
+      .fill(`invalid-${Date.now()}@parity-test.invalid`)
+      .catch(() => undefined);
     await passwordHit!.locator.fill("wrong-password-on-purpose").catch(() => undefined);
     const submitHit = await findElement(page, ctx, {
       key: "loginSubmit",
-      intent: "Encontrar o botão de submeter login ('Entrar', 'Login', 'Acessar') dentro do form de login.",
+      intent:
+        "Encontrar o botão de submeter login ('Entrar', 'Login', 'Acessar') dentro do form de login.",
       budget,
       stepName: "login-submit",
     });
@@ -3355,14 +3584,20 @@ async function flowLogin(ctx: FlowContext): Promise<FlowResult> {
     await page.waitForTimeout(2_000);
     const errorHit = await findElement(page, ctx, {
       key: "loginErrorMessage",
-      intent: "Encontrar a mensagem de erro mostrada após login falho — geralmente em [role='alert'] ou perto do form.",
+      intent:
+        "Encontrar a mensagem de erro mostrada após login falho — geralmente em [role='alert'] ou perto do form.",
       budget,
       stepName: "login-error-message",
     });
     const errorMsg = errorHit
-      ? await withCap(errorHit.locator.innerText().catch(() => ""), 1_500, "")
+      ? await withCap(
+          errorHit.locator.innerText().catch(() => ""),
+          1_500,
+          "",
+        )
       : "";
-    const errorShown = !!errorHit || /invalid|inv[aá]lid|incorret|n[aã]o (existe|cadastrad)/i.test(errorMsg);
+    const errorShown =
+      !!errorHit || /invalid|inv[aá]lid|incorret|n[aã]o (existe|cadastrad)/i.test(errorMsg);
     steps.push({
       step: 3,
       name: "submit-invalid",
@@ -3403,7 +3638,8 @@ async function flowLogin(ctx: FlowContext): Promise<FlowResult> {
     }
     const accountMenuHit = await findElement(page, ctx, {
       key: "accountMenuTrigger",
-      intent: "Após login bem-sucedido, encontrar o menu de conta logada no header (avatar, 'Olá <nome>', link 'Minha conta').",
+      intent:
+        "Após login bem-sucedido, encontrar o menu de conta logada no header (avatar, 'Olá <nome>', link 'Minha conta').",
       budget,
       stepName: "login-account-menu",
     });

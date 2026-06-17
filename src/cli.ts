@@ -1,25 +1,25 @@
 import { Command } from "commander";
-import { baselineList, baselineSet, baselineUnset } from "./commands/baseline.ts";
 import { auditCommand } from "./commands/audit.ts";
+import { baselineList, baselineSet, baselineUnset } from "./commands/baseline.ts";
 import { cacheCommand } from "./commands/cache.ts";
-import { e2eCommand } from "./commands/e2e.ts";
 import { checkCommand } from "./commands/check.ts";
 import { compareCommand } from "./commands/compare.ts";
 import { consoleCommand } from "./commands/console.ts";
-import { htmlCommand } from "./commands/html.ts";
 import { cssTraceCommand } from "./commands/css-trace.ts";
+import { e2eCommand } from "./commands/e2e.ts";
 import { explainCommand } from "./commands/explain.ts";
 import { fixCommand } from "./commands/fix.ts";
+import { htmlCommand } from "./commands/html.ts";
 import { journeyCommand } from "./commands/journey.ts";
 import { learnedStats } from "./commands/learned.ts";
-import { vitalsCommand } from "./commands/vitals.ts";
 import { listCommand } from "./commands/list.ts";
+import { prCommand } from "./commands/pr.ts";
 import { promptCommand } from "./commands/prompt.ts";
 import { reportCommand } from "./commands/report.ts";
-import { prCommand } from "./commands/pr.ts";
 import { runCommand } from "./commands/run.ts";
 import { sectionCommand } from "./commands/section.ts";
 import { serveCommand } from "./commands/serve.ts";
+import { vitalsCommand } from "./commands/vitals.ts";
 import { getPackageVersion } from "./util/version.ts";
 
 const program = new Command();
@@ -68,11 +68,21 @@ program
   .option("--no-auto-selectors", "Disable LLM-based selector discovery (uses defaults instead)")
   .option("--refresh-selectors", "Bypass selector cache and re-run discovery", false)
   .option("--no-learn", "Don't write to learned-selectors.json (read-only mode)")
-  .option("--vitals-pages <n>", "Extra pages from sitemap to crawl for Vitals coverage (default 10)", (v) => Number(v), 10)
-  .option("--visual-pages <n>", "Pages to compare visually via LLM (home + sampled PLPs/PDPs from sitemap, default 5)", (v) => Number(v), 5)
+  .option(
+    "--vitals-pages <n>",
+    "Extra pages from sitemap to crawl for Vitals coverage (default 10)",
+    (v) => Number(v),
+    10,
+  )
+  .option(
+    "--visual-pages <n>",
+    "Pages to compare visually via LLM (home + sampled PLPs/PDPs from sitemap, default 5)",
+    (v) => Number(v),
+    5,
+  )
   .option(
     "--pages <list>",
-    "Comma-separated paths to compare visually (overrides sitemap discovery). E.g. \"/,/account,/p/some-product\". Use this when you want deterministic coverage instead of sampled.",
+    'Comma-separated paths to compare visually (overrides sitemap discovery). E.g. "/,/account,/p/some-product". Use this when you want deterministic coverage instead of sampled.',
   )
   .option(
     "--pages-file <path>",
@@ -327,7 +337,10 @@ program
   )
   .requiredOption("--prod <url>", "Production URL (optional reference)")
   .requiredOption("--cand <url>", "Candidate URL (foco)")
-  .option("--urls <list-or-file>", "Comma-separated paths or .txt file (1/line). Overrides sitemap.")
+  .option(
+    "--urls <list-or-file>",
+    "Comma-separated paths or .txt file (1/line). Overrides sitemap.",
+  )
   .option("--pages <n>", "Max pages to crawl from sitemap", (v) => Number(v), 30)
   .option("--viewports <list>", "mobile,desktop", "mobile")
   .option("--concurrency <n>", "Parallel workers (1-8)", (v) => Number(v), 6)
@@ -345,7 +358,10 @@ program
   )
   .requiredOption("--prod <url>", "Production URL (base)")
   .requiredOption("--cand <url>", "Candidate URL (base)")
-  .option("--urls <list-or-file>", "Comma-separated paths or .txt file (1/line). Overrides sitemap discovery.")
+  .option(
+    "--urls <list-or-file>",
+    "Comma-separated paths or .txt file (1/line). Overrides sitemap discovery.",
+  )
   .option("--limit <n>", "Max pages discovered from sitemap.xml", (v) => Number(v), 20)
   .option("--viewports <list>", "mobile,desktop", "mobile")
   .option("--concurrency <n>", "Parallel workers (1-8)", (v) => Number(v), 4)
@@ -430,7 +446,10 @@ program
   .option("--url <url>", "Single URL to inspect (mutually exclusive with --prod/--cand)")
   .option("--prod <url>", "Production URL (for comparison mode)")
   .option("--cand <url>", "Candidate URL (for comparison mode)")
-  .requiredOption("--selector <sel>", "CSS selector for the target element (e.g. 'html', '[data-aside]', '.drawer-side')")
+  .requiredOption(
+    "--selector <sel>",
+    "CSS selector for the target element (e.g. 'html', '[data-aside]', '.drawer-side')",
+  )
   .option(
     "--filter <props>",
     "Comma-separated property names to focus on (e.g. 'scrollbar-gutter,position,width')",
@@ -460,11 +479,7 @@ program
   )
   .requiredOption("--url <url>", "URL to load")
   .option("--viewport <viewport>", "mobile | desktop | tablet", "mobile")
-  .option(
-    "--wait <ms>",
-    "Extra ms to wait after networkidle so client-side errors land",
-    "2000",
-  )
+  .option("--wait <ms>", "Extra ms to wait after networkidle so client-side errors land", "2000")
   .option(
     "--filter <types>",
     "Comma-separated subset of error,warning,log,info,debug (default: error,warning)",
@@ -529,7 +544,11 @@ program
   .requiredOption("--prod <url>", "Production URL (base, e.g. https://www.example.com)")
   .requiredOption("--cand <url>", "Candidate URL (base, e.g. https://example.deco-cx.workers.dev)")
   .requiredOption("--selector <sel>", "CSS selector for the section to compare")
-  .option("--output-html", "Include the HTML diff facet (default: on if no facet flag passed)", false)
+  .option(
+    "--output-html",
+    "Include the HTML diff facet (default: on if no facet flag passed)",
+    false,
+  )
   .option("--screenshot", "Include the screenshot facet (locator screenshot per side)", false)
   .option("--computed-styles", "Include the computed-styles diff facet", false)
   .option(
@@ -617,11 +636,9 @@ program
   .command("learned")
   .description("Inspect the learned-selectors library")
   .addCommand(
-    new Command("stats")
-      .description("Print learned-selectors stats per platform")
-      .action(() => {
-        process.exit(learnedStats());
-      }),
+    new Command("stats").description("Print learned-selectors stats per platform").action(() => {
+      process.exit(learnedStats());
+    }),
   );
 
 program.parseAsync(process.argv);

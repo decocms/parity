@@ -87,7 +87,10 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
   if (opts.searchTerms) {
     rc.search = {
       ...(rc.search ?? {}),
-      terms: opts.searchTerms.split(",").map((s) => s.trim()).filter(Boolean),
+      terms: opts.searchTerms
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
     };
   }
   if (opts.loginEmail) process.env.PARITY_LOGIN_EMAIL = opts.loginEmail;
@@ -147,7 +150,8 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
       }
       await ctx.close().catch(() => undefined);
     }
-    if (spinner) spinner.succeed(`${allFlows.length} flow capture(s), ${allPages.length} página(s)`);
+    if (spinner)
+      spinner.succeed(`${allFlows.length} flow capture(s), ${allPages.length} página(s)`);
   } finally {
     await browser?.close().catch(() => undefined);
   }
@@ -158,13 +162,17 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
   }
 
   // ─── Run absolute audit checks per page (vitals/console/network/images/seo) ───
-  const auditSpinner = opts.json ? null : ora("Audit checks (vitals/console/network/images/seo)…").start();
+  const auditSpinner = opts.json
+    ? null
+    : ora("Audit checks (vitals/console/network/images/seo)…").start();
   const auditResults = allPages.map(runAuditForPage);
   const audit = aggregateAudit(auditResults);
   if (auditSpinner) auditSpinner.succeed(`${audit.totals.issues} audit issue(s)`);
 
   // ─── Run new flow-aware checks in single-site mode ───
-  const checkSpinner = opts.json ? null : ora("Flow checks (search/cart/PDP/404/CLS/footer/login)…").start();
+  const checkSpinner = opts.json
+    ? null
+    : ora("Flow checks (search/cart/PDP/404/CLS/footer/login)…").start();
   const checkCtx: CheckContext = {
     prodPages: [],
     candPages: allPages,
@@ -193,9 +201,7 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
   }
   const flowIssues = flowCheckResults.flatMap((r) => r.issues);
   if (checkSpinner)
-    checkSpinner.succeed(
-      `${flowCheckResults.length} check(s), ${flowIssues.length} flow issue(s)`,
-    );
+    checkSpinner.succeed(`${flowCheckResults.length} check(s), ${flowIssues.length} flow issue(s)`);
 
   // ─── Aggregate + write report ───
   const durationMs = Date.now() - startedAt;
@@ -261,15 +267,16 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
     printSummary(enriched, paths.reportHtml);
   }
 
-  const worstSev = enriched.totals.critical > 0
-    ? "critical"
-    : enriched.totals.high > 0
-      ? "high"
-      : enriched.totals.medium > 0
-        ? "medium"
-        : enriched.totals.low > 0
-          ? "low"
-          : null;
+  const worstSev =
+    enriched.totals.critical > 0
+      ? "critical"
+      : enriched.totals.high > 0
+        ? "high"
+        : enriched.totals.medium > 0
+          ? "medium"
+          : enriched.totals.low > 0
+            ? "low"
+            : null;
   if (opts.open) await openReport(paths.reportHtml);
   if (worstSev && failOn.includes(worstSev as Issue["severity"])) return 1;
   return 0;
@@ -301,10 +308,7 @@ function parseFlows(raw: string | undefined): FlowName[] {
   return list.filter((f) => valid.includes(f));
 }
 
-function printSummary(
-  result: ReturnType<typeof aggregateAudit>,
-  reportPath: string,
-): void {
+function printSummary(result: ReturnType<typeof aggregateAudit>, reportPath: string): void {
   const { totals } = result;
   const verdict =
     totals.critical > 0

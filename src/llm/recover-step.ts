@@ -13,7 +13,10 @@ export interface RecoverySuggestion {
 const RECOVER_STEP_INPUT_SCHEMA = {
   type: "object",
   properties: {
-    selector: { type: "string", description: "CSS or Playwright selector that targets the element" },
+    selector: {
+      type: "string",
+      description: "CSS or Playwright selector that targets the element",
+    },
     action: { type: "string", enum: ["click", "fill", "press"] },
     value: { type: "string", description: "For 'fill' or 'press', the text/key to use" },
     reasoning: { type: "string" },
@@ -30,11 +33,14 @@ export function compactHtmlForRecovery(html: string, maxChars = 12_000): string 
     const $ = cheerio.load(html);
     $("script, style, noscript, svg, picture source, link, meta").remove();
     // Keep only elements likely to be interactive or contain them
-    const allowed = $("header, nav, main, footer, dialog, [role='dialog'], form, button, a, input, [data-buy-button], [data-checkout], [data-minicart], [role='button']")
+    const allowed = $(
+      "header, nav, main, footer, dialog, [role='dialog'], form, button, a, input, [data-buy-button], [data-checkout], [data-minicart], [role='button']",
+    )
       .map((_, el) => $.html(el))
       .get()
       .join("\n");
-    const truncated = allowed.length > maxChars ? `${allowed.slice(0, maxChars)}\n<!-- TRUNCATED -->` : allowed;
+    const truncated =
+      allowed.length > maxChars ? `${allowed.slice(0, maxChars)}\n<!-- TRUNCATED -->` : allowed;
     return truncated;
   } catch {
     return html.slice(0, maxChars);

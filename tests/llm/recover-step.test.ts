@@ -11,7 +11,8 @@ import { compactHtmlForRecovery, suggestRecovery } from "../../src/llm/recover-s
 
 describe("compactHtmlForRecovery", () => {
   it("strips scripts, styles, svg", () => {
-    const html = "<html><head><script>alert(1)</script><style>body{}</style></head><body><svg><path/></svg><button>Buy</button></body></html>";
+    const html =
+      "<html><head><script>alert(1)</script><style>body{}</style></head><body><svg><path/></svg><button>Buy</button></body></html>";
     const out = compactHtmlForRecovery(html);
     expect(out).not.toMatch(/<script/);
     expect(out).not.toMatch(/<style/);

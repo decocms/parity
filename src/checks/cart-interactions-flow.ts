@@ -53,7 +53,9 @@ export function cartInteractionsFlow(ctx: CheckContext): CheckResult {
             category: "functional",
             check: "cart-interactions-flow",
             summary: `[${viewport}] Step "${STEP_LABELS[step.name] ?? step.name}" falhou: ${step.note ?? step.actionDescription ?? ""}`,
-            evidence: step.screenshotPath ? [{ kind: "screenshot", path: step.screenshotPath }] : [],
+            evidence: step.screenshotPath
+              ? [{ kind: "screenshot", path: step.screenshotPath }]
+              : [],
           });
         }
       }
@@ -93,12 +95,11 @@ export function cartInteractionsFlow(ctx: CheckContext): CheckResult {
     }
   }
 
-  const status: CheckResult["status"] =
-    issues.some((i) => i.severity === "critical")
-      ? "fail"
-      : issues.length > 0
-        ? "warn"
-        : "pass";
+  const status: CheckResult["status"] = issues.some((i) => i.severity === "critical")
+    ? "fail"
+    : issues.length > 0
+      ? "warn"
+      : "pass";
 
   return {
     name: "cart-interactions-flow",
