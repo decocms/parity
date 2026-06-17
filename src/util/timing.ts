@@ -83,10 +83,31 @@ export class TimingRegistry {
 }
 
 /**
+ * Per-flow timing surfaced to the bottom-of-run summary. Sides ran in
+ * parallel within a viewport, so `maxMs` (longest side's duration) is
+ * the real wall-clock contribution that flow added to the run. The
+ * sides list is for transparency.
+ */
+export interface FlowTimingBreakdown {
+  /** Flow name, e.g. "purchase-journey". */
+  flow: string;
+  /** Wall-clock = longest of `sides`. */
+  maxMs: number;
+  /** Per-(viewport,side) durations, in completion order. */
+  sides: Array<{ viewport: string; side: string; durationMs: number }>;
+}
+
+/**
  * Format a `RunTimings` snapshot for stdout. Uses simple ASCII bars so
  * it works in any terminal. Caller pipes to chalk if it wants color.
+ * When `flowBreakdown` is provided, an extra block lists each flow's
+ * `max` time (the parallel-wall-clock contribution) plus the per-side
+ * detail so the user can see where prod or cand was the long pole.
  */
-export function formatTimingsSummary(timings: RunTimings): string {
+export function formatTimingsSummary(
+  timings: RunTimings,
+  flowBreakdown?: FlowTimingBreakdown[],
+): string {
   if (timings.phases.length === 0) {
     return `⏱  Run completed in ${formatMs(timings.totalMs)}`;
   }
@@ -101,10 +122,53 @@ export function formatTimingsSummary(timings: RunTimings): string {
       `    ${p.phase.padEnd(maxLabel)}  ${formatMs(p.durationMs).padStart(7)}  ${bar} ${pctOfTotal}%`,
     );
   }
+  if (flowBreakdown && flowBreakdown.length > 0) {
+    const maxFlowLabel = Math.max(...flowBreakdown.map((f) => f.flow.length));
+    lines.push("");
+    lines.push("    flows breakdown (sides run in parallel within viewport)");
+    for (const f of flowBreakdown) {
+      const sideDetail = f.sides
+        .map((s) => `${s.viewport}/${s.side} ${formatMs(s.durationMs)}`)
+        .join(" · ");
+      lines.push(
+        `    ${f.flow.padEnd(maxFlowLabel)}  max ${formatMs(f.maxMs).padStart(6)} · ${sideDetail}`,
+      );
+    }
+  }
   return lines.join("\n");
 }
 
-function formatMs(ms: number): string {
+/**
+ * Build a per-flow breakdown from raw `FlowCapture`-shaped entries.
+ * Groups by flow name and reports max + the underlying sides.
+ */
+export function buildFlowBreakdown(
+  captures: Array<{ flow: string; viewport: string; side: string; totalDurationMs: number }>,
+): FlowTimingBreakdown[] {
+  const byFlow = new Map<string, FlowTimingBreakdown>();
+  for (const c of captures) {
+    const existing = byFlow.get(c.flow);
+    const entry = {
+      viewport: c.viewport,
+      side: c.side,
+      durationMs: c.totalDurationMs,
+    };
+    if (!existing) {
+      byFlow.set(c.flow, {
+        flow: c.flow,
+        maxMs: c.totalDurationMs,
+        sides: [entry],
+      });
+    } else {
+      existing.sides.push(entry);
+      if (c.totalDurationMs > existing.maxMs) existing.maxMs = c.totalDurationMs;
+    }
+  }
+  // Preserve declaration order from input.
+  return Array.from(byFlow.values());
+}
+
+export function formatMs(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
   if (totalSec < 60) return `${totalSec}s`;
   const min = Math.floor(totalSec / 60);

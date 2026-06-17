@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.14](https://github.com/decocms/parity/compare/v0.11.13...v0.11.14) (2026-06-17)
+
+### Added
+
+* **Always-visible elapsed counter.** A 1-second ticker rewrites the spinner with `⏱ 04:32 · <current label>` from the moment "Launching browser…" appears until the report writes. No more "is it stuck?" minutes of silence — the user knows exactly how long the run has been going at any moment. Cleared in `finally` so it can't survive past `runCommand`.
+* **Per-flow timing in the bottom summary.** New `flows breakdown` block lists each flow's `max` time (the parallel-wall-clock contribution) plus per-side detail:
+  ```
+  flows breakdown (sides run in parallel within viewport)
+    purchase-journey  max 1m32s · mobile/prod 52s · mobile/cand 58s · desk/prod 89s · desk/cand 90s
+    search            max 1m48s · …
+  ```
+  Driven by the existing `FlowCapture.totalDurationMs` (already populated by `finalize` — just wasn't surfaced).
+
+### Changed
+
+* **Prod + cand now run in parallel within each viewport.** `parity run`'s collect loop was 100% sequential: `for viewport { for side { for flow {…} } }`. The two sides for a given viewport are already independent (separate BrowserContexts, separate HAR/trace paths), so the same `Promise.all([prod, cand])` pattern that `parity journey` has used for months now applies to `parity run` too. Extracted a `runOneSide(viewport, side)` helper, replaced the inner side loop with `Promise.all`, and deferred `promoteStepsFromFlow` (which mutates the shared `learned` object) until after `Promise.all` resolves so there's no race on selector promotion. **Expected speedup: ~50% on collect phase** (25m → ~17m total on bagaggio). Viewports still serialize for now — PR #2 will parallelize those too.
+
 ## [0.11.13](https://github.com/decocms/parity/compare/v0.11.12...v0.11.13) (2026-06-17)
 
 ### Fixed
