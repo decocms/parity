@@ -683,18 +683,38 @@ async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJourneyRes
     reportStart(6, "add-to-cart");
     let buyHit = await firstVisibleLocator(page, selFor(ctx, "buyButton"));
     let buyRecovered = false;
-    if (!buyHit && budget.remaining > 0) {
-      const recovery = await attemptRecovery(
-        page,
-        ctx,
-        "add-to-cart",
-        "Clicar no botão de comprar/adicionar ao carrinho",
-        selFor(ctx, "buyButton"),
-      );
-      if (recovery) {
-        buyHit = recovery;
-        buyRecovered = true;
-        budget.remaining--;
+    if (!buyHit) {
+      // Before burning LLM budget on recovery, sanity-check that this
+      // page actually looks like a PDP. Some "PDP" URLs are landing pages
+      // (no Product schema, no price, no buy form) — there's nothing to
+      // recover. Bail honestly so the user knows the test stopped because
+      // the page wasn't a PDP, not because the runner gave up.
+      const landingCheck = await detectLandingPage(page);
+      if (landingCheck.isLanding) {
+        steps.push(
+          makeSkipStep(
+            6,
+            "add-to-cart",
+            ctx,
+            `PDP appears to be a landing page (${landingCheck.reasons.join("; ")}) — no buy form to test`,
+          ),
+        );
+        reportEnd(6, "add-to-cart", "skipped", 0, "landing page detected");
+        return { pages, steps };
+      }
+      if (budget.remaining > 0) {
+        const recovery = await attemptRecovery(
+          page,
+          ctx,
+          "add-to-cart",
+          "Clicar no botão de comprar/adicionar ao carrinho",
+          selFor(ctx, "buyButton"),
+        );
+        if (recovery) {
+          buyHit = recovery;
+          buyRecovered = true;
+          budget.remaining--;
+        }
       }
     }
     if (!buyHit) {
@@ -1324,6 +1344,99 @@ interface VariantSelectionResult {
  * whether the page is *demanding* variant selection (so the caller can decide
  * how alarmed to be about a skip).
  */
+/**
+ * Heuristic: does this page actually look like a PDP, or is it a landing
+ * page that happens to live under a product URL? Used to skip add-to-cart
+ * honestly (and stop burning LLM recovery budget) when the runner lands
+ * on the wrong page type. Returns `isLanding: true` only when MULTIPLE
+ * signals agree — a real PDP missing one signal (rare) shouldn't be
+ * mis-flagged.
+ *
+ *   PDP signals (any of these = "looks like a PDP"):
+ *     - schema:Product JSON-LD in <head>
+ *     - itemtype containing "Product"
+ *     - any <form> with a CTA-looking button inside
+ *     - price-ish text near the top (R$ NN.NN, $XX, EUR, etc)
+ *     - a <select>/<input type="number"> for variant/quantity
+ *
+ * If FEWER THAN 2 PDP signals are present AND no buy button was found,
+ * treat as landing.
+ */
+async function detectLandingPage(page: Page): Promise<{ isLanding: boolean; reasons: string[] }> {
+  const reasons: string[] = [];
+  let pdpSignalCount = 0;
+
+  try {
+    const hasSchema = await page
+      .locator("script[type='application/ld+json']:has-text('\"@type\":\"Product\"')")
+      .first()
+      .count()
+      .catch(() => 0);
+    if (hasSchema > 0) pdpSignalCount++;
+    else reasons.push("no schema:Product JSON-LD");
+  } catch {
+    reasons.push("no schema:Product JSON-LD");
+  }
+
+  try {
+    const hasItemtype = await page.locator("[itemtype*='Product']").first().count();
+    if (hasItemtype > 0) pdpSignalCount++;
+  } catch {
+    /* skip */
+  }
+
+  try {
+    const hasForm = await page.locator("form:has(button)").first().count();
+    if (hasForm > 0) pdpSignalCount++;
+    else reasons.push("no <form> with button");
+  } catch {
+    reasons.push("no <form> with button");
+  }
+
+  try {
+    const bodyText = await page.locator("body").innerText({ timeout: 500 });
+    if (/R\$\s*\d+|\$\s*\d+\.\d{2}|€\s*\d+|\bUSD\s*\d+/i.test(bodyText)) {
+      pdpSignalCount++;
+    } else {
+      reasons.push("no price text (R$ / $ / €)");
+    }
+  } catch {
+    reasons.push("no price text (R$ / $ / €)");
+  }
+
+  try {
+    const hasVariantInput = await page
+      .locator("select, input[type='number'], input[type='radio']")
+      .first()
+      .count();
+    if (hasVariantInput > 0) pdpSignalCount++;
+  } catch {
+    /* skip */
+  }
+
+  return { isLanding: pdpSignalCount < 2, reasons };
+}
+
+/**
+ * Click a locator and, if the click triggered a navigation, wait for the
+ * new page to settle. Used for variant pickers that are rendered as
+ * `<a href=".../p?skuId=N">` links (Deco TanStack pattern) instead of
+ * radio buttons — clicking navigates to a different SKU URL and the next
+ * step needs to run against the new page, not the pre-nav one.
+ *
+ * When the click doesn't navigate (button radio case), the
+ * `waitForNavigation` rejects on the timeout and we just continue.
+ */
+async function clickAndMaybeWait(page: Page, locator: Locator, _label: string): Promise<void> {
+  await Promise.allSettled([
+    page.waitForNavigation({ timeout: 5_000, waitUntil: "domcontentloaded" }),
+    locator.click({ timeout: 2_000 }),
+  ]);
+  // Brief settle period for SPAs that update via History API without
+  // firing a full navigation but still need a tick to re-render.
+  await page.waitForTimeout(600);
+}
+
 async function selectVariant(page: Page, ctx: FlowContext): Promise<VariantSelectionResult> {
   const actions: string[] = [];
   let primarySelectorKey: string | undefined;
@@ -1371,8 +1484,13 @@ async function selectVariant(page: Page, ctx: FlowContext): Promise<VariantSelec
     const sizeHit = await firstVisibleLocator(page, selFor(ctx, "sizeSwatch"));
     if (sizeHit && !(await sizeHit.locator.isDisabled().catch(() => false))) {
       const sizeText = (await sizeHit.locator.innerText().catch(() => "")).slice(0, 20).trim();
-      await sizeHit.locator.click({ timeout: 2_000 }).catch(() => undefined);
-      await page.waitForTimeout(400);
+      // Deco TanStack variants are `<a href=".../p?skuId=N">` LINKS that
+      // navigate to a different SKU URL — clicking triggers a full nav,
+      // and the post-click work has to wait for the new page to settle
+      // before checking selected-state or trying add-to-cart. `clickAndMaybeWait`
+      // races the click with a short navigation wait; if no nav happens
+      // (button radio case) it falls through immediately.
+      await clickAndMaybeWait(page, sizeHit.locator, "sizeSwatch");
       actions.push(
         `Selecionou tamanho${sizeText ? ` '${sizeText}'` : ""} (\`${sizeHit.selector}\`)`,
       );
@@ -1386,8 +1504,7 @@ async function selectVariant(page: Page, ctx: FlowContext): Promise<VariantSelec
     const colorText = (await colorHit.locator.innerText().catch(() => "")).slice(0, 20).trim();
     const colorLabel =
       colorText || (await colorHit.locator.getAttribute("aria-label").catch(() => null)) || "";
-    await colorHit.locator.click({ timeout: 2_000 }).catch(() => undefined);
-    await page.waitForTimeout(400);
+    await clickAndMaybeWait(page, colorHit.locator, "colorSwatch");
     actions.push(
       `Selecionou cor${colorLabel ? ` '${colorLabel}'` : ""} (\`${colorHit.selector}\`)`,
     );
@@ -1622,8 +1739,14 @@ async function validateAddToCart(
       };
     }
 
-    // A dialog/drawer that wasn't visible before became visible.
+    // A dialog/drawer/notification that wasn't visible before became
+    // visible. Combines the legacy hardcoded list with the new
+    // `cartOpenedIndicator` selector key (Issue #102 follow-up) so users
+    // can override per-site via `.parityrc.json` and the Deco TanStack
+    // `[aria-label='Fechar notificação']` / `[aria-label='Fechar carrinho']`
+    // patterns are tried automatically.
     const drawerSelectors = [
+      ...selFor(ctx, "cartOpenedIndicator"),
       "[role='dialog']",
       "[data-minicart][aria-expanded='true']",
       "[data-cart-drawer].open",
