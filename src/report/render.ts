@@ -1,5 +1,5 @@
 import { buildCacheReport, type CacheReport, type ClassifiedRequest } from "../diff/cache.ts";
-import type { Issue, NetworkEntry, Run, SeoPageMeta, VisualDiffPage } from "../types/schema.ts";
+import type { CheckResult, Issue, NetworkEntry, Run, SeoPageMeta, VisualDiffPage } from "../types/schema.ts";
 import { REPORT_CSS, REPORT_JS } from "./html-template.ts";
 import {
   escapeHtml as esc,
@@ -108,7 +108,7 @@ function buildTiles(run: Run): Tile[] {
       value: total > 0 ? `${total - failed}/${total}` : "—",
       meta: failed > 0 ? `${failed} step(s) failed` : "completed in both",
       state: failed > 0 ? "fail" : "pass",
-      href: "#issues",
+      href: "#detail/purchase-journey-flow",
     });
   }
 
@@ -122,7 +122,7 @@ function buildTiles(run: Run): Tile[] {
       value: `${((data.hitRate ?? 0) * 100).toFixed(0)}%`,
       meta: `${data.opportunityCount ?? 0} opportunities`,
       state: (data.hitRate ?? 0) > 0.7 ? "pass" : (data.hitRate ?? 0) > 0.4 ? "warn" : "fail",
-      href: "#cache",
+      href: "#detail/cache-coverage",
     });
   }
 
@@ -135,7 +135,7 @@ function buildTiles(run: Run): Tile[] {
       value: vitals.status === "pass" ? "✓" : vitals.issues.length.toString(),
       meta: vitals.status === "pass" ? "no regressions" : `${vitals.issues.length} regression(s)`,
       state: vitals.status === "pass" ? "pass" : "fail",
-      href: "#vitals",
+      href: "#detail/web-vitals-mobile",
     });
   }
 
@@ -149,7 +149,7 @@ function buildTiles(run: Run): Tile[] {
       value: critical > 0 ? `${critical} crit` : seo.status === "pass" ? "✓" : seo.issues.length.toString(),
       meta: critical > 0 ? "noindex / robots regression" : `${seo.issues.length} issue(s)`,
       state: critical > 0 ? "fail" : seo.status === "pass" ? "pass" : "warn",
-      href: "#seo",
+      href: "#detail/seo-deep-audit",
     });
   }
 
@@ -162,7 +162,7 @@ function buildTiles(run: Run): Tile[] {
       value: console_.issues.length.toString(),
       meta: console_.status === "pass" ? "no new errors" : "errors in cand",
       state: console_.status === "pass" ? "pass" : "fail",
-      href: "#console",
+      href: "#detail/console-errors-baseline",
     });
   }
 
@@ -184,7 +184,7 @@ function buildTiles(run: Run): Tile[] {
       value,
       meta,
       state: visual.status === "pass" ? "pass" : "warn",
-      href: "#visualdiff",
+      href: "#detail/visual-regression-keyframes",
     });
   }
 
@@ -213,6 +213,46 @@ function renderTopIssues(run: Run, runDir: string): string {
     <div class="hint">Prioritized, aggregated issues; see the Issues tab for the complete list.</div>
     ${run.topIssues.map((i) => renderIssue(i, runDir)).join("")}
   </div>`;
+}
+
+/**
+ * Per-check detail panel — opened when the user clicks a dashboard tile
+ * or navigates to `#detail/<checkName>`. Shows everything we have about
+ * the specific check in one place: status, duration, summary, issues,
+ * the raw `data` payload, and a copy-pasteable reproduction command.
+ * Issue #76.
+ */
+function renderCheckDetailPanel(check: CheckResult, run: Run, runDir: string): string {
+  const reproCmd = `parity check ${check.name} --prod ${run.prodUrl} --cand ${run.candUrl}`;
+  const reproId = `repro-${check.name.replace(/[^a-zA-Z0-9]/g, "_")}`;
+  const dataJson = check.data && Object.keys(check.data).length > 0
+    ? JSON.stringify(check.data, null, 2)
+    : null;
+  return `
+  <div class="card">
+    <div class="check-detail-header">
+      <a class="back-link" href="#summary">← Dashboard</a>
+      <h2><code>${esc(check.name)}</code></h2>
+      <div class="check-detail-meta">
+        <span class="status-pill status-${check.status}">${check.status}</span>
+        <span class="dim">${check.durationMs}ms</span>
+        <span class="dim">${check.issues.length} issue${check.issues.length !== 1 ? "s" : ""}</span>
+      </div>
+    </div>
+    <p class="check-detail-summary">${esc(check.summary)}</p>
+  </div>
+
+  <div class="card">
+    <h2>Reproduce this check</h2>
+    <div class="prompt-toolbar">
+      <code class="repro-cmd" id="${reproId}">${esc(reproCmd)}</code>
+      <button class="copy-btn" data-copy-target="${reproId}" type="button">copy</button>
+    </div>
+  </div>
+
+  ${check.issues.length > 0 ? `<div class="card"><h2>Issues from this check</h2>${check.issues.map((i: Issue) => renderIssue(i, runDir)).join("")}</div>` : ""}
+
+  ${dataJson ? `<div class="card"><h2>Raw check data</h2><pre class="check-data">${esc(dataJson)}</pre></div>` : ""}`;
 }
 
 function renderChecksTable(run: Run): string {
@@ -1264,6 +1304,11 @@ export function renderHtmlReport(run: Run, runDir: string): string {
         ${renderNetworkPanel(run)}
       </section>
       ${run.baseline ? `<section class="panel" data-panel="diff">${tabHelp(TAB_HELP.diff)}${renderDiffPanel(run, runDir)}</section>` : ""}
+      ${run.checks
+        .map(
+          (c) => `<section class="panel detail-panel" data-detail="${esc(c.name)}">${renderCheckDetailPanel(c, run, runDir)}</section>`,
+        )
+        .join("")}
     </main>
   </div>
   <div class="help-modal" id="help-modal">
