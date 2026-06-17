@@ -30,7 +30,21 @@ program
 
 program
   .command("run")
-  .description("Compare two URLs and produce a parity report")
+  .description(
+    [
+      "Compare two URLs and produce a parity report.",
+      "",
+      "Flag convention (Issue #71):",
+      "  --X        → enable / opt-in (default OFF unless preset overrides)",
+      "  --no-X     → disable / opt-out (default ON unless preset overrides)",
+      "",
+      "Default behavior (no preset):",
+      "  flows=purchase-journey, viewports=mobile,desktop, vitals-pages=10,",
+      "  visual-pages=5 (auto-zeroed when no LLM provider available),",
+      "  auto-selectors=ON (if LLM), learn=ON, cache=ON, visual-diff=ON,",
+      "  warmup=OFF, bypass-cache=OFF, ci=OFF.",
+    ].join("\n"),
+  )
   .requiredOption("--prod <url>", "Production URL (source of truth, e.g. Fresh site)")
   .requiredOption("--cand <url>", "Candidate URL (migrated site, e.g. TanStack)")
   .option(
