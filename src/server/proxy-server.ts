@@ -102,7 +102,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, runDir: 
   const reqUrl = new URL(req.url ?? "/", "http://placeholder");
   const path = decodeURIComponent(reqUrl.pathname);
 
-  // Proxy endpoint: /proxy?url=<encoded>
+  // Proxy endpoint: /proxy?url=<encoded>&viewport=mobile|desktop
+  // The viewport hint forces a mobile UA outbound + injects a 375-wide
+  // viewport meta tag so the cand iframe renders in the correct breakpoint
+  // even when the prod and cand origins differ. Issue #70.
   if (path === "/proxy") {
     const target = reqUrl.searchParams.get("url");
     if (!target) {
@@ -110,7 +113,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, runDir: 
       res.end("missing ?url=");
       return;
     }
-    return proxyRequest(req, res, target);
+    const viewport = reqUrl.searchParams.get("viewport");
+    const forceMobile = viewport === "mobile";
+    return proxyRequest(req, res, target, { forceMobile });
   }
 
   // Health
@@ -175,7 +180,12 @@ function serveStatic(res: ServerResponse, runDir: string, path: string): void {
   res.end(readFileSync(filePath));
 }
 
-async function proxyRequest(req: IncomingMessage, res: ServerResponse, targetUrl: string): Promise<void> {
+async function proxyRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  targetUrl: string,
+  opts: { forceMobile?: boolean } = {},
+): Promise<void> {
   let target: URL;
   try {
     target = new URL(targetUrl);
@@ -197,10 +207,19 @@ async function proxyRequest(req: IncomingMessage, res: ServerResponse, targetUrl
     if (STRIPPED_REQUEST_HEADERS.has(k.toLowerCase())) continue;
     headers[k] = Array.isArray(v) ? v.join(", ") : v;
   }
-  // Force a realistic UA so sites don't return bare error pages
-  headers["user-agent"] =
-    headers["user-agent"] ??
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+  // Force a realistic UA so sites don't return bare error pages. When the
+  // caller asked for `viewport=mobile`, send a mobile UA + the client-hint
+  // header that signals mobile — most sites branch on this for SSR.
+  if (opts.forceMobile) {
+    headers["user-agent"] =
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+    headers["sec-ch-ua-mobile"] = "?1";
+    headers["sec-ch-ua-platform"] = '"iOS"';
+  } else {
+    headers["user-agent"] =
+      headers["user-agent"] ??
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+  }
   headers.host = target.host;
 
   let upstream: Response;
@@ -231,16 +250,30 @@ async function proxyRequest(req: IncomingMessage, res: ServerResponse, targetUrl
   });
   res.setHeader("cache-control", "no-store");
 
-  // If HTML, inject base tag so relative URLs resolve to the target origin (not our proxy).
+  // If HTML, inject base tag so relative URLs resolve to the target origin
+  // (not our proxy). When forceMobile is set, also inject (or override) the
+  // viewport meta so the layout actually renders at the mobile breakpoint.
+  // Issue #70.
   const contentType = upstream.headers.get("content-type") ?? "";
   if (contentType.includes("text/html")) {
     const buf = await upstream.text();
     const baseTag = `<base href="${escapeAttr(target.toString())}">`;
-    const out = buf.includes("<head>")
-      ? buf.replace("<head>", `<head>${baseTag}`)
-      : buf.includes("<html")
-        ? buf.replace(/<html([^>]*)>/i, `<html$1><head>${baseTag}</head>`)
-        : `${baseTag}${buf}`;
+    let html = buf;
+    if (opts.forceMobile) {
+      const viewportMeta = `<meta name="viewport" content="width=375, initial-scale=1">`;
+      // Strip any existing viewport meta so ours wins; then inject our own.
+      html = html.replace(/<meta\s+[^>]*name=["']viewport["'][^>]*>/gi, "");
+      html = html.includes("<head>")
+        ? html.replace("<head>", `<head>${viewportMeta}`)
+        : html.includes("<html")
+          ? html.replace(/<html([^>]*)>/i, `<html$1><head>${viewportMeta}</head>`)
+          : `${viewportMeta}${html}`;
+    }
+    const out = html.includes("<head>")
+      ? html.replace("<head>", `<head>${baseTag}`)
+      : html.includes("<html")
+        ? html.replace(/<html([^>]*)>/i, `<html$1><head>${baseTag}</head>`)
+        : `${baseTag}${html}`;
     res.end(out);
     return;
   }
