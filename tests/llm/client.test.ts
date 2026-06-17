@@ -135,7 +135,10 @@ describe("callTool — Anthropic branch", () => {
     );
   });
 
-  it("routes selector-discovery feature to haiku model by default", async () => {
+  it("routes selector-discovery feature to sonnet model by default (#102)", async () => {
+    // Selectors regressed against bagaggio when Haiku was the default —
+    // sonnet is the safe baseline. Users can opt into Haiku with
+    // `--llm-tier-default haiku`.
     mockCreate.mockResolvedValue({
       content: [{ type: "tool_use", name: "t", input: {} }],
     });
@@ -146,8 +149,24 @@ describe("callTool — Anthropic branch", () => {
       tool: { name: "t", description: "d", inputSchema: { type: "object" } },
     });
     const call = mockCreate.mock.calls[0]?.[0];
-    expect(call.model).toBe("claude-haiku-4-5");
+    expect(call.model).toBe("claude-sonnet-4-6");
     expect(call.max_tokens).toBe(2000);
+  });
+
+  it("routes search-terms feature to haiku model by default", async () => {
+    // search-terms stays Haiku — pure copy-list classification, no
+    // structural reasoning needed.
+    mockCreate.mockResolvedValue({
+      content: [{ type: "tool_use", name: "t", input: {} }],
+    });
+    await callTool({
+      feature: "search-terms",
+      systemPrompt: "s",
+      userText: "u",
+      tool: { name: "t", description: "d", inputSchema: { type: "object" } },
+    });
+    const call = mockCreate.mock.calls[0]?.[0];
+    expect(call.model).toBe("claude-haiku-4-5");
   });
 
   it("routes visual-diff feature to sonnet model by default", async () => {

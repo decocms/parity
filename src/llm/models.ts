@@ -35,13 +35,24 @@ export type ModelTier = "haiku" | "sonnet" | "opus";
 
 export type Provider = "anthropic" | "openrouter" | "claude-agent-sdk";
 
-/** Default tier per feature — pick the cheapest model that does the job well. */
+/**
+ * Default tier per feature. Selector-related features (discovery, recovery,
+ * PLP/PDP matching) default to Sonnet because Haiku regressed real
+ * purchase-journey runs against bagaggio in 0.11.x: Haiku-discovered
+ * selectors didn't match the PLP markup and Haiku step-recovery couldn't
+ * find a product card either, causing the journey to skip enter-pdp and
+ * everything downstream. Lighter calls (search-terms) stay on Haiku.
+ * Issue #102 (regression from #66).
+ *
+ * Want the old Haiku-everywhere behavior to save cost? Use
+ * `--llm-tier-default haiku` to flip everything in one shot.
+ */
 export const DEFAULT_FEATURE_TIER: Record<Feature, ModelTier> = {
-  "selector-discovery": "haiku",
-  "step-recovery": "haiku",
+  "selector-discovery": "sonnet",
+  "step-recovery": "sonnet",
   "search-terms": "haiku",
-  "plp-matching": "haiku",
-  "pdp-matching": "haiku",
+  "plp-matching": "sonnet",
+  "pdp-matching": "sonnet",
   "section-understanding": "sonnet",
   "visual-diff": "sonnet",
   "issue-aggregation": "sonnet",

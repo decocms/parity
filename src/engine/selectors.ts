@@ -16,12 +16,23 @@ export const DEFAULT_SELECTORS = {
     "header a[href]:not([href='/']):not([href='#']):not([href*='login']):not([href*='cart'])",
   ],
   productCard: [
+    // Most explicit data attrs first
     "[data-product-card] a",
     "[data-deco='view-product'] a",
     "[data-testid='product-card'] a",
     ".product-card a",
+    // Deco TanStack PLP: <div data-product-list><div class="card"><a aria-label="view product" href=".../p">
+    // (Issue #102 — caught by live testing against bagaggio.)
+    "[data-product-list] a[aria-label='view product']",
+    "[data-product-list] a[href$='/p']",
+    "[data-product-list] a[href*='/p?']",
+    "a[aria-label='view product']",
+    // Generic VTEX / Shopify path conventions
     "article a[href*='/p/']",
     "a[href*='/products/']",
+    // Path ends in `/p` (Deco/VTEX product page convention)
+    "main a[href$='/p']",
+    "main a[href*='/p?']",
   ],
   buyButton: [
     "button:has-text('Comprar')",

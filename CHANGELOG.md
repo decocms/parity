@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.3](https://github.com/decocms/parity/compare/v0.11.2...v0.11.3) (2026-06-17)
+
+### Fixed
+
+* **`productCard` defaults now match Deco TanStack PLPs (#102).** Live testing against `bagaggio-tanstack.deco-cx.workers.dev` showed every purchase-journey aborting at step 3 (`enter-pdp` → "no product card found, recovery exhausted"). Root cause: the Deco TanStack PLP uses `<a aria-label="view product" href="/<product>/p">` (no `/p/` subpath, no `[data-product-card]` attr) — none of the seven baked-in candidates matched. Added five new defaults covering the Deco TanStack pattern: `[data-product-list] a[aria-label='view product']`, `[data-product-list] a[href$='/p']`, `[data-product-list] a[href*='/p?']`, `a[aria-label='view product']`, plus path-suffix variants. Journey on bagaggio now reaches step 6 (add-to-cart) where it surfaces a real bug — variant selection — instead of bailing at step 3.
+
+### Changed
+
+* **Default tier for selector-related features back to Sonnet.** PR #66 defaulted selector-discovery / step-recovery / plp-matching / pdp-matching to Haiku 4.5 for cost savings. Live testing showed Sonnet is the safer default for structural-reasoning calls — Haiku-discovered selectors didn't always match on real sites and Haiku-recovery couldn't find alternatives. `search-terms` (pure classification) stays on Haiku. Users who want the previous cheap behavior can opt in with `--llm-tier-default haiku`.
+
 ## [0.11.2](https://github.com/decocms/parity/compare/v0.11.1...v0.11.2) (2026-06-17)
 
 ### Added
