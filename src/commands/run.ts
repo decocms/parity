@@ -73,6 +73,14 @@ export interface RunOptions {
   learn?: boolean;
   /** Extra pages (beyond flows) to crawl just for Web Vitals coverage. Default 10. */
   vitalsPages?: number;
+  /**
+   * How many viewports run concurrently during collect. Default 2, which
+   * means the standard `mobile,desktop` set runs fully in parallel (with
+   * each viewport already running its prod+cand sides in parallel via
+   * `runOneSide`). Set to 1 on memory-constrained machines or for runs
+   * with >2 viewports if Chromium memory becomes an issue.
+   */
+  maxViewportConcurrency?: number;
   /** Pages to compare visually (prod vs cand screenshots + LLM). Default 5. */
   visualPages?: number;
   /** Disable the visual-diff capture pass entirely. */
@@ -697,21 +705,24 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       return { captures, pages };
     };
 
-    for (const viewport of viewports) {
-      // Run prod + cand in parallel. Cuts ~50% off this viewport's
-      // wall-clock contribution — independently verified against the
-      // same pattern used in src/commands/journey.ts.
+    // Per-viewport runner. Each viewport runs its two sides in parallel
+    // (via runOneSide × Promise.all). Viewports themselves can also run
+    // in parallel — up to `maxViewportConcurrency` (default 2, i.e. the
+    // default mobile+desktop set runs fully parallel). Cap exists for
+    // memory-constrained machines and for runs with >2 viewports.
+    const runOneViewport = async (viewport: Viewport): Promise<void> => {
       const [prodResult, candResult] = await Promise.all([
         runOneSide(viewport, "prod"),
         runOneSide(viewport, "cand"),
       ]);
+      // Merge into shared accumulators sequentially (single-threaded
+      // after the awaits, so no need for locks). Promotion runs here too
+      // so `learned` is never touched concurrently — promoteStepsFromFlow
+      // is deterministic over captures, so the deferral changes no
+      // semantics.
       for (const r of [prodResult, candResult]) {
         for (const cap of r.captures) {
           allFlowCaptures.push(cap);
-          // Promotion runs sequentially after Promise.all so the
-          // learned-selectors object is never mutated from two sides at
-          // once. The promotion logic itself is deterministic given the
-          // captures so deferring it changes no semantics.
           if (opts.learn !== false) {
             const result = promoteStepsFromFlow(learned, platform, prodHost, cap);
             promotedCount += result.promoted;
@@ -720,7 +731,10 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         }
         for (const p of r.pages) allPageCaptures.push(p);
       }
-    }
+    };
+
+    const maxViewportConcurrency = Math.max(1, opts.maxViewportConcurrency ?? 2);
+    await runWithConcurrency(viewports, maxViewportConcurrency, runOneViewport);
     stampPhase("collect");
     spinner.succeed("Coleta concluída");
 

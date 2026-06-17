@@ -75,6 +75,12 @@ program
     10,
   )
   .option(
+    "--max-viewport-concurrency <n>",
+    "How many viewports run concurrently during collect (default 2: mobile+desktop together). Set to 1 if you hit OOM with many viewports.",
+    (v) => Number(v),
+    2,
+  )
+  .option(
     "--visual-pages <n>",
     "Pages to compare visually via LLM (home + sampled PLPs/PDPs from sitemap, default 5)",
     (v) => Number(v),

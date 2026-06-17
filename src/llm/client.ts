@@ -139,6 +139,44 @@ function makeTimeoutSignal(ms: number): { signal: AbortSignal; clear: () => void
 }
 
 /**
+ * Concurrency cap on in-flight LLM calls. With prod+cand running in
+ * parallel within each viewport, and viewports themselves now running
+ * in parallel, the recovery-budget × side count can easily push 8–12
+ * simultaneous LLM calls — past Anthropic's tier-1 rate limit (4 RPS)
+ * and into OpenRouter throttling for some models. The semaphore serves
+ * two purposes:
+ *   1. Avoids 429s that would otherwise show up as silent recovery
+ *      failures mid-flow.
+ *   2. Keeps the failure mode predictable — calls queue rather than
+ *      blow up, so a parallel run is deterministically as fast as a
+ *      serial run when the LLM is the bottleneck.
+ * Default 3 leaves headroom for the post-collect aggregate call to
+ * fire even when collect is at peak concurrency.
+ */
+const MAX_CONCURRENT_LLM_CALLS = 3;
+let activeLlmCalls = 0;
+const llmQueue: Array<() => void> = [];
+
+function acquireLlmSlot(): Promise<void> {
+  if (activeLlmCalls < MAX_CONCURRENT_LLM_CALLS) {
+    activeLlmCalls++;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    llmQueue.push(() => {
+      activeLlmCalls++;
+      resolve();
+    });
+  });
+}
+
+function releaseLlmSlot(): void {
+  activeLlmCalls--;
+  const next = llmQueue.shift();
+  if (next) next();
+}
+
+/**
  * Unified tool-call interface across providers. The `feature` field selects
  * which model tier we use — see `src/llm/models.ts` for the default map.
  * Returns the parsed tool input object, or null if no provider is configured
@@ -151,10 +189,16 @@ export async function callTool<T = Record<string, unknown>>(
   if (!provider) return null;
   const model = resolveModel(params.feature, provider);
   const timeoutMs = params.timeoutMs ?? defaultTimeout(params);
-  if (provider === "anthropic") return callAnthropicTool<T>(params, model, timeoutMs);
-  if (provider === "openrouter") return callOpenRouterTool<T>(params, model, timeoutMs);
-  if (provider === "claude-agent-sdk") return callToolSdk<T>({ ...params, model, timeoutMs });
-  return null;
+  await acquireLlmSlot();
+  try {
+    if (provider === "anthropic") return await callAnthropicTool<T>(params, model, timeoutMs);
+    if (provider === "openrouter") return await callOpenRouterTool<T>(params, model, timeoutMs);
+    if (provider === "claude-agent-sdk")
+      return await callToolSdk<T>({ ...params, model, timeoutMs });
+    return null;
+  } finally {
+    releaseLlmSlot();
+  }
 }
 
 async function callAnthropicTool<T>(
@@ -416,16 +460,23 @@ export function tryRepairJson(raw: string): string | null {
 
 /**
  * Free-form text response (no tool-use). Used by `parity explain`.
+ * Shares the global concurrency cap with `callTool` (see `acquireLlmSlot`).
  */
 export async function callMessage(params: MessageCallParams): Promise<string | null> {
   const provider = getProvider();
   if (!provider) return null;
   const model = resolveModel(params.feature, provider);
   const timeoutMs = params.timeoutMs ?? 60_000;
-  if (provider === "anthropic") return callAnthropicMessage(params, model, timeoutMs);
-  if (provider === "openrouter") return callOpenRouterMessage(params, model, timeoutMs);
-  if (provider === "claude-agent-sdk") return callMessageSdk({ ...params, model, timeoutMs });
-  return null;
+  await acquireLlmSlot();
+  try {
+    if (provider === "anthropic") return await callAnthropicMessage(params, model, timeoutMs);
+    if (provider === "openrouter") return await callOpenRouterMessage(params, model, timeoutMs);
+    if (provider === "claude-agent-sdk")
+      return await callMessageSdk({ ...params, model, timeoutMs });
+    return null;
+  } finally {
+    releaseLlmSlot();
+  }
 }
 
 async function callAnthropicMessage(
