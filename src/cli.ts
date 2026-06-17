@@ -217,7 +217,7 @@ program
   .command("serve")
   .argument("<runId>", "Run ID to serve")
   .description(
-    "Sobe um HTTP server local que serve o report e faz proxy de iframes externos (remove X-Frame-Options/CSP), tornando a aba Side-by-side funcional pra qualquer site.",
+    "Spawns a local HTTP server that serves the report and proxies external iframes (strips X-Frame-Options/CSP), making the Side-by-side tab functional for any site.",
   )
   .option("--output <dir>", "Output directory where runs live", "./parity-output")
   .option("--port <n>", "Fixed port (default: auto-pick free port)", (v) => Number(v))
@@ -248,9 +248,9 @@ program
 program
   .command("cache")
   .description(
-    "Análise de cache focada em cand. Crawla N páginas (mais leve que vitals: sem screenshot, sem vitals, sem scroll), agrupa requests por categoria, lista oportunidades de assets MISS.",
+    "Cache analysis focused on cand. Crawls N pages (lighter than `vitals`: no screenshots, no vitals, no scroll), groups requests by category, lists MISS-asset opportunities.",
   )
-  .requiredOption("--prod <url>", "Production URL (referência opcional)")
+  .requiredOption("--prod <url>", "Production URL (optional reference)")
   .requiredOption("--cand <url>", "Candidate URL (foco)")
   .option("--urls <list-or-file>", "Comma-separated paths or .txt file (1/line). Overrides sitemap.")
   .option("--pages <n>", "Max pages to crawl from sitemap", (v) => Number(v), 30)
@@ -266,7 +266,7 @@ program
 program
   .command("vitals")
   .description(
-    "Crawleia múltiplas páginas (via sitemap.xml ou --urls) e compara Web Vitals prod vs cand em cada uma. Output HTML com top piores/melhores expandidos.",
+    "Crawls multiple pages (via sitemap.xml or --urls) and compares Web Vitals prod vs cand on each. HTML output with the top worst/best expanded.",
   )
   .requiredOption("--prod <url>", "Production URL (base)")
   .requiredOption("--cand <url>", "Candidate URL (base)")
@@ -283,7 +283,7 @@ program
 program
   .command("journey")
   .description(
-    "CI-friendly: roda só o purchase-journey (home → PLP → PDP → frete → carrinho → frete carrinho → checkout) e compara prod vs cand step-by-step",
+    "CI-friendly: runs only the purchase journey (home → PLP → PDP → shipping → cart → cart shipping → checkout) and compares prod vs cand step by step.",
   )
   .requiredOption("--prod <url>", "Production URL")
   .requiredOption("--cand <url>", "Candidate URL")
@@ -300,7 +300,12 @@ program
     "Demote prod-side cart-empty journey failures (VTEX session quirk) from failed to skipped. The cart-reveal-mode-divergence check still emits critical if prod/cand markup intents differ, so this flag never masks a real regression. See issue #12.",
     false,
   )
+  .option("--pt", "Tell the LLM to respond in Brazilian Portuguese. Issue #67.")
   .action(async (opts) => {
+    if (opts.pt) {
+      const { setLlmLanguage } = await import("./llm/client.ts");
+      setLlmLanguage("pt");
+    }
     process.exit(await journeyCommand(opts));
   });
 
@@ -513,7 +518,12 @@ program
     "--no-llm",
     "Skip the LLM call (still writes the markdown bundle). Use when offline or to avoid API costs.",
   )
+  .option("--pt", "Tell the LLM to respond in Brazilian Portuguese. Issue #67.")
   .action(async (opts) => {
+    if (opts.pt) {
+      const { setLlmLanguage } = await import("./llm/client.ts");
+      setLlmLanguage("pt");
+    }
     process.exit(
       await fixCommand({
         prod: opts.prod,

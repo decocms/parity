@@ -64,7 +64,7 @@ export interface RenderIssueOptions {
  * report. Composition (in order):
  *   - severity / category / check / page tags
  *   - summary (`<h3>`)
- *   - optional `<details>` blocks: Detalhes, Reprodução, Fix sugerido
+ *   - optional `<details>` blocks: Details, Reproduction, Suggested fix
  *   - optional screenshot grid when both `evidence` and `runDir` are set
  *
  * Behavior is identical to the legacy private `renderIssue` in render.ts;

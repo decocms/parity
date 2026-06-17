@@ -987,10 +987,10 @@ function renderPromptPanel(run: Run): string {
   const charCount = md.length;
   return `
   <div class="card">
-    <h2>Prompt para LLM</h2>
+    <h2>LLM prompt</h2>
     <div class="hint">Ready to paste into Claude / ChatGPT / any chat. Lists ranked issues + migration context + specific diagnose-and-fix instructions.</div>
     <div class="prompt-toolbar">
-      <button id="prompt-copy">📋 Copiar markdown</button>
+      <button id="prompt-copy">📋 Copy markdown</button>
       <button class="secondary" id="prompt-download">⬇ Download .md</button>
       <span class="feedback" id="prompt-feedback"></span>
       <div class="right">${charCount.toLocaleString("en-US")} chars · ${(charCount / 1024).toFixed(1)} KB</div>
@@ -1058,7 +1058,7 @@ function renderSideBySidePanel(run: Run): string {
   <div class="card">
     <h2>Side-by-side mobile</h2>
     <div class="hint">Compare prod (Fresh, left) with cand (TanStack, right) in mobile viewport. Scroll sync works when the proxy is active OR when the site implements a <code>postMessage</code> handler.</div>
-    <div id="sbs-status" class="sbs-status warn">carregando…</div>
+    <div id="sbs-status" class="sbs-status warn">loading…</div>
     <div class="sbs-toolbar">
       ${pairs.map((p, i) => `<button data-sbs-btn="${i}">${esc(p.label)}</button>`).join("")}
       <label class="label"><input type="checkbox" id="sbs-sync" checked/> Synchronized scroll</label>
@@ -1149,10 +1149,10 @@ export function renderHtmlReport(run: Run, runDir: string): string {
       </div>
       <div class="header-actions">
         <button class="action-btn" id="theme-toggle">☀ Light</button>
-        <button class="action-btn" id="help-btn">? Atalhos</button>
+        <button class="action-btn" id="help-btn">? Shortcuts</button>
       </div>
     </header>
-    ${run.partial ? `<div style="background:#7c2d12;color:#fed7aa;padding:12px 24px;border-bottom:2px solid #ea580c;font-weight:600">⚠ Partial run — interrupted${run.partialReason ? ` (${esc(run.partialReason)})` : ""}. Verdict, top-issues and some sections may be incomplete.</div>` : ""}
+    ${run.partial ? `<div style="background:#7c2d12;color:#fed7aa;padding:12px 24px;border-bottom:2px solid #ea580c;font-weight:600">⚠ Partial run — interrupted${run.partialReason ? ` (${esc(run.partialReason)})` : ""}. Verdict, top-issues, and some sections may be incomplete.</div>` : ""}
     ${renderTimingsBar(run)}
     <main class="app-main">
       <section class="panel" data-panel="summary">
@@ -1198,17 +1198,17 @@ export function renderHtmlReport(run: Run, runDir: string): string {
   </div>
   <div class="help-modal" id="help-modal">
     <div class="modal-inner">
-      <h3>Atalhos de teclado</h3>
+      <h3>Keyboard shortcuts</h3>
       <table>
         <tbody>
-          <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Navegar entre abas</td></tr>
-          <tr><td><kbd>/</kbd></td><td>Foco no campo de busca da aba ativa</td></tr>
-          <tr><td><kbd>t</kbd></td><td>Alternar tema dark/light</td></tr>
-          <tr><td><kbd>?</kbd></td><td>Mostrar este painel</td></tr>
-          <tr><td><kbd>Esc</kbd></td><td>Fechar</td></tr>
+          <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Navigate between tabs</td></tr>
+          <tr><td><kbd>/</kbd></td><td>Focus the active tab's search field</td></tr>
+          <tr><td><kbd>t</kbd></td><td>Toggle dark/light theme</td></tr>
+          <tr><td><kbd>?</kbd></td><td>Show this panel</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Close</td></tr>
         </tbody>
       </table>
-      <div style="margin-top:16px;text-align:right"><button class="action-btn" id="help-close">Fechar</button></div>
+      <div style="margin-top:16px;text-align:right"><button class="action-btn" id="help-close">Close</button></div>
     </div>
   </div>
   <script>${REPORT_JS}</script>

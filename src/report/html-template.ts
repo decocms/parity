@@ -1298,7 +1298,7 @@ export const REPORT_JS = `
       if (imgs.length === 0) return;
       var lb = document.createElement('div');
       lb.className = 'vd-lightbox';
-      lb.innerHTML = '<button class="vd-lightbox-close" aria-label="Fechar">✕</button><img alt="zoom"/>';
+      lb.innerHTML = '<button class="vd-lightbox-close" aria-label="Close">✕</button><img alt="zoom"/>';
       document.body.appendChild(lb);
       var lbImg = lb.querySelector('img');
       var lbClose = lb.querySelector('.vd-lightbox-close');
