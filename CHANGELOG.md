@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.15](https://github.com/decocms/parity/compare/v0.11.14...v0.11.15) (2026-06-17)
+
+### Changed
+
+* **Viewports now run in parallel during collect.** Building on 0.11.14's parallel-sides change, the outer `for (const viewport of viewports)` loop is now wrapped in `runWithConcurrency` so the default `mobile,desktop` set runs fully concurrent — 4 BrowserContexts simultaneously (mobile/prod + mobile/cand + desktop/prod + desktop/cand). **Expected collect speedup: another ~40% on top of 0.11.14** (~9min → ~5–6min on bagaggio).
+* **New `--max-viewport-concurrency <n>` flag (default 2).** Lets memory-constrained machines fall back to serial-viewport behavior, and caps concurrency for runs that add a 3rd viewport (e.g. `--viewports mobile,tablet,desktop`).
+* **LLM call concurrency cap.** With 4 sides running, recovery-budget × side count could push 8–12 simultaneous LLM calls — past Anthropic tier-1's 4 RPS. Added a process-global semaphore in `src/llm/client.ts` (3 concurrent slots, queue thereafter) so calls never blow up with 429s — they queue. Default of 3 leaves headroom for the post-collect aggregate call.
+
 ## [0.11.14](https://github.com/decocms/parity/compare/v0.11.13...v0.11.14) (2026-06-17)
 
 ### Added
