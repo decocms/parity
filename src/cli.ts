@@ -112,6 +112,22 @@ program
     "--pt",
     "Tell the LLM to respond in Brazilian Portuguese. Only affects LLM-generated content (issues, explain, prompts) — the static HTML report stays in English. Issue #67.",
   )
+  .option(
+    "--llm <provider>",
+    "Force LLM provider: anthropic | openrouter | claude-code | none. Default: auto-detect (anthropic key → openrouter key → local claude CLI → none). Issue #66.",
+  )
+  .option(
+    "--llm-model <overrides>",
+    "Per-feature model override, e.g. visual-diff=claude-opus-4-7,explain=claude-opus-4-7. Features: selector-discovery, step-recovery, search-terms, plp-matching, pdp-matching, section-understanding, visual-diff, issue-aggregation, explain. Issue #66.",
+  )
+  .option(
+    "--llm-tier-default <tier>",
+    "Override the default tier (haiku | sonnet | opus) for every feature that doesn't have a per-feature override. Issue #66.",
+  )
+  .option(
+    "--llm-model-default <model>",
+    "Force every LLM call to use this exact model ID, ignoring per-feature defaults. Issue #66.",
+  )
   .action(async (opts) => {
     // --flow is just sugar for --flows with a single value
     if (opts.flow) {

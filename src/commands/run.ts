@@ -19,7 +19,8 @@ import {
   saveLearned,
 } from "../learned/repo.ts";
 import { aggregateIssues } from "../llm/aggregate-issues.ts";
-import { isLlmAvailable, providerLabel, setLlmLanguage } from "../llm/client.ts";
+import { disableLlm, isLlmAvailable, providerLabel, setForcedProvider, setLlmLanguage } from "../llm/client.ts";
+import { applyModelOverrides, parseFeatureOverrides, type ModelTier, type Provider } from "../llm/models.ts";
 import { discoverSelectorsFromUrl } from "../llm/discover-selectors.ts";
 import { fingerprintPdp, matchPdps } from "../llm/match-pdp.ts";
 import { renderHtmlReport } from "../report/render.ts";
@@ -139,6 +140,20 @@ export interface RunOptions {
    * HTML report stays in English. Issue #67.
    */
   pt?: boolean;
+  /**
+   * Force LLM provider. `claude-code` uses the local `claude` CLI via the
+   * Claude Agent SDK. Defaults to auto-detect. Issue #66.
+   */
+  llm?: "anthropic" | "openrouter" | "claude-code" | "none" | "auto";
+  /**
+   * Per-feature model override: `<feature>=<model>,...`. See `src/llm/models.ts`
+   * for the list of features. Issue #66.
+   */
+  llmModel?: string;
+  /** Override the default tier (haiku/sonnet/opus). Issue #66. */
+  llmTierDefault?: "haiku" | "sonnet" | "opus";
+  /** Force every LLM call to use this exact model ID. Issue #66. */
+  llmModelDefault?: string;
 }
 
 type PresetDefaults = Partial<Pick<RunOptions,
@@ -214,12 +229,57 @@ const SEVERITY_RANK: Record<Issue["severity"], number> = {
   low: 3,
 };
 
+/**
+ * Apply `--llm*` flags to the provider/model registry. Returns a user-facing
+ * error string if any flag was malformed; `null` on success. Called once
+ * before any LLM activity. Issue #66.
+ */
+function applyLlmOptions(opts: RunOptions): string | null {
+  const llmFlag = opts.llm;
+  if (llmFlag && llmFlag !== "auto") {
+    if (llmFlag === "none") {
+      disableLlm();
+    } else {
+      const map: Record<string, Provider> = {
+        anthropic: "anthropic",
+        openrouter: "openrouter",
+        "claude-code": "claude-agent-sdk",
+      };
+      const target = map[llmFlag];
+      if (!target) return `--llm: invalid provider "${llmFlag}" (valid: anthropic, openrouter, claude-code, none, auto)`;
+      const err = setForcedProvider(target);
+      if (err) return err;
+    }
+  }
+  if (opts.llmModel) {
+    const { overrides, errors } = parseFeatureOverrides(opts.llmModel);
+    if (errors.length) return `--llm-model: ${errors.join("; ")}`;
+    applyModelOverrides({ perFeature: overrides });
+  }
+  if (opts.llmTierDefault) {
+    const tier = opts.llmTierDefault as ModelTier;
+    if (!["haiku", "sonnet", "opus"].includes(tier)) {
+      return `--llm-tier-default: invalid tier "${opts.llmTierDefault}" (valid: haiku, sonnet, opus)`;
+    }
+    applyModelOverrides({ defaultTier: tier });
+  }
+  if (opts.llmModelDefault) {
+    applyModelOverrides({ defaultModel: opts.llmModelDefault });
+  }
+  return null;
+}
+
 export async function runCommand(rawOpts: RunOptions): Promise<number> {
   const opts = applyPreset(rawOpts);
   if (rawOpts.preset) {
     console.log(chalk.dim(`  preset: ${rawOpts.preset}`));
   }
   if (opts.pt) setLlmLanguage("pt");
+  const llmCfgErr = applyLlmOptions(opts);
+  if (llmCfgErr) {
+    console.error(chalk.red(`  ${llmCfgErr}`));
+    return 2;
+  }
   const flows = opts.flows.split(",").map((s) => s.trim()) as FlowName[];
   const viewports = opts.viewports.split(",").map((s) => s.trim()) as Viewport[];
   const failOn = opts.failOn

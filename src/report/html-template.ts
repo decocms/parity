@@ -1317,7 +1317,11 @@ export const REPORT_JS = `
     // ---- Side-by-side iframe controller ----
     var sbsState = window.__parity_sbs || {};
     var proxyBase = window.__parity_proxy; // set by 'parity serve' on the served page
-    function proxied(u) { return proxyBase ? proxyBase + encodeURIComponent(u) : u; }
+    // Side-by-side is mobile-only today. When the proxy is active, force the
+    // upstream response to render at the mobile breakpoint by appending
+    // viewport=mobile — the proxy strips X-Frame-Options AND injects a 375
+    // viewport meta + mobile UA. Issue #70.
+    function proxied(u) { return proxyBase ? proxyBase + encodeURIComponent(u) + '&viewport=mobile' : u; }
     var statusEl = document.getElementById('sbs-status');
     if (statusEl) {
       statusEl.textContent = proxyBase

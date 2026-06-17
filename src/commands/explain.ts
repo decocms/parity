@@ -24,6 +24,7 @@ export async function explainCommand(runId: string, issueId: string, output: str
 
   console.log(chalk.dim("Consultando LLM…\n"));
   const text = await callMessage({
+    feature: "explain",
     systemPrompt: ISSUE_AGGREGATOR_SYSTEM_PROMPT,
     userText: `Faça um deep-dive técnico sobre esta issue específica de uma migração Deco. Liste causa raiz prováveis e ações concretas em ordem de probabilidade.
 

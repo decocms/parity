@@ -92,6 +92,7 @@ export async function aggregateIssues(input: AggregateInput): Promise<Issue[]> {
   );
 
   const parsed = await callTool<{ issues?: Partial<Issue>[] }>({
+    feature: "issue-aggregation",
     systemPrompt: ISSUE_AGGREGATOR_SYSTEM_PROMPT,
     userText: `Analise os resultados abaixo e produza issues priorizadas via report_issues.\n\n${userContent}`,
     maxTokens: 4096,

@@ -1088,7 +1088,7 @@ interface NavEntry {
 }
 
 function buildNav(run: Run): NavEntry[] {
-  return [
+  const entries: NavEntry[] = [
     { tab: "summary", label: "Dashboard", icon: "🏠" },
     { tab: "visualdiff", label: "Visual Diff", icon: "🖼", count: run.visualDiff?.pagesWithDiffs },
     { tab: "seo", label: "SEO", icon: "🔍", count: run.seo?.issues.length },
@@ -1101,8 +1101,14 @@ function buildNav(run: Run): NavEntry[] {
     { tab: "pages", label: "Pages", icon: "📄" },
     { tab: "console", label: "Console", icon: "🔧" },
     { tab: "network", label: "Network", icon: "🌐" },
-    { tab: "diff", label: "Diff", icon: "📈" },
   ];
+  // Diff tab only when a baseline is loaded — otherwise the panel just
+  // shows an empty state that looks like a bug. Use --baseline <name> on
+  // `parity run` to enable. Issue #68.
+  if (run.baseline) {
+    entries.push({ tab: "diff", label: "Diff", icon: "📈" });
+  }
+  return entries;
 }
 
 export function renderHtmlReport(run: Run, runDir: string): string {
@@ -1191,9 +1197,7 @@ export function renderHtmlReport(run: Run, runDir: string): string {
       <section class="panel" data-panel="network">
         ${renderNetworkPanel(run)}
       </section>
-      <section class="panel" data-panel="diff">
-        ${renderDiffPanel(run, runDir)}
-      </section>
+      ${run.baseline ? `<section class="panel" data-panel="diff">${renderDiffPanel(run, runDir)}</section>` : ""}
     </main>
   </div>
   <div class="help-modal" id="help-modal">
