@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.7](https://github.com/decocms/parity/compare/v0.11.6...v0.11.7) (2026-06-17)
+
+### Fixed
+
+* **First-run UX after `npm install -g`.** Two papercuts:
+  1. **Playwright Chromium wasn't auto-installed.** A fresh global install left users with `browserType.launch: Executable doesn't exist at ...` plus a stack trace on the first `parity run`. Now there's a `postinstall` script that runs `npx playwright install chromium` automatically (one-time, ~140 MB). Skippable via `PARITY_SKIP_PLAYWRIGHT_INSTALL=1` for CI / Docker / monorepos that manage browsers separately. Failures during postinstall (offline, corp proxy) are downgraded to a warning so the global install itself still completes.
+  2. **`launchBrowser` now catches the missing-browser error** and prints a single clear instruction (`npx playwright install chromium`) instead of Playwright's ASCII banner + stack trace. Original error is preserved on `.cause` for debugging.
+
+### Known cosmetic warning
+
+The `@anthropic-ai/claude-agent-sdk` peer-dep on `zod@^4.0.0` clashes with parity's `zod@^3.x`. The warning is harmless — npm nests the two versions and everything works. A migration to zod 4 is tracked separately (lots of schema API differences).
+
 ## [0.11.6](https://github.com/decocms/parity/compare/v0.11.5...v0.11.6) (2026-06-17)
 
 ### Added

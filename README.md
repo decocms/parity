@@ -26,10 +26,14 @@ Three use cases drive the design:
 ## Quickstart
 
 ```bash
-# Install
+# Install — auto-installs Playwright Chromium on postinstall (~140 MB, one-time)
 npm install -g @decocms/parity
 # or run without install
 npx @decocms/parity run --prod ... --cand ...
+
+# In CI / behind a corp proxy? Skip the auto-install and do it later:
+# PARITY_SKIP_PLAYWRIGHT_INSTALL=1 npm install -g @decocms/parity
+# npx playwright install chromium
 
 # First-time smoke run (~30s, no LLM needed)
 parity run --prod https://oldsite.com --cand https://newsite.example.dev --preset smoke --open
