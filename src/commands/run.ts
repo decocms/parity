@@ -241,7 +241,8 @@ function applyLlmOptions(opts: RunOptions): string | null {
       };
       const target = map[llmFlag];
       if (!target) return `--llm: invalid provider "${llmFlag}" (valid: anthropic, openrouter, claude-code, none, auto)`;
-      setForcedProvider(target);
+      const err = setForcedProvider(target);
+      if (err) return err;
     }
   }
   if (opts.llmModel) {

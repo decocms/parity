@@ -19,17 +19,40 @@ let llmDisabled = false;
 
 /**
  * Force a specific provider (set by `--llm <name>`). Pass `null` to clear and
- * fall back to auto-detection.
+ * fall back to auto-detection. Returns a user-facing error string when the
+ * caller asks for a provider whose required credentials are missing — that
+ * way the user fails fast at startup instead of getting a 401 from the API
+ * mid-run.
  */
-export function setForcedProvider(p: Provider | null): void {
+export function setForcedProvider(p: Provider | null): string | null {
+  if (p === "anthropic" && !process.env.ANTHROPIC_API_KEY) {
+    return "--llm anthropic requires ANTHROPIC_API_KEY";
+  }
+  if (p === "openrouter" && !process.env.OPENROUTER_API_KEY) {
+    return "--llm openrouter requires OPENROUTER_API_KEY";
+  }
+  if (p === "claude-agent-sdk" && !isClaudeAgentSdkAvailable()) {
+    return "--llm claude-code requires a local `claude` CLI logged in (~/.claude/ not found)";
+  }
   forcedProvider = p;
   if (p) llmDisabled = false;
+  return null;
 }
 
 /** Disable LLM entirely (set by `--llm none`). Overrides forced provider. */
 export function disableLlm(): void {
   llmDisabled = true;
   forcedProvider = null;
+}
+
+/**
+ * Reset all module-level LLM state. Tests use this to start clean between
+ * cases; production code shouldn't need it but it's exposed for libraries
+ * that embed the parity engine in long-lived processes.
+ */
+export function resetLlmState(): void {
+  forcedProvider = null;
+  llmDisabled = false;
 }
 
 /**
@@ -298,7 +321,7 @@ async function openRouterToolOnce<T>(
   }
 }
 
-function tryRepairJson(raw: string): string | null {
+export function tryRepairJson(raw: string): string | null {
   let s = raw.trim();
   if (!s) return null;
   const fence = s.match(/^```(?:json)?\s*([\s\S]*?)\s*```\s*$/);
