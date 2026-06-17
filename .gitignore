@@ -36,3 +36,4 @@ bun-debug.log*
 
 # TypeScript
 *.tsbuildinfo
+parity-output*/
