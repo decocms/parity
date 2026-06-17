@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.8](https://github.com/decocms/parity/compare/v0.11.7...v0.11.8) (2026-06-17)
+
+### Fixed
+
+* **CI on `main` was broken across the 0.11.x patch series.** Three issues converged: (a) the new `postinstall` script in 0.11.7 used CommonJS `require()` but the package is `"type": "module"`, so every fresh `bun install --frozen-lockfile` (including the CI install step) threw `ReferenceError: require is not defined`. (b) Several lint errors carried over from PRs that used `--admin` to bypass CI (template-literal-as-string, assign-in-while-conditions in the new `plp-pagination` check, `delete attrs[name]` flagged by `noDelete`). (c) The earlier `0.11.4` HTML-compaction code in `discover-selectors`/`recover-step` triggered the same `noDelete` rule.
+* **`postinstall.js` renamed to `postinstall.cjs`** so it runs as CommonJS regardless of the package's `"type"`. `package.json` `files` list and the `postinstall` script invocation updated accordingly.
+* **Lint clean across the repo.** `bun run lint` returns zero errors. Loop patterns rewritten from `while ((m = re.exec(s)))` to `for (;;)` + early-break (biome's `noAssignInExpressions`). Two intentional `delete` calls on cheerio attribs get a scoped `biome-ignore` with the rationale (cheerio serializes `undefined`-valued attrs as empty strings; only `delete` actually removes them).
+
 ## [0.11.7](https://github.com/decocms/parity/compare/v0.11.6...v0.11.7) (2026-06-17)
 
 ### Fixed
