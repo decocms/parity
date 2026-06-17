@@ -147,7 +147,7 @@ export async function plpPagination(ctx: CheckContext): Promise<CheckResult> {
     durationMs: Date.now() - start,
     summary:
       issues.length === 0
-        ? `PLP pagination working on both sides (tested page=2 + page=3)`
+        ? "PLP pagination working on both sides (tested page=2 + page=3)"
         : `${issues.length} pagination issue(s) — see details`,
     issues,
     data,
@@ -179,8 +179,9 @@ async function fetchPlpProducts(url: string): Promise<PlpFetchResult> {
     // OR containing `/p/` OR `/products/`.
     const paths = new Set<string>();
     const re = /href="([^"]+\/p(?:\?[^"]*|\/[^"]+|))"/gi;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(html))) {
+    for (;;) {
+      const m = re.exec(html);
+      if (!m) break;
       const path = m[1];
       if (!path) continue;
       // Normalize: drop query, drop trailing slash. We're checking SET
@@ -190,7 +191,9 @@ async function fetchPlpProducts(url: string): Promise<PlpFetchResult> {
       paths.add(normalized);
     }
     const re2 = /href="([^"]+\/products\/[^"]+)"/gi;
-    while ((m = re2.exec(html))) {
+    for (;;) {
+      const m = re2.exec(html);
+      if (!m) break;
       const path = m[1];
       if (path) paths.add(path.split("?")[0]!.replace(/\/$/, ""));
     }
@@ -230,8 +233,9 @@ async function discoverPlpFromHome(homeUrl: string): Promise<string | null> {
     const html = await res.text();
     const candidates = new Set<string>();
     const re = /href="([^"]+)"/gi;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(html))) {
+    for (;;) {
+      const m = re.exec(html);
+      if (!m) break;
       const href = m[1];
       if (!href) continue;
       // Skip non-PLP hrefs
@@ -239,7 +243,9 @@ async function discoverPlpFromHome(homeUrl: string): Promise<string | null> {
         /^https?:\/\//.test(href) ||
         href.startsWith("#") ||
         href === "/" ||
-        /\/(p|cart|carrinho|checkout|account|conta|login|wishlist|favoritos)(\/|$|\?)/i.test(href) ||
+        /\/(p|cart|carrinho|checkout|account|conta|login|wishlist|favoritos)(\/|$|\?)/i.test(
+          href,
+        ) ||
         /\.(jpg|png|webp|css|js|svg|ico|woff)/i.test(href)
       ) {
         continue;
@@ -272,8 +278,7 @@ function pickPlpUrl(flows: CheckContext["prodFlows"]): string | null {
         const u = new URL(p.url);
         // PLP heuristic: depth-1 or depth-2 path, not /p or /products
         return (
-          u.pathname.split("/").filter(Boolean).length <= 2 &&
-          !/\/p$|\/products\//.test(u.pathname)
+          u.pathname.split("/").filter(Boolean).length <= 2 && !/\/p$|\/products\//.test(u.pathname)
         );
       } catch {
         return false;

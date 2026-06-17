@@ -233,8 +233,16 @@ export function compactHtmlForSelectors(html: string, maxChars = 30_000): string
       if (attrs.class) {
         const tokens = attrs.class.split(/\s+/).filter(Boolean);
         const kept = tokens.filter((t) => isSemanticClass(t));
-        attrs.class = kept.join(" ");
-        if (!attrs.class) delete attrs.class;
+        const joined = kept.join(" ");
+        if (joined) {
+          attrs.class = joined;
+        } else {
+          // Drop the attribute entirely when nothing semantic remains —
+          // cheerio's attribs type is `Record<string, string>` so we
+          // can't assign undefined; delete is the right tool here.
+          // biome-ignore lint/performance/noDelete: cheerio attribs are a plain object that needs the key gone, not undefined.
+          delete attrs.class;
+        }
       }
     });
 

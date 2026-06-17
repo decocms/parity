@@ -326,7 +326,10 @@ function renderFlowStepTimeline(checkName: string, run: Run, runDir: string): st
   if (captures.length === 0) return "";
 
   // Pair prod + cand by viewport so the user sees side-by-side step state.
-  const byViewport = new Map<string, { prod?: typeof captures[0]; cand?: typeof captures[0] }>();
+  const byViewport = new Map<
+    string,
+    { prod?: (typeof captures)[0]; cand?: (typeof captures)[0] }
+  >();
   for (const fc of captures) {
     const slot = byViewport.get(fc.viewport) ?? {};
     if (fc.side === "prod") slot.prod = fc;

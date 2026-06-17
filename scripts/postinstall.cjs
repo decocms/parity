@@ -41,8 +41,8 @@ try {
     );
   }
 } catch (err) {
+  const reason = err?.message ?? "unknown error";
   console.log(
-    `[parity] Playwright install skipped (${err && err.message ? err.message : "unknown error"}). ` +
-      "Run `npx playwright install chromium` before your first `parity run`.",
+    `[parity] Playwright install skipped (${reason}). Run \`npx playwright install chromium\` before your first \`parity run\`.`,
   );
 }

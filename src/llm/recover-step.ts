@@ -50,8 +50,13 @@ export function compactHtmlForRecovery(html: string, maxChars = 12_000): string 
       if (attrs.class) {
         const tokens = attrs.class.split(/\s+/).filter(Boolean);
         const kept = tokens.filter((t) => isSemanticClassToken(t));
-        attrs.class = kept.join(" ");
-        if (!attrs.class) delete attrs.class;
+        const joined = kept.join(" ");
+        if (joined) {
+          attrs.class = joined;
+        } else {
+          // biome-ignore lint/performance/noDelete: cheerio attribs need the key gone, not undefined.
+          delete attrs.class;
+        }
       }
     });
     // Keep only elements likely to be interactive or contain them. Added
