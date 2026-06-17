@@ -1073,49 +1073,84 @@ interface SbsPair {
   label: string;
   prodUrl: string;
   candUrl: string;
+  /** When true, the URL pair was inferred from a convention, not actually
+   *  captured during the run. The UI shows the button but flagged so the
+   *  user knows the iframe may 404. Issue #77. */
+  inferred?: boolean;
+  /** Tooltip shown on hover; used for the "not captured" state. */
+  tooltip?: string;
+}
+
+/**
+ * Heuristic: does a captured URL path look like a PLP, PDP, cart, or
+ * checkout page? PLP and PDP are sequential under purchase-journey
+ * (PLP first, then a click into PDP); cart/checkout are recognized by
+ * keyword.
+ */
+function classifyPath(path: string, isFirstNonHome: boolean): "plp" | "pdp" | "cart" | "checkout" | "other" {
+  const lower = path.toLowerCase();
+  if (/\/(checkout|finalizar|finalize)/.test(lower)) return "checkout";
+  if (/\/(cart|carrinho|sacola|bag)/.test(lower)) return "cart";
+  // PLP heuristics: typical category-listing URL conventions
+  if (/\/(c|category|collections|categoria|departamento)\//.test(lower) || /\/loja\//.test(lower)) return "plp";
+  // PDP heuristics
+  if (/\/(p|product|produto)\//.test(lower) || /\/dp\//.test(lower)) return "pdp";
+  // Fallback ordering — first non-home page is usually PLP under purchase-journey
+  return isFirstNonHome ? "plp" : "pdp";
 }
 
 function buildSideBySidePairs(run: Run): SbsPair[] {
-  const pairs: SbsPair[] = [];
-  // Always include home
-  pairs.push({ label: "Home", prodUrl: run.prodUrl, candUrl: run.candUrl });
+  // Slot map keyed by the role (Home / PLP / PDP / Cart / Checkout) so each
+  // role gets one button — first capture wins. Issue #77.
+  const slots: Partial<Record<"home" | "plp" | "pdp" | "cart" | "checkout", { prodPath?: string; candPath?: string }>> = {
+    home: { prodPath: "/", candPath: "/" },
+  };
 
-  // Extract PLP + PDP from mobile flow captures
-  const findPaths = (side: "prod" | "cand"): { plp?: string; pdp?: string } => {
-    const out: { plp?: string; pdp?: string } = {};
+  for (const side of ["prod", "cand"] as const) {
+    let seenNonHome = false;
     for (const fc of run.flowCaptures) {
       if (fc.side !== side || fc.viewport !== "mobile") continue;
-      if (fc.flow !== "purchase-journey" && fc.flow !== "pdp" && fc.flow !== "plp") continue;
       for (const p of fc.pages) {
         const path = pathOf(p.url);
         if (path === "/" || path === "") continue;
-        if (!out.plp) out.plp = path;
-        else if (path !== out.plp) out.pdp = path;
+        const role = classifyPath(path, !seenNonHome);
+        seenNonHome = true;
+        if (role === "other") continue;
+        const slot = (slots[role] ??= {});
+        const key = side === "prod" ? "prodPath" : "candPath";
+        if (!slot[key]) slot[key] = path;
       }
     }
-    return out;
-  };
-
-  const prodPaths = findPaths("prod");
-  const candPaths = findPaths("cand");
-
-  if (prodPaths.plp) {
-    const candPlp = candPaths.plp ?? prodPaths.plp;
-    pairs.push({
-      label: "PLP",
-      prodUrl: new URL(prodPaths.plp, run.prodUrl).toString(),
-      candUrl: new URL(candPlp, run.candUrl).toString(),
-    });
-  }
-  if (prodPaths.pdp) {
-    const candPdp = candPaths.pdp ?? prodPaths.pdp;
-    pairs.push({
-      label: "PDP",
-      prodUrl: new URL(prodPaths.pdp, run.prodUrl).toString(),
-      candUrl: new URL(candPdp, run.candUrl).toString(),
-    });
   }
 
+  const order: Array<["home" | "plp" | "pdp" | "cart" | "checkout", string]> = [
+    ["home", "Home"],
+    ["plp", "PLP"],
+    ["pdp", "PDP"],
+    ["cart", "Cart"],
+    ["checkout", "Checkout"],
+  ];
+
+  const pairs: SbsPair[] = [];
+  for (const [role, label] of order) {
+    const slot = slots[role];
+    if (!slot) continue;
+    // If only one side captured, fall back to the same path on the other —
+    // common when prod and cand share routes (typical for migrations).
+    const prodPath = slot.prodPath ?? slot.candPath;
+    const candPath = slot.candPath ?? slot.prodPath;
+    if (!prodPath || !candPath) continue;
+    const bothCaptured = slot.prodPath && slot.candPath;
+    pairs.push({
+      label,
+      prodUrl: new URL(prodPath, run.prodUrl).toString(),
+      candUrl: new URL(candPath, run.candUrl).toString(),
+      inferred: !bothCaptured,
+      tooltip: !bothCaptured
+        ? `Path captured on one side only; the other iframe falls back to the same path. May 404 if the migrated site uses different routing.`
+        : undefined,
+    });
+  }
   return pairs;
 }
 
@@ -1130,7 +1165,12 @@ function renderSideBySidePanel(run: Run): string {
     <div class="hint">Compare prod (Fresh, left) with cand (TanStack, right) in mobile viewport. Scroll sync works when the proxy is active OR when the site implements a <code>postMessage</code> handler.</div>
     <div id="sbs-status" class="sbs-status warn">loading…</div>
     <div class="sbs-toolbar">
-      ${pairs.map((p, i) => `<button data-sbs-btn="${i}">${esc(p.label)}</button>`).join("")}
+      ${pairs
+        .map(
+          (p, i) =>
+            `<button data-sbs-btn="${i}"${p.inferred ? ' class="sbs-btn-inferred" title="' + esc(p.tooltip ?? "") + '"' : ""}>${esc(p.label)}${p.inferred ? " <span class=\"sbs-btn-flag\">?</span>" : ""}</button>`,
+        )
+        .join("")}
       <label class="label"><input type="checkbox" id="sbs-sync" checked/> Synchronized scroll</label>
       <div class="toolbar-right">tip: use <code>parity serve &lt;runId&gt;</code> to bypass X-Frame-Options</div>
     </div>

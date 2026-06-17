@@ -399,6 +399,18 @@ export const REPORT_CSS = `
   .sbs-toolbar button { background: var(--surface-overlay); color: var(--text-primary); border: 1px solid var(--border-default); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
   .sbs-toolbar button.active { background: var(--accent-action); color: white; border-color: var(--accent-action); }
   .sbs-toolbar button:hover { border-color: var(--accent-action); }
+  /* Inferred URL pair — captured on only one side. Issue #77. */
+  .sbs-toolbar button.sbs-btn-inferred { opacity: 0.7; border-style: dashed; }
+  .sbs-toolbar .sbs-btn-flag {
+    display: inline-block;
+    margin-left: 4px;
+    background: var(--state-warn);
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 0 6px;
+    border-radius: 8px;
+  }
   .sbs-toolbar .label { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
   .sbs-toolbar .toolbar-right { margin-left: auto; font-size: 11px; color: var(--text-muted); }
   .sbs-container { display: flex; gap: 16px; justify-content: center; align-items: flex-start; }
