@@ -1131,6 +1131,71 @@ export const REPORT_CSS = `
     max-height: 480px;
   }
 
+  /* Per-flow step timeline inside the check detail panel. Issue #98 follow-up. */
+  .step-timeline {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-default);
+  }
+  .step-timeline:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+  .step-timeline-header {
+    display: flex;
+    gap: 16px;
+    align-items: baseline;
+    font-size: 12px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .step-timeline-header strong { font-size: 13px; }
+  .step-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .step-table th, .step-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-default);
+    vertical-align: top;
+    text-align: left;
+  }
+  .step-table th.num, .step-table td.num { text-align: right; width: 40px; }
+  .step-table th {
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .step-cell.empty { color: var(--text-muted); text-align: center; }
+  .step-cell-head { display: flex; gap: 8px; align-items: center; font-size: 11px; }
+  .step-cell .step-status {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--surface-base);
+    border: 1px solid var(--border-default);
+  }
+  .step-cell.step-ok .step-status { color: var(--state-good); border-color: var(--state-good); }
+  .step-cell.step-skipped .step-status { color: var(--state-warn); border-color: var(--state-warn); }
+  .step-cell.step-failed .step-status { color: var(--state-bad); border-color: var(--state-bad); }
+  .step-shot { color: var(--accent-action); text-decoration: none; font-size: 13px; }
+  .step-shot:hover { opacity: 0.7; }
+  .step-selector {
+    margin-top: 4px;
+    font-size: 10px;
+    color: var(--text-muted);
+    word-break: break-all;
+  }
+  .step-selector code { background: var(--surface-base); padding: 1px 4px; border-radius: 3px; }
+  .step-note {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--state-warn);
+    font-style: italic;
+  }
+
   /* Network waterfall — per-page SVG bar chart. Issue #78. */
   .wf-page {
     border: 1px solid var(--border-default);

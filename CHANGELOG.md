@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.2](https://github.com/decocms/parity/compare/v0.11.1...v0.11.2) (2026-06-17)
+
+### Added
+
+* **Per-flow step timeline in the check detail panel.** When a check is backed by a flow (`purchase-journey-flow`, `cart-interactions-flow`, `search-*`, `login-flow`), the detail page now renders a prod vs cand step-by-step table with status pill, duration, used selector, screenshot link, and skip-reason note per step. Lets you see exactly where the runner stopped instead of just "3/3 ok".
+
+### Changed
+
+* **Journey tile no longer claims "completed in both" when steps were skipped (#100).** The dashboard tile now reads `${ok}/${maxSteps}` (against the actual recorded step count, not just matched steps) and surfaces skipped steps explicitly: `${n} step(s) skipped (recovery exhausted)`. Tile state goes `warn` when a journey aborted early instead of staying `pass`. Found via live testing against bagaggio where step 3 (enter-pdp) silently skipped on both sides and the tile still showed green.
+* **`scripts/regen-report.ts`** — small dev utility for re-rendering `report.html` from a saved `report.json` without re-running the browser. Useful when iterating on the renderer.
+
 ## [0.11.1](https://github.com/decocms/parity/compare/v0.11.0...v0.11.1) (2026-06-17)
 
 ### Fixed
