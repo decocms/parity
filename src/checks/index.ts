@@ -161,36 +161,47 @@ export function getCheckByName(name: string): Check | undefined {
 }
 
 /**
- * Run every check sequentially and return the results array.
+ * Run every check in parallel and return the results array.
+ *
+ * Almost every check (~24 of 27) is a pure aggregation over already-
+ * captured `PageCapture[]` / `FlowCapture[]` data — string/HTML diffs,
+ * regex matches, console-entry filtering. Three issue raw network
+ * fetches (`seo-deep-audit`, `footer-links-health`, `plp-pagination`)
+ * but those are I/O-bound, not CPU-bound, so they parallelize cleanly
+ * with the pure-aggregation checks too. Running them sequentially used
+ * ~4.5min of an end-to-end run; in parallel the whole phase is dominated
+ * by the slowest single check.
  *
  * `outResults`, if provided, is the SAME array that gets populated as
  * each check completes — callers (e.g. `runCommand`'s shutdown path)
  * hold a reference to it so a SIGINT/timeout mid-pipeline still has
- * access to whatever checks finished before the interrupt. Without
- * this, the partial report's `checks: []` would always be empty on the
- * "Rodando checks…" phase. Review feedback on PR #59.
+ * access to whatever checks finished before the interrupt. The push
+ * happens in the per-check `.then()` so ordering reflects completion
+ * order, not declaration order. Review feedback on PR #59.
  */
 export async function runAllChecks(
   ctx: CheckContext,
   outResults?: CheckResult[],
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = outResults ?? [];
-  for (const check of ALL_CHECKS) {
-    const start = Date.now();
-    try {
-      const r = await check(ctx);
-      results.push({ ...r, durationMs: r.durationMs || Date.now() - start });
-    } catch (err) {
-      results.push({
-        name: check.name || "anonymous-check",
-        status: "fail",
-        severity: "medium",
-        durationMs: Date.now() - start,
-        summary: `check threw: ${(err as Error).message}`,
-        issues: [],
-      });
-    }
-  }
+  await Promise.all(
+    ALL_CHECKS.map(async (check) => {
+      const start = Date.now();
+      try {
+        const r = await check(ctx);
+        results.push({ ...r, durationMs: r.durationMs || Date.now() - start });
+      } catch (err) {
+        results.push({
+          name: check.name || "anonymous-check",
+          status: "fail",
+          severity: "medium",
+          durationMs: Date.now() - start,
+          summary: `check threw: ${(err as Error).message}`,
+          issues: [],
+        });
+      }
+    }),
+  );
   return results;
 }
 

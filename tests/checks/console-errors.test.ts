@@ -93,4 +93,43 @@ describe("consoleErrorsBaseline", () => {
     );
     expect(r.status).toBe("pass");
   });
+
+  it("dedupes the same error across pages into one issue with the affected-pages list", () => {
+    const sharedError = "A chave utilizada não corresponde ao domínio: example.com";
+    const r = consoleErrorsBaseline(
+      makeContext({
+        prodPages: [
+          makePageCapture({ url: "https://x.com/", side: "prod" }),
+          makePageCapture({ url: "https://x.com/s", side: "prod" }),
+          makePageCapture({ url: "https://x.com/search", side: "prod" }),
+        ],
+        candPages: [
+          makePageCapture({
+            url: "https://x.com/",
+            side: "cand",
+            console: [{ type: "error", text: sharedError }],
+          }),
+          makePageCapture({
+            url: "https://x.com/s",
+            side: "cand",
+            console: [{ type: "error", text: sharedError }],
+          }),
+          makePageCapture({
+            url: "https://x.com/search",
+            side: "cand",
+            console: [{ type: "error", text: sharedError }],
+          }),
+        ],
+      }),
+    );
+    // Previously this would emit 3 separate issues — one per page —
+    // crowding the top-issues list with duplicates. Now it's a single
+    // issue summarising all affected pages.
+    expect(r.issues).toHaveLength(1);
+    expect(r.issues[0]?.summary).toMatch(/3 páginas/);
+    expect(r.issues[0]?.details).toContain("Observed on:");
+    expect(r.issues[0]?.details).toContain("/");
+    expect(r.issues[0]?.details).toContain("/s");
+    expect(r.issues[0]?.details).toContain("/search");
+  });
 });

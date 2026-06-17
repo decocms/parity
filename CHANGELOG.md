@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.16](https://github.com/decocms/parity/compare/v0.11.15...v0.11.16) (2026-06-17)
+
+### Changed
+
+* **All checks now run in parallel.** `runAllChecks` previously walked the ~27 checks sequentially with `for (const check of ALL_CHECKS) await check(ctx)`, taking ~4m26s on bagaggio. Almost every check is a pure CPU aggregation over already-captured `PageCapture[]` data (string diffs, regex matches, console-entry filtering); the 3 network-bound ones (`seo-deep-audit`, `footer-links-health`, `plp-pagination`) are I/O-bound and parallelize cleanly too. Now uses `Promise.all` — the whole checks phase is dominated by the slowest single check. **Expected speedup: ~4m26s → ~30-60s** on bagaggio.
+* **Console errors now dedupe across pages.** Previously the same error message ("A chave utilizada não corresponde ao domínio…") that appeared on 4 pages produced 4 separate top-level issues, crowding the report. Now `consoleErrorsBaseline` groups by normalized error key across all page pairs and emits ONE issue per unique error with the affected-pages list inline:
+  ```
+  [high] [generic] novo erro de console em 4 páginas (/ · /s · /search · /:::desktop): A chave utilizada não corresponde…
+  ```
+  Direct response to user feedback ("console log não deveria ter um teste pra ele … fazer o dedup e descrever quais páginas tiveram aquele error"). The schema-level Issue shape is unchanged (page = first affected, details = full list).
+
 ## [0.11.15](https://github.com/decocms/parity/compare/v0.11.14...v0.11.15) (2026-06-17)
 
 ### Changed
