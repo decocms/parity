@@ -27,11 +27,15 @@ describe("renderHtmlReport — structure", () => {
 
   it("includes all top-level navigation tabs", () => {
     const html = renderHtmlReport(makeRun(), "/tmp/run");
-    const tabs = ["summary", "visualdiff", "seo", "sidebyside", "issues", "vitals", "cache", "checks", "prompt", "pages", "console", "network", "diff"];
+    // "diff" is conditional (only when baseline is loaded — Issue #68); check the rest.
+    const tabs = ["summary", "visualdiff", "seo", "sidebyside", "issues", "vitals", "cache", "checks", "prompt", "pages", "console", "network"];
     for (const tab of tabs) {
       expect(html).toContain(`data-tab="${tab}"`);
       expect(html).toContain(`data-panel="${tab}"`);
     }
+    // No baseline on the default run fixture → diff tab/panel absent.
+    expect(html).not.toContain('data-tab="diff"');
+    expect(html).not.toContain('data-panel="diff"');
   });
 
   it("renders the health score from verdict", () => {
