@@ -365,6 +365,14 @@ export type SeoSummary = z.infer<typeof SeoSummary>;
 export const Verdict = z.object({
   status: z.enum(["pass", "warn", "fail"]),
   score: z.number().min(0).max(100),
+  /**
+   * Formula version that produced `score`. Absent/1 = legacy linear
+   * formula (saturated at 0 on real runs); 2 = per-page normalization +
+   * exponential decay. Deltas are only shown between same-version runs.
+   */
+  scoreVersion: z.number().optional(),
+  /** Page-pair count the score was normalized over (score v2). */
+  pagesAnalyzed: z.number().optional(),
   critical: z.number(),
   high: z.number(),
   medium: z.number(),
@@ -387,6 +395,19 @@ export const Run = z.object({
   cep: z.string(),
   durationMs: z.number(),
   verdict: Verdict,
+  /**
+   * Most recent non-partial prior run against the same prod/cand host
+   * pair (and same scoreVersion), so every surface can show the score
+   * trend without re-scanning the runs directory.
+   */
+  previousRun: z
+    .object({
+      id: z.string(),
+      timestamp: z.string(),
+      score: z.number(),
+      scoreDelta: z.number(),
+    })
+    .optional(),
   topIssues: z.array(Issue),
   issues: z.array(Issue),
   checks: z.array(CheckResult),

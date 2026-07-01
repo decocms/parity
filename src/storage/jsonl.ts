@@ -45,7 +45,7 @@ export interface JsonlFinalRecord {
   totalDurationMs: number;
   totalChecks: number;
   totalIssues: number;
-  verdict: { status: "pass" | "warn" | "fail"; score: number };
+  verdict: { status: "pass" | "warn" | "fail"; score: number; scoreVersion?: number };
 }
 
 /**

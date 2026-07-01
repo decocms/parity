@@ -5,12 +5,14 @@ import ora from "ora";
 import type { Browser } from "playwright";
 import { runAllChecks } from "../checks/index.ts";
 import type { CheckContext } from "../checks/index.ts";
+import { pairCaptures } from "../checks/lib/pairing.ts";
 import { resolveSitemapUrls } from "../diff/sitemap.ts";
 import { launchBrowser, newContext, stopTracing, userAgentFor } from "../engine/browser.ts";
 import { capturePage, installVitalsCollector } from "../engine/collect.ts";
 import { runFlow } from "../engine/flows.ts";
 import { disableInteractive, isInteractiveMode } from "../engine/interactive-selector-prompt.ts";
 import { discoverPagesFromSitemap } from "../engine/sitemap-discover.ts";
+import { SCORE_VERSION, computeVerdict } from "../engine/verdict.ts";
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
 import { type Platform, detectPlatform } from "../learned/platform.ts";
 import { promoteStepsFromFlow } from "../learned/promote.ts";
@@ -31,9 +33,16 @@ import {
   applyModelOverrides,
   parseFeatureOverrides,
 } from "../llm/models.ts";
+import { groupIssues } from "../report/group-issues.ts";
 import { renderHtmlReport } from "../report/render.ts";
 import { compareToBaseline, loadBaseline } from "../storage/baselines.ts";
-import { createRunDir, newRunId, writeRunReportHtml, writeRunReportJson } from "../storage/fs.ts";
+import {
+  createRunDir,
+  findPreviousRun,
+  newRunId,
+  writeRunReportHtml,
+  writeRunReportJson,
+} from "../storage/fs.ts";
 import { JsonlWriter, checkToJsonl } from "../storage/jsonl.ts";
 import type {
   CheckResult,
@@ -1083,7 +1092,22 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     spinner.succeed(`${topIssues.length} issue(s) priorizada(s)`);
     currentPhase = "report";
 
-    const verdict = computeVerdict(checks, allIssues);
+    // Normalize the score over the number of paired (path × viewport)
+    // captures — the unit issues multiply over. See src/engine/verdict.ts.
+    const pagesAnalyzed = pairCaptures(checkCtx.prodPages, checkCtx.candPages).pairs.length;
+    const verdict = computeVerdict(checks, allIssues, { pagesAnalyzed });
+
+    // Score trend vs the last completed run against the same host pair.
+    const prevRun = findPreviousRun(opts.output, {
+      prodUrl: opts.prod,
+      candUrl: opts.cand,
+      excludeRunId: runId,
+      scoreVersion: SCORE_VERSION,
+    });
+    const previousRun = prevRun
+      ? { ...prevRun, scoreDelta: verdict.score - prevRun.score }
+      : undefined;
+
     let baselineSection: Run["baseline"] | undefined;
     if (opts.baseline) {
       try {
@@ -1134,6 +1158,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       cep: rc.cep,
       durationMs: Date.now() - startedAt,
       verdict,
+      previousRun,
       topIssues,
       issues: allIssues,
       checks,
@@ -1164,7 +1189,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       totalDurationMs: Date.now() - startedAt,
       totalChecks: checks.length,
       totalIssues: allIssues.length,
-      verdict: { status: verdict.status, score: verdict.score },
+      verdict: { status: verdict.status, score: verdict.score, scoreVersion: SCORE_VERSION },
     });
 
     printSummary(run, paths.reportHtml, { promotedCount, deprecatedCount, platform });
@@ -1257,41 +1282,6 @@ function buildPartialRun(args: {
     partial: true,
     partialReason: args.partialReason,
     timings: args.timings,
-  };
-}
-
-function computeVerdict(checks: CheckResult[], issues: Issue[]): Verdict {
-  const counts = { critical: 0, high: 0, medium: 0, low: 0 };
-  for (const i of issues) counts[i.severity]++;
-
-  const checksPassed = checks.filter((c) => c.status === "pass").length;
-  const checksFailed = checks.filter((c) => c.status === "fail").length;
-  const checksSkipped = checks.filter((c) => c.status === "skipped").length;
-  const checksWarn = checks.filter((c) => c.status === "warn").length;
-
-  const score = Math.max(
-    0,
-    100 - counts.critical * 20 - counts.high * 8 - counts.medium * 3 - counts.low * 1,
-  );
-
-  const status =
-    counts.critical > 0 || checksFailed > 0
-      ? "fail"
-      : counts.high > 0 || checksWarn > 0
-        ? "warn"
-        : "pass";
-
-  return {
-    status,
-    score,
-    critical: counts.critical,
-    high: counts.high,
-    medium: counts.medium,
-    low: counts.low,
-    checksRun: checks.length,
-    checksPassed,
-    checksFailed,
-    checksSkipped,
   };
 }
 
@@ -1549,8 +1539,19 @@ function printSummary(
         ? chalk.yellow(verdict.score)
         : chalk.red(verdict.score);
 
+  const prev = run.previousRun;
+  const scoreDelta = !prev
+    ? chalk.dim("  (sem run anterior comparável)")
+    : prev.scoreDelta > 0
+      ? chalk.green(`  (+${prev.scoreDelta} vs run anterior: ${prev.score})`)
+      : prev.scoreDelta < 0
+        ? chalk.red(`  (${prev.scoreDelta} vs run anterior: ${prev.score})`)
+        : chalk.dim(`  (= run anterior: ${prev.score})`);
+
   console.log("");
-  console.log(`  ${emoji}  parity ${verdict.status.toUpperCase()} · score ${score}/100`);
+  console.log(
+    `  ${emoji}  parity ${verdict.status.toUpperCase()} · score ${score}/100${scoreDelta}`,
+  );
   console.log(
     `     checks: ${chalk.green(verdict.checksPassed)} pass · ${chalk.red(verdict.checksFailed)} fail · ${chalk.dim(`${verdict.checksSkipped} skipped`)}`,
   );
@@ -1569,14 +1570,16 @@ function printSummary(
   if (run.topIssues.length > 0) {
     console.log("");
     console.log(chalk.bold("  Top issues:"));
-    for (const i of run.topIssues.slice(0, 5)) {
+    for (const g of groupIssues(run.topIssues).slice(0, 5)) {
+      const i = g.sample;
       const sev =
         i.severity === "critical"
           ? chalk.red(`[${i.severity}]`)
           : i.severity === "high"
             ? chalk.yellow(`[${i.severity}]`)
             : chalk.dim(`[${i.severity}]`);
-      console.log(`     ${sev} ${i.summary}`);
+      const pagesNote = g.pages.length > 1 ? chalk.dim(` (${g.pages.length} páginas)`) : "";
+      console.log(`     ${sev} ${i.summary}${pagesNote}`);
     }
   }
   if (meta.promotedCount > 0 || meta.deprecatedCount > 0) {

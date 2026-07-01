@@ -46,7 +46,10 @@ Do **not** run parity for:
 
 ```ts
 {
-  verdict: { status: "pass"|"warn"|"fail", score: 0..100, critical, high, medium, low },
+  verdict: { status: "pass"|"warn"|"fail", score: 0..100, scoreVersion: 2, pagesAnalyzed, critical, high, medium, low },
+  // score v2 = 100·e^(-penaltyDensity/35), penaltyDensity = Σ severity weights ÷ pagesAnalyzed.
+  // Any FAIL verdict (critical issue or failed check) caps it at 79. It's a progress meter: it RISES as issues get fixed.
+  previousRun?: { id, timestamp, score, scoreDelta },  // trend vs last comparable run (same hosts + scoreVersion)
   topIssues: Issue[],       // LLM-ranked, deduplicated; usually 5-10 items
   issues: Issue[],          // all raw issues from every check
   checks: CheckResult[],    // one per check; .data has structured details

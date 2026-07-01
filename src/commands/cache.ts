@@ -5,9 +5,11 @@ import ora from "ora";
 import type { Browser, Page } from "playwright";
 import { cacheCoverage } from "../checks/cache-coverage.ts";
 import type { CheckContext } from "../checks/index.ts";
+import { pairCaptures } from "../checks/lib/pairing.ts";
 import { resolveSitemapUrls } from "../diff/sitemap.ts";
 import { launchBrowser, newContext } from "../engine/browser.ts";
 import { capturePage } from "../engine/collect.ts";
+import { computeVerdict } from "../engine/verdict.ts";
 import { renderHtmlReport } from "../report/render.ts";
 import { createRunDir, newRunId, writeRunReportHtml, writeRunReportJson } from "../storage/fs.ts";
 import type {
@@ -20,7 +22,6 @@ import type {
   ParityRc,
   Run,
   Side,
-  Verdict,
   Viewport,
 } from "../types/schema.ts";
 
@@ -150,7 +151,9 @@ export async function cacheCommand(opts: CacheOptions): Promise<number> {
     const cacheResult: CheckResult = cacheCoverage(checkCtx);
 
     const allIssues: Issue[] = cacheResult.issues;
-    const verdict = computeVerdict([cacheResult], allIssues);
+    const verdict = computeVerdict([cacheResult], allIssues, {
+      pagesAnalyzed: pairCaptures(checkCtx.prodPages, checkCtx.candPages).pairs.length,
+    });
     const run: Run = {
       schemaVersion: "0.1",
       id: runId,
@@ -207,37 +210,6 @@ export async function cacheCommand(opts: CacheOptions): Promise<number> {
   } finally {
     if (browser) await browser.close().catch(() => undefined);
   }
-}
-
-function computeVerdict(checks: CheckResult[], issues: Issue[]): Verdict {
-  const counts = { critical: 0, high: 0, medium: 0, low: 0 };
-  for (const i of issues) counts[i.severity]++;
-  const checksPassed = checks.filter((c) => c.status === "pass").length;
-  const checksFailed = checks.filter((c) => c.status === "fail").length;
-  const checksSkipped = checks.filter((c) => c.status === "skipped").length;
-  const checksWarn = checks.filter((c) => c.status === "warn").length;
-  const score = Math.max(
-    0,
-    100 - counts.critical * 20 - counts.high * 8 - counts.medium * 3 - counts.low * 1,
-  );
-  const status: Verdict["status"] =
-    counts.critical > 0 || checksFailed > 0
-      ? "fail"
-      : counts.high > 0 || checksWarn > 0
-        ? "warn"
-        : "pass";
-  return {
-    status,
-    score,
-    critical: counts.critical,
-    high: counts.high,
-    medium: counts.medium,
-    low: counts.low,
-    checksRun: checks.length,
-    checksPassed,
-    checksFailed,
-    checksSkipped,
-  };
 }
 
 async function captureLite(
