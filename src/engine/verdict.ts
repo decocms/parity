@@ -10,7 +10,7 @@ import type { CheckResult, Issue, Verdict } from "../types/schema.ts";
  *   totalPenalty = Σ weight(severity) over non-inconclusive issues
  *   normalized   = totalPenalty / max(1, pagesAnalyzed)
  *   score        = round(100 · e^(-normalized / DECAY_K))
- *   if any scored critical → score = min(score, CRITICAL_SCORE_CAP)
+ *   if verdict status is "fail" → score = min(score, FAIL_SCORE_CAP)
  *
  * Why not the old linear `100 - Σweights`: checks emit one issue per
  * occurrence — per (page × viewport) pair, per robots.txt user-agent,
@@ -44,8 +44,13 @@ export const SEVERITY_WEIGHTS: Record<Issue["severity"], number> = {
  */
 export const DECAY_K = 35;
 
-/** Any live critical caps the score below 80 so "FAIL · score 91" can't happen. */
-export const CRITICAL_SCORE_CAP = 79;
+/**
+ * Any FAIL verdict — a critical issue OR a failed check (checks like
+ * meta-seo/html-structural set status "fail" on non-critical issues) —
+ * caps the score below 80 so "status FAIL, score 91" can't happen.
+ * Applied in `computeVerdict`, where the status is known.
+ */
+export const FAIL_SCORE_CAP = 79;
 
 /** Bumped when the formula changes — fences cross-version score deltas. */
 export const SCORE_VERSION = 2;
@@ -57,18 +62,20 @@ export interface ScoreBreakdown {
   pagesAnalyzed: number;
 }
 
+/**
+ * Pure penalty-density formula — no fail cap here, since "fail" depends
+ * on check statuses that this function doesn't see. Callers that know
+ * the verdict status apply `FAIL_SCORE_CAP` (see `computeVerdict`).
+ */
 export function computeScore(issues: Issue[], opts: { pagesAnalyzed: number }): ScoreBreakdown {
   const pagesAnalyzed = Math.max(1, opts.pagesAnalyzed);
   let totalPenalty = 0;
-  let scoredCriticals = 0;
   for (const issue of issues) {
     if (issue.inconclusive) continue;
     totalPenalty += SEVERITY_WEIGHTS[issue.severity];
-    if (issue.severity === "critical") scoredCriticals++;
   }
   const normalizedPenalty = totalPenalty / pagesAnalyzed;
-  let score = Math.round(100 * Math.exp(-normalizedPenalty / DECAY_K));
-  if (scoredCriticals > 0) score = Math.min(score, CRITICAL_SCORE_CAP);
+  const score = Math.round(100 * Math.exp(-normalizedPenalty / DECAY_K));
   return { score, totalPenalty, normalizedPenalty, pagesAnalyzed };
 }
 
@@ -102,7 +109,7 @@ export function computeVerdict(
   const checksWarn = checks.filter((c) => c.status === "warn").length;
 
   const pagesAnalyzed = opts?.pagesAnalyzed ?? derivePagesAnalyzed(checks, issues);
-  const { score } = computeScore(issues, { pagesAnalyzed });
+  let { score } = computeScore(issues, { pagesAnalyzed });
 
   const status: Verdict["status"] =
     counts.critical > 0 || checksFailed > 0
@@ -110,6 +117,7 @@ export function computeVerdict(
       : counts.high > 0 || checksWarn > 0
         ? "warn"
         : "pass";
+  if (status === "fail") score = Math.min(score, FAIL_SCORE_CAP);
 
   return {
     status,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CRITICAL_SCORE_CAP,
+  FAIL_SCORE_CAP,
   SCORE_VERSION,
   computeScore,
   computeVerdict,
@@ -114,10 +114,10 @@ describe("computeScore", () => {
     expect(at10).toBe(at30);
   });
 
-  it("any live critical caps the score below 80", () => {
+  it("computeScore is the pure density formula — the fail cap lives in computeVerdict", () => {
     const one = [makeIssue({ severity: "critical", page: "/p1::mobile" })];
     const { score } = computeScore(one, { pagesAnalyzed: 20 });
-    expect(score).toBe(CRITICAL_SCORE_CAP);
+    expect(score).toBeGreaterThan(FAIL_SCORE_CAP);
   });
 
   it("pageless (site-level) issues still lower the score", () => {
@@ -171,6 +171,36 @@ describe("computeVerdict", () => {
     );
     expect(v.status).toBe("fail");
     expect(v.critical).toBe(1);
+  });
+
+  it("any critical issue caps the score at FAIL_SCORE_CAP", () => {
+    const v = computeVerdict(
+      [makeCheck()],
+      [makeIssue({ severity: "critical", page: "/p1::mobile" })],
+      { pagesAnalyzed: 20 },
+    );
+    expect(v.status).toBe("fail");
+    expect(v.score).toBe(FAIL_SCORE_CAP);
+  });
+
+  it("a failed check with only non-critical issues also caps the score (no 'FAIL · score 91')", () => {
+    // e.g. meta-seo-parity fails on a single medium divergence across many pages —
+    // the raw density score would be ~100, but the FAIL verdict must cap it.
+    const v = computeVerdict(
+      [makeCheck({ status: "fail" })],
+      [makeIssue({ severity: "medium", page: "/p1::mobile" })],
+      { pagesAnalyzed: 40 },
+    );
+    expect(v.status).toBe("fail");
+    expect(v.score).toBeLessThanOrEqual(FAIL_SCORE_CAP);
+  });
+
+  it("warn verdicts are not capped", () => {
+    const v = computeVerdict([makeCheck()], [makeIssue({ severity: "high", page: "/p::mobile" })], {
+      pagesAnalyzed: 20,
+    });
+    expect(v.status).toBe("warn");
+    expect(v.score).toBeGreaterThan(FAIL_SCORE_CAP);
   });
 
   it("high issues or warn checks → warn; otherwise pass", () => {
