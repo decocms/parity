@@ -76,6 +76,58 @@ export function loadRun(outputDir: string, runId: string): Run {
   return Run.parse(raw);
 }
 
+/**
+ * Most recent completed run against the same prod/cand host pair — used
+ * to show the score trend ("score 64 (+23 vs previous run)").
+ *
+ * Reads report.json raw (NOT `Run.parse`) so reports written by older
+ * CLI versions never throw here. Skips partial runs (their verdict is
+ * not authoritative) and runs whose `verdict.scoreVersion` differs from
+ * the requested one, so the first run after a formula upgrade shows "no
+ * comparable previous run" instead of a bogus delta against the old scale.
+ */
+export function findPreviousRun(
+  outputDir: string,
+  opts: { prodUrl: string; candUrl: string; excludeRunId?: string; scoreVersion?: number },
+): { id: string; timestamp: string; score: number } | null {
+  const hostOf = (url: string): string => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return url;
+    }
+  };
+  const prodHost = hostOf(opts.prodUrl);
+  const candHost = hostOf(opts.candUrl);
+  for (const entry of listRuns(outputDir)) {
+    if (entry.id === opts.excludeRunId) continue;
+    try {
+      const raw = JSON.parse(readFileSync(entry.reportPath, "utf8")) as {
+        id?: string;
+        timestamp?: string;
+        prodUrl?: string;
+        candUrl?: string;
+        partial?: boolean;
+        verdict?: { score?: number; scoreVersion?: number };
+      };
+      if (raw.partial) continue;
+      if (typeof raw.verdict?.score !== "number") continue;
+      if (opts.scoreVersion !== undefined && raw.verdict.scoreVersion !== opts.scoreVersion)
+        continue;
+      if (hostOf(raw.prodUrl ?? "") !== prodHost || hostOf(raw.candUrl ?? "") !== candHost)
+        continue;
+      return {
+        id: raw.id ?? entry.id,
+        timestamp: raw.timestamp ?? entry.timestamp,
+        score: raw.verdict.score,
+      };
+    } catch {
+      /* unreadable report — skip */
+    }
+  }
+  return null;
+}
+
 export function listRuns(
   outputDir: string,
 ): { id: string; timestamp: string; reportPath: string }[] {

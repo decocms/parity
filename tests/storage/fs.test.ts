@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createRunDir,
+  findPreviousRun,
   getRunPaths,
   listRuns,
   loadRun,
@@ -10,6 +11,7 @@ import {
   writeRunReportHtml,
   writeRunReportJson,
 } from "../../src/storage/fs.ts";
+import type { Run } from "../../src/types/schema.ts";
 import { makeRun } from "../helpers/make-run.ts";
 import { makeTmpDir } from "../helpers/tmp-dir.ts";
 
@@ -105,5 +107,82 @@ describe("listRuns", () => {
     const list = listRuns(dir.path);
     expect(list[0]?.id).toBe("broken");
     expect(list[0]?.timestamp).toBe("broken"); // fallback
+  });
+});
+
+describe("findPreviousRun", () => {
+  let dir: { path: string; cleanup: () => void };
+  beforeEach(() => (dir = makeTmpDir()));
+  afterEach(() => dir.cleanup());
+
+  const HOSTS = { prodUrl: "https://prod.example.com", candUrl: "https://cand.example.com" };
+
+  function writeRunFixture(
+    id: string,
+    over: Omit<Partial<Run>, "verdict"> & { verdict?: Partial<Run["verdict"]> } = {},
+  ): void {
+    const p = createRunDir(dir.path, id);
+    const base = makeRun({ id, timestamp: `${id}T00:00:00Z`, ...HOSTS });
+    const run = {
+      ...base,
+      ...over,
+      verdict: { ...base.verdict, scoreVersion: 2, ...(over.verdict ?? {}) },
+    };
+    writeFileSync(p.reportJson, JSON.stringify(run));
+  }
+
+  it("returns the newest run matching the same host pair", () => {
+    writeRunFixture("2026-01-01", { verdict: { score: 30 } });
+    writeRunFixture("2026-02-01", { verdict: { score: 55 } });
+    const prev = findPreviousRun(dir.path, HOSTS);
+    expect(prev?.id).toBe("2026-02-01");
+    expect(prev?.score).toBe(55);
+  });
+
+  it("excludes the current run id", () => {
+    writeRunFixture("2026-01-01", { verdict: { score: 30 } });
+    writeRunFixture("2026-02-01", { verdict: { score: 55 } });
+    const prev = findPreviousRun(dir.path, { ...HOSTS, excludeRunId: "2026-02-01" });
+    expect(prev?.id).toBe("2026-01-01");
+  });
+
+  it("skips runs against a different host pair", () => {
+    writeRunFixture("2026-02-01", {
+      prodUrl: "https://other-prod.com",
+      verdict: { score: 90 },
+    });
+    expect(findPreviousRun(dir.path, HOSTS)).toBeNull();
+  });
+
+  it("matches by hostname, ignoring path/query differences", () => {
+    writeRunFixture("2026-01-01", {
+      prodUrl: "https://prod.example.com/home?x=1",
+      verdict: { score: 42 },
+    });
+    expect(findPreviousRun(dir.path, HOSTS)?.score).toBe(42);
+  });
+
+  it("skips partial runs (verdict not authoritative)", () => {
+    writeRunFixture("2026-02-01", { partial: true, verdict: { score: 80 } });
+    writeRunFixture("2026-01-01", { verdict: { score: 20 } });
+    expect(findPreviousRun(dir.path, HOSTS)?.id).toBe("2026-01-01");
+  });
+
+  it("skips runs from a different score formula version when requested", () => {
+    writeRunFixture("2026-02-01", { verdict: { score: 0, scoreVersion: undefined } });
+    writeRunFixture("2026-01-01", { verdict: { score: 33, scoreVersion: 2 } });
+    const prev = findPreviousRun(dir.path, { ...HOSTS, scoreVersion: 2 });
+    expect(prev?.id).toBe("2026-01-01");
+  });
+
+  it("tolerates unreadable report.json files", () => {
+    const p = createRunDir(dir.path, "2026-02-01");
+    writeFileSync(p.reportJson, "{not json");
+    writeRunFixture("2026-01-01", { verdict: { score: 10 } });
+    expect(findPreviousRun(dir.path, HOSTS)?.id).toBe("2026-01-01");
+  });
+
+  it("returns null when there is no comparable run", () => {
+    expect(findPreviousRun(dir.path, HOSTS)).toBeNull();
   });
 });

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+* **The health score was stuck at 0 on every real run — now it actually rises as you fix issues.** The old formula (`100 - crit·20 - high·8 - med·3 - low·1`) had no dynamic range for real workloads: 13 high issues alone zeroed it, and checks emit one issue per occurrence (per page × viewport, per robots.txt user-agent, per broken link), so mid-migration runs carry 40–120 issues. Empirical evidence: across 15 real runs of the granadobr migration, issues fell 122 → 39 (criticals 18 → 0) and the score sat at **0 the entire time**. The new formula (score v2) normalizes the severity-weighted penalty by the number of analyzed page-pairs and applies exponential decay — `round(100·e^(-density/35))` — so the same 15 runs now read **20 → 7 (regression caught) → 35**, moving with every fix. Any live critical caps the score at 79 so "FAIL · score 91" can't happen. Status logic (pass/warn/fail), `--fail-on`, and exit codes are unchanged. Verdicts now carry `scoreVersion: 2` and `pagesAnalyzed`.
+
+### Added
+
+* **Score trend vs previous run.** `parity run` now records `previousRun: { id, timestamp, score, scoreDelta }` in `report.json` (most recent non-partial run against the same prod/cand host pair and same scoreVersion) and surfaces the delta in the CLI summary (`score 64/100 (+23 vs run anterior)`), the HTML dashboard (chip under the health ring), and the `parity pr` Markdown comment (header + score-trend line).
+* **Root-cause grouping in issue displays.** New display-only grouper (`src/report/group-issues.ts`) collapses issues that share check + severity + normalized summary (paths/URLs/viewports/digits stripped), so "description ausente" on 10 pages reads as one row with an affected-pages note instead of 10 near-identical rows. Applied to the HTML Top issues card, the CLI Top issues list, and the PR comment. Issue IDs and baselines are untouched.
+
+### Changed
+
+* **`computeVerdict` is now a single shared module** (`src/engine/verdict.ts`) — `run.ts`, `vitals.ts`, and `cache.ts` previously carried three drifting copies.
+
 ## [0.11.16](https://github.com/decocms/parity/compare/v0.11.15...v0.11.16) (2026-06-17)
 
 ### Changed

@@ -13,6 +13,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
+import { groupIssues } from "../report/group-issues.ts";
 import { listRuns } from "../storage/fs.ts";
 import type { Issue, Run } from "../types/schema.ts";
 import { type RunOptions, runCommand } from "./run.ts";
@@ -35,13 +36,6 @@ const SEVERITY_EMOJI: Record<Issue["severity"], string> = {
   high: "🟠",
   medium: "🟡",
   low: "⚪",
-};
-
-const SEVERITY_RANK: Record<Issue["severity"], number> = {
-  critical: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
 };
 
 export async function prCommand(opts: PrCommandOptions): Promise<number> {
@@ -113,11 +107,22 @@ function buildPrComment(run: Run, opts: PrCommandOptions): string {
   const v = run.verdict;
   const status =
     v.status === "pass" ? "✅ **PASS**" : v.status === "warn" ? "⚠ **WARN**" : "❌ **FAIL**";
-  lines.push(`## Parity report — ${status} · score ${v.score}/100`);
+  const prev = run.previousRun;
+  const delta = prev
+    ? prev.scoreDelta > 0
+      ? ` (📈 +${prev.scoreDelta} vs previous run)`
+      : prev.scoreDelta < 0
+        ? ` (📉 ${prev.scoreDelta} vs previous run)`
+        : " (= previous run)"
+    : "";
+  lines.push(`## Parity report — ${status} · score ${v.score}/100${delta}`);
   lines.push("");
   lines.push(`- **prod:** ${opts.prod}`);
   lines.push(`- **preview:** ${opts.preview}`);
   lines.push(`- **run id:** \`${run.id}\``);
+  if (prev) {
+    lines.push(`- **score trend:** ${prev.score} → ${v.score} (previous run \`${prev.id}\`)`);
+  }
   lines.push("");
   lines.push("### Verdict");
   lines.push("");
@@ -128,25 +133,23 @@ function buildPrComment(run: Run, opts: PrCommandOptions): string {
   );
   lines.push("");
 
-  // Top issues — sorted by severity then alphabetically.
-  const topIssues = (run.topIssues.length > 0 ? run.topIssues : run.issues)
-    .slice()
-    .sort((a, b) => {
-      const r = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
-      return r !== 0 ? r : a.summary.localeCompare(b.summary);
-    })
-    .slice(0, 10);
+  // Top issues — grouped by root cause (same check + normalized summary),
+  // sorted by severity then affected-page count.
+  const topGroups = groupIssues(run.topIssues.length > 0 ? run.topIssues : run.issues).slice(0, 10);
 
-  if (topIssues.length === 0) {
+  if (topGroups.length === 0) {
     lines.push("### Issues");
     lines.push("");
     lines.push("_No issues detected — preview is at parity with prod._");
   } else {
-    lines.push(`### Top ${topIssues.length} issue${topIssues.length === 1 ? "" : "s"}`);
+    lines.push(`### Top ${topGroups.length} issue${topGroups.length === 1 ? "" : "s"}`);
     lines.push("");
-    for (const i of topIssues) {
+    for (const g of topGroups) {
+      const i = g.sample;
+      const where =
+        g.pages.length > 1 ? ` · ${g.pages.length} pages` : i.page ? ` · page: \`${i.page}\`` : "";
       lines.push(
-        `- ${SEVERITY_EMOJI[i.severity]} \`${i.category}\` · **${i.summary}** _(check: \`${i.check}\`${i.page ? ` · page: \`${i.page}\`` : ""})_`,
+        `- ${SEVERITY_EMOJI[i.severity]} \`${i.category}\` · **${i.summary}** _(check: \`${i.check}\`${where})_`,
       );
     }
   }

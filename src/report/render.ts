@@ -7,6 +7,7 @@ import type {
   SeoPageMeta,
   VisualDiffPage,
 } from "../types/schema.ts";
+import { groupIssues } from "./group-issues.ts";
 import { REPORT_CSS, REPORT_JS } from "./html-template.ts";
 import { escapeHtml as esc, humanKey, relPath, renderIssueHtml } from "./issue-html.ts";
 import { buildLlmPrompt } from "./prompt-builder.ts";
@@ -76,6 +77,24 @@ function renderDashboard(run: Run): string {
         : "var(--state-bad)";
   const ringDeg = `${Math.round((v.score / 100) * 360)}deg`;
 
+  // Score trend vs the previous comparable run (same host pair + formula).
+  const prev = run.previousRun;
+  const deltaChip = prev
+    ? (() => {
+        const up = prev.scoreDelta > 0;
+        const flat = prev.scoreDelta === 0;
+        const color = flat
+          ? "var(--text-dim, #888)"
+          : up
+            ? "var(--state-good)"
+            : "var(--state-bad)";
+        const label = flat
+          ? `= previous run (${prev.score})`
+          : `${up ? "▲ +" : "▼ "}${prev.scoreDelta} vs previous run (${prev.score})`;
+        return `<div class="score-delta" style="color:${color};font-size:12px;margin-top:4px" title="previous: ${esc(prev.id)}">${label}</div>`;
+      })()
+    : `<div class="score-delta" style="color:var(--text-dim, #888);font-size:12px;margin-top:4px">no comparable previous run</div>`;
+
   // Build metric tiles from check results
   const tiles = buildTiles(run);
 
@@ -87,6 +106,7 @@ function renderDashboard(run: Run): string {
     </div>
     <div class="dash-hero-info">
       <div class="verdict-text ${v.status}">${statusLabel}</div>
+      ${deltaChip}
       <div class="verdict-sub">${v.critical + v.high} blocking issue${v.critical + v.high !== 1 ? "s" : ""} ${v.critical > 0 ? `(${v.critical} critical)` : ""}</div>
       <div class="verdict-meta">
         <span><strong>${v.checksPassed}</strong> checks pass</span>
@@ -248,11 +268,22 @@ function renderTopIssues(run: Run, runDir: string): string {
   if (run.topIssues.length === 0) {
     return `<div class="card"><div class="empty">No priority issues 🎉</div></div>`;
   }
+  // Collapse page-multiplied duplicates (same check + normalized summary)
+  // so one root cause reads as one row with an affected-pages note.
+  const groups = groupIssues(run.topIssues);
   return `
   <div class="card">
     <h2>Top issues</h2>
     <div class="hint">Prioritized, aggregated issues; see the Issues tab for the complete list.</div>
-    ${run.topIssues.map((i) => renderIssue(i, runDir)).join("")}
+    ${groups
+      .map((g) => {
+        const note =
+          g.pages.length > 1
+            ? `<div class="hint" style="margin:-6px 0 10px 0">↳ same issue on ${g.pages.length} pages: ${esc(g.pages.slice(0, 6).join(", "))}${g.pages.length > 6 ? "…" : ""}</div>`
+            : "";
+        return renderIssue(g.sample, runDir) + note;
+      })
+      .join("")}
   </div>`;
 }
 
