@@ -1372,19 +1372,37 @@ async function preflightCheck(
   const errors: string[] = [];
   const ua = userAgentFor(viewport);
 
-  async function probe(label: string, url: string): Promise<void> {
+  // Use Playwright for probing so that sites behind JS challenges (e.g.
+  // Cloudflare Managed Challenge / Turnstile) pass the pre-flight the same
+  // way the real measurement passes do — the headless browser resolves the
+  // JS challenge; a plain fetch always gets blocked by it.
+  const browser = await launchBrowser({ headless: true }).catch(() => null);
+
+  async function probeWithBrowser(label: string, url: string): Promise<void> {
+    const ctx = await browser!.newContext({
+      userAgent: ua,
+      ignoreHTTPSErrors: true,
+    });
+    const page = await ctx.newPage();
     try {
-      new URL(url);
-    } catch {
-      errors.push(`${label}: URL inválida (${url})`);
-      return;
+      const res = await page.goto(url, { waitUntil: "commit", timeout: 30_000 });
+      const status = res?.status() ?? 0;
+      if (status >= 500) errors.push(`${label}: HTTP ${status} (${url})`);
+      // 4xx via Playwright means the origin genuinely rejects the request —
+      // JS challenges always resolve to 2xx in a real browser
+      else if (status >= 400) errors.push(`${label}: HTTP ${status} (${url})`);
+    } catch (err) {
+      const e = err as Error;
+      errors.push(`${label}: ${e.message.split("\n")[0]} (${url})`);
+    } finally {
+      await ctx.close().catch(() => {});
     }
-    // 30s — covers cold-start serverless workers (Cloudflare, Vercel, Deno
-    // Deploy). Observed miess-tanstack.deco-cx.workers.dev returning 144ms
-    // on a warm hit but 8-15s on the very next cold request, which makes
-    // a 10s pre-flight cap flaky. Pre-flight is a one-shot probe so the
-    // extra budget only costs us when a URL is genuinely dead — and a
-    // dead URL fails fast anyway via ENOTFOUND / ECONNREFUSED.
+  }
+
+  async function probeWithFetch(label: string, url: string): Promise<void> {
+    // Fallback when Playwright is not available (PARITY_SKIP_PLAYWRIGHT_INSTALL=1
+    // or the binary download failed). Best-effort — JS-challenge sites will
+    // still return 403 here, but that's better than crashing.
     const PREFLIGHT_TIMEOUT_MS = 30_000;
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), PREFLIGHT_TIMEOUT_MS);
@@ -1393,9 +1411,7 @@ async function preflightCheck(
         method: "GET",
         redirect: "follow",
         signal: controller.signal,
-        headers: {
-          "User-Agent": ua,
-        },
+        headers: { "User-Agent": ua },
       });
       if (res.status >= 500) errors.push(`${label}: HTTP ${res.status} ${res.statusText} (${url})`);
       else if (res.status >= 400)
@@ -1409,7 +1425,22 @@ async function preflightCheck(
     }
   }
 
+  async function probe(label: string, url: string): Promise<void> {
+    try {
+      new URL(url);
+    } catch {
+      errors.push(`${label}: URL inválida (${url})`);
+      return;
+    }
+    if (browser) {
+      await probeWithBrowser(label, url);
+    } else {
+      await probeWithFetch(label, url);
+    }
+  }
+
   await Promise.all([probe("prod", prodUrl), probe("cand", candUrl)]);
+  await browser?.close().catch(() => {});
 
   if (errors.length > 0) {
     spinner.fail("Pre-flight falhou");
