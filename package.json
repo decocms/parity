@@ -1,6 +1,6 @@
 {
   "name": "@decocms/parity",
-  "version": "0.11.16",
+  "version": "0.11.17",
   "description": "E2E parity validator for site migrations. Compares prod vs cand and reports UI, functional, SEO, visual, and Web Vitals deltas with an LLM-ranked HTML report.",
   "type": "module",
   "license": "MIT",
@@ -32,7 +32,14 @@
   "bin": {
     "parity": "dist/cli.js"
   },
-  "files": ["dist", "scripts/postinstall.cjs", "README.md", "AGENTS.md", "CHANGELOG.md", "LICENSE"],
+  "files": [
+    "dist",
+    "scripts/postinstall.cjs",
+    "README.md",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "scripts": {
     "dev": "bun run --hot src/cli.ts",
     "build": "bun build src/cli.ts --target=node --outfile=dist/cli.js --external @anthropic-ai/claude-agent-sdk --external @anthropic-ai/sdk --external chalk --external commander --external diff --external open --external ora --external pixelmatch --external playwright --external pngjs --external prettier --external zod && bun run scripts/postbuild.ts",
@@ -83,5 +90,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "trustedDependencies": ["@biomejs/biome"]
+  "trustedDependencies": [
+    "@biomejs/biome"
+  ]
 }
