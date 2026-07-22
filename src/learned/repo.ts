@@ -42,6 +42,9 @@ export const SelectorKey = z.enum([
   "loginSubmit",
   "loginErrorMessage",
   "accountMenuTrigger",
+  // PLP pagination flow
+  "paginationNext",
+  "loadMoreButton",
 ]);
 export type SelectorKey = z.infer<typeof SelectorKey>;
 

@@ -18,7 +18,9 @@ Selector overrides and run defaults. Placed at the project root.
     "cepInputCart": "input[name='cart-zipcode']",
     "checkoutButton": "a:has-text('Finalizar compra')",
     "searchInput": "input[type='search']",
-    "cartCouponInput": "input[name*='coupon']"
+    "cartCouponInput": "input[name*='coupon']",
+    "paginationNext": "a[rel='next']",
+    "loadMoreButton": "button:has-text('Carregar mais')"
   },
   "search": {
     "terms": ["camisa", "promocao"]
@@ -43,6 +45,13 @@ step. `coupon.validCode` is opt-in: when set, the cart-interactions flow also
 runs `apply-valid-coupon` (asserts the total drops or a discount indicator
 appears); when absent, that step is skipped — parity has no way to know a real
 discount code on its own.
+
+`paginationNext` / `loadMoreButton` override the selectors the `plp` flow
+uses to detect how a PLP paginates (next-page link, "load more" button, or —
+when neither matches — a scroll probe for infinite scroll). The PLP
+pagination check trusts whichever mode gets detected and only falls back to
+fetching `?page=N` when the detected mode is a classic paginated link (or
+undetected).
 
 > **Credentials are NEVER read from `.parityrc.json`.** Set `PARITY_LOGIN_EMAIL` and `PARITY_LOGIN_PASSWORD` as environment variables (`.parityrc.json` is for non-secret config only).
 

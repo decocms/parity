@@ -380,6 +380,23 @@ export const DEFAULT_SELECTORS = {
     "header button:has-text('Olá')",
     "[data-testid='account-menu']",
   ],
+  // ── PLP pagination flow ────────────────────────────────────────────────
+  paginationNext: [
+    "a[rel='next']",
+    "[data-pagination] a[href*='page=']",
+    "nav[aria-label*='pagina' i] a[href*='page=2']",
+    "a[aria-label*='próxima' i]",
+    "a[aria-label*='next page' i]",
+    "ul[class*='pagination' i] a[href*='page=2']",
+  ],
+  loadMoreButton: [
+    "[data-load-more]",
+    "button:has-text('Carregar mais')",
+    "button:has-text('Ver mais produtos')",
+    "button:has-text('Mostrar mais')",
+    "button:has-text('Load more')",
+    "a:has-text('Carregar mais')",
+  ],
 } as const;
 
 export type SelectorKey = keyof typeof DEFAULT_SELECTORS;

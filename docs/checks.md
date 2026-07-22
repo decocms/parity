@@ -10,6 +10,7 @@ Every check `parity` runs, what it catches, and when it fires.
 | Meta / SEO parity             | `<title>`, `<meta description>`, canonical, og:*, twitter:*, JSON-LD   |
 | **Visual diff (LLM Vision)**  | Sections missing, wrong hero, broken shelf, layout shifts              |
 | Purchase journey              | Home → PLP → PDP → CEP → cart → checkout completes in both             |
+| **PLP pagination**            | Interactive next-page / load-more / infinite-scroll all work in cand; fetch-based `?page=N` fallback for classic paginated PLPs |
 | Network summary               | Request count / bytes / cache hit rate                                 |
 | Web Vitals                    | LCP, FCP, TTFB, INP, CLS — mobile + desktop                            |
 | Image loading health          | Missing alt text, no srcset, broken `<img>`                            |

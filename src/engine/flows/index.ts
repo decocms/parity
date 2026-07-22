@@ -27,7 +27,7 @@ export type { FlowContext, StepActionResult, StepProgressEvent } from "./shared.
  */
 const FLOW_DEADLINE_MS: Record<FlowName, number> = {
   homepage: 90_000,
-  plp: 180_000,
+  plp: 240_000, // +3 interactive pagination steps (detect/paginate/verify) on top of home+PLP capture
   pdp: 240_000,
   "purchase-journey": 420_000, // 9 steps × ~30s + LLM recovery + variant heuristic scroll
   search: 300_000, // 6 steps (home + autocomplete + results + no-results + empty)
@@ -53,8 +53,10 @@ export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCap
       switch (flow) {
         case "homepage":
           return finalize(flow, ctx, await flowHomepage(ctx), [], start);
-        case "plp":
-          return finalize(flow, ctx, await flowPlp(ctx), [], start);
+        case "plp": {
+          const { pages, steps } = await flowPlp(ctx);
+          return finalize(flow, ctx, pages, steps, start);
+        }
         case "pdp":
           return finalize(flow, ctx, await flowPdp(ctx), [], start);
         case "purchase-journey": {
