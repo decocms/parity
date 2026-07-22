@@ -165,6 +165,7 @@ export const StepCapture = z.object({
         "decrement",
         "remove",
         "apply-coupon",
+        "apply-valid-coupon",
         "add-second-item",
         "validate-multi-item",
       ]),
@@ -549,6 +550,17 @@ export const ParityRc = z.object({
   notFound: z
     .object({
       testUrl: z.string().optional(),
+    })
+    .optional(),
+  /**
+   * Cart-interactions coupon config. `invalidCode` overrides the hardcoded
+   * default; `validCode` opts into the `apply-valid-coupon` step (skipped
+   * when absent — parity has no way to know a real discount code).
+   */
+  coupon: z
+    .object({
+      invalidCode: z.string().optional(),
+      validCode: z.string().optional(),
     })
     .optional(),
 });

@@ -30,9 +30,19 @@ Selector overrides and run defaults. Placed at the project root.
   "notFound": {
     "testUrl": "/this-page-definitely-does-not-exist"
   },
-  "login": { "enabled": true }
+  "login": { "enabled": true },
+  "coupon": {
+    "invalidCode": "INVALIDCOUPON123-XYZ",
+    "validCode": "PARITY10"
+  }
 }
 ```
+
+`coupon.invalidCode` overrides the default code used by the `apply-invalid-coupon`
+step. `coupon.validCode` is opt-in: when set, the cart-interactions flow also
+runs `apply-valid-coupon` (asserts the total drops or a discount indicator
+appears); when absent, that step is skipped — parity has no way to know a real
+discount code on its own.
 
 > **Credentials are NEVER read from `.parityrc.json`.** Set `PARITY_LOGIN_EMAIL` and `PARITY_LOGIN_PASSWORD` as environment variables (`.parityrc.json` is for non-secret config only).
 
