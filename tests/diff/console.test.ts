@@ -12,6 +12,16 @@ describe("classify", () => {
     );
   });
 
+  it("detecta códigos minificados de hydration do React em build de produção (issue #54)", () => {
+    expect(
+      classify(e("Uncaught Error: Minified React error #418; visit https://react.dev/errors/418")),
+    ).toBe("hydration");
+    expect(classify(e("Minified React error #423"))).toBe("hydration");
+    expect(classify(e("Minified React error #425"))).toBe("hydration");
+    // #310 (hooks) NÃO é hydration
+    expect(classify(e("Minified React error #310"))).toBe("generic");
+  });
+
   it("detecta CSP", () => {
     expect(
       classify(

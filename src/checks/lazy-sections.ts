@@ -159,16 +159,25 @@ function countDecoMarkers(html: string): number {
   return (html.match(/data-deco\s*=/gi) ?? []).length;
 }
 
+/**
+ * Issue #118: Fresh names lazy-section chunks `render` while TanStack/Vite
+ * emits `render.ts` (extension included) — same section, different id, false
+ * "missing in cand" on every page. Strip bundler extensions before comparing.
+ */
+export function normalizeSectionId(seg: string): string {
+  return seg.replace(/\.(tsx|ts|jsx|js|mjs)$/i, "").toLowerCase();
+}
+
 function extractSectionIds(entries: NetworkEntry[]): Set<string> {
   const out = new Set<string>();
   for (const e of entries) {
-    if (e.decoSection) out.add(e.decoSection);
+    if (e.decoSection) out.add(normalizeSectionId(e.decoSection));
     if (LAZY_URL_PATTERN.test(e.url)) {
       // Use last path segment as a stable id when header is absent
       try {
         const u = new URL(e.url);
         const seg = u.pathname.split("/").filter(Boolean).pop();
-        if (seg) out.add(seg);
+        if (seg) out.add(normalizeSectionId(seg));
       } catch {
         /* skip malformed */
       }

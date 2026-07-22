@@ -16,6 +16,10 @@ const HYDRATION_PATTERNS = [
   /tree hydration/i,
   /useDevice/i,
   /usePlatform/i,
+  // Production builds emit minified codes instead of the readable message
+  // (issue #54): #418 hydration failed, #423 error during hydration,
+  // #425 text mismatch. The /hydrat/i pattern above never matches these.
+  /minified react error #(418|423|425)\b/i,
 ];
 
 const CSP_PATTERNS = [

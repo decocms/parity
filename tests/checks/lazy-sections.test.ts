@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lazySectionPresence } from "../../src/checks/lazy-sections.ts";
+import { lazySectionPresence, normalizeSectionId } from "../../src/checks/lazy-sections.ts";
 import type { NetworkEntry } from "../../src/types/schema.ts";
 import { makeContext } from "../helpers/make-context.ts";
 import { makePageCapture } from "../helpers/make-page-capture.ts";
@@ -95,6 +95,41 @@ describe("lazySectionPresence", () => {
       }),
     );
     expect(r.status).toBe("pass");
+  });
+
+  describe("issue #118: bundler extension drift (render vs render.ts)", () => {
+    it("normalizeSectionId strips bundler extensions and lowercases", () => {
+      expect(normalizeSectionId("render")).toBe("render");
+      expect(normalizeSectionId("render.ts")).toBe("render");
+      expect(normalizeSectionId("render.tsx")).toBe("render");
+      expect(normalizeSectionId("Render.JS")).toBe("render");
+      expect(normalizeSectionId("hero.mjs")).toBe("hero");
+      // non-bundler suffixes are preserved
+      expect(normalizeSectionId("hero.v2")).toBe("hero.v2");
+    });
+
+    it("passes when prod chunk is `render` (Fresh) and cand is `render.ts` (Vite)", () => {
+      const r = lazySectionPresence(
+        makeContext({
+          prodPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "prod",
+              network: [net({ url: "https://x.com/deco/render", decoSection: null })],
+            }),
+          ],
+          candPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "cand",
+              network: [net({ url: "https://x.com/deco/render.ts", decoSection: null })],
+            }),
+          ],
+        }),
+      );
+      expect(r.status).toBe("pass");
+      expect(r.issues).toHaveLength(0);
+    });
   });
 
   describe("issue #46: intentional eager rendering (respectCmsLazy:false)", () => {
