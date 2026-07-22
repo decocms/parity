@@ -45,9 +45,7 @@ export function consoleErrorsBaseline(ctx: CheckContext): CheckResult {
           cls: e.cls,
           sampleText: e.entry.text,
           pages: [pair.key],
-          sampleEvidence: [
-            { kind: "screenshot", path: pair.cand.screenshotPath, label: "cand" },
-          ],
+          sampleEvidence: [{ kind: "screenshot", path: pair.cand.screenshotPath, label: "cand" }],
         });
       } else if (!existing.pages.includes(pair.key)) {
         existing.pages.push(pair.key);
@@ -62,7 +60,9 @@ export function consoleErrorsBaseline(ctx: CheckContext): CheckResult {
         ? agg.pages.join(" · ")
         : `${agg.pages.slice(0, 5).join(" · ")} +${agg.pages.length - 5} more`;
     const pageSuffix =
-      agg.pages.length === 1 ? `em ${agg.pages[0]}` : `em ${agg.pages.length} páginas (${pageList})`;
+      agg.pages.length === 1
+        ? `em ${agg.pages[0]}`
+        : `em ${agg.pages.length} páginas (${pageList})`;
     const severity: Severity = agg.cls === "hydration" ? "critical" : "high";
     issues.push({
       id: `console:${hash(key)}`,
