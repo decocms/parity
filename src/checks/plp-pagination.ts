@@ -1,32 +1,70 @@
-import type { CheckResult, Issue, PageCapture } from "../types/schema.ts";
+import type { CheckResult, FlowCapture, Issue, PageCapture } from "../types/schema.ts";
 import type { CheckContext } from "./index.ts";
+import { hrefOverlap } from "./lib/pagination-overlap.ts";
 
 /**
- * PLP pagination parity. For each PLP we captured (purchase-journey
- * step 2), fetch `?page=2` and `?page=3` against BOTH prod and cand and
- * verify:
+ * PLP pagination parity.
  *
- *   - both pages return 200 (catch-all 200 bugs OR query-param-strip
- *     bugs are common during migrations)
- *   - the product set on each page is different from page 1 (the
- *     classic regression: TanStack site ignores `?page=N` and returns
- *     the same items every time → infinite first page)
- *   - cand's product count per page is within ~30% of prod's (deeper
- *     pagination divergence usually means sort order broke)
+ * Two complementary sources of evidence feed this check:
  *
- * We fetch instead of navigating: the check runs against PLP URLs that
- * are already known from the journey capture, the markup is server-
- * rendered in Deco TanStack so HTML alone is enough, and skipping
- * Playwright keeps the check sub-second.
+ *  1. INTERACTIVE (preferred, when available): the `plp` flow
+ *     (`engine/flows/simple.ts`) drives the page like a user would —
+ *     clicking a "next page" link, clicking "load more", or scrolling —
+ *     and records `detect-pagination-mode` / `paginate` / `verify-pagination`
+ *     steps. This is the only way to catch "load more" and infinite-scroll
+ *     sites correctly; a `?page=N` fetch against those is meaningless (the
+ *     server ignores the param by design, not by bug).
+ *
+ *  2. FETCH-BASED FALLBACK (cheap, always available in single-check mode):
+ *     fetch `?page=2` / `?page=3` against BOTH prod and cand and verify
+ *     both return 200, the product set differs from page 1, and cross-side
+ *     counts are within ~30%. This is the classic "TanStack site ignores
+ *     ?page=N" detector. It's only TRUSTED for a side when that side's
+ *     interactive mode is "page-link", "none"/unknown, or when no `plp`
+ *     flow ran at all — fetching `?page=2` against a load-more/infinite-
+ *     scroll site is a known false-positive source (issue: M2 roadmap).
  */
 export async function plpPagination(ctx: CheckContext): Promise<CheckResult> {
   const start = Date.now();
   const issues: Issue[] = [];
 
-  // The journey records the PLP it landed on as step 2 of purchase-journey.
-  // Pull that URL per side; if missing, fall back to scraping the home
-  // page so the check still runs in single-check mode (`parity check
-  // plp-pagination`).
+  const prodStep = pickPlpStepData(ctx.prodFlows);
+  const candStep = pickPlpStepData(ctx.candFlows);
+
+  if (prodStep && candStep) {
+    const prodPaginates = prodStep.verifyStatus === "ok";
+    if (prodPaginates && (candStep.mode === "none" || candStep.verifyStatus === "failed")) {
+      issues.push({
+        id: "plp-pagination:interactive:cand-broken",
+        severity: "critical",
+        category: "functional",
+        check: "plp-pagination",
+        summary:
+          candStep.mode === "none"
+            ? `[cand] prod paginates interactively (mode="${prodStep.mode}") but cand shows no pagination affordance at all`
+            : `[cand] prod paginates interactively (mode="${prodStep.mode}") but cand's pagination action (mode="${candStep.mode}") failed verification`,
+        details: `prod verify-pagination: ${JSON.stringify(prodStep.detail ?? {})}\ncand verify-pagination: ${JSON.stringify(candStep.detail ?? {})}`,
+      });
+    } else if (
+      prodStep.mode !== "unknown" &&
+      candStep.mode !== "unknown" &&
+      prodStep.mode !== candStep.mode
+    ) {
+      issues.push({
+        id: "plp-pagination:interactive:mode-changed",
+        severity: "medium",
+        category: "functional",
+        check: "plp-pagination",
+        summary: `pagination mode changed: prod="${prodStep.mode}" → cand="${candStep.mode}" — could be an intentional redesign, not necessarily a bug`,
+        inconclusive: true,
+      });
+    }
+  }
+
+  // The journey records the PLP it landed on as step 2 of purchase-journey
+  // (or, now, as the second page of the `plp` flow itself). Pull that URL
+  // per side; if missing, fall back to scraping the home page so the check
+  // still runs in single-check mode (`parity check plp-pagination`).
   let prodPlp = pickPlpUrl(ctx.prodFlows);
   let candPlp = pickPlpUrl(ctx.candFlows);
 
@@ -38,6 +76,19 @@ export async function plpPagination(ctx: CheckContext): Promise<CheckResult> {
   }
 
   if (!prodPlp && !candPlp) {
+    // Even with no URL to fetch against, the interactive flow may have
+    // already produced issues above (e.g. it ran plp-only, no purchase-
+    // journey, and captured verify-pagination data straight from steps).
+    if (issues.length > 0) {
+      return {
+        name: "plp-pagination",
+        status: "fail",
+        severity: "high",
+        durationMs: Date.now() - start,
+        summary: `${issues.length} pagination issue(s) from interactive flow data — see details`,
+        issues,
+      };
+    }
     return {
       name: "plp-pagination",
       status: "skipped",
@@ -56,6 +107,20 @@ export async function plpPagination(ctx: CheckContext): Promise<CheckResult> {
     ["cand", candPlp],
   ] as const) {
     if (!plp) continue;
+    const stepData = side === "prod" ? prodStep : candStep;
+    if (
+      stepData &&
+      stepData.mode !== "page-link" &&
+      stepData.mode !== "none" &&
+      stepData.mode !== "unknown"
+    ) {
+      // Interactive mode is load-more/infinite-scroll — a `?page=N` fetch
+      // probe is meaningless here (the server ignoring the param is
+      // expected behavior, not a bug) and was a known false-positive
+      // source. Trust the interactive verdict instead.
+      data[`${side}_page_counts`] = { skippedFetchProbe: true, reason: `mode=${stepData.mode}` };
+      continue;
+    }
     const page1 = await fetchPlpProducts(plp);
     const page2 = await fetchPlpProducts(withPage(plp, 2));
     const page3 = await fetchPlpProducts(withPage(plp, 3));
@@ -119,7 +184,7 @@ export async function plpPagination(ctx: CheckContext): Promise<CheckResult> {
   if (prodPlp && candPlp) {
     const prodCounts = data.prod_page_counts as { page2: { products: number } } | undefined;
     const candCounts = data.cand_page_counts as { page2: { products: number } } | undefined;
-    if (prodCounts && candCounts) {
+    if (prodCounts && candCounts && "page2" in prodCounts && "page2" in candCounts) {
       const p = prodCounts.page2.products;
       const c = candCounts.page2.products;
       if (p > 0 && Math.abs(p - c) / p > 0.3) {
@@ -269,9 +334,15 @@ async function discoverPlpFromHome(homeUrl: string): Promise<string | null> {
 
 function pickPlpUrl(flows: CheckContext["prodFlows"]): string | null {
   for (const fc of flows) {
-    if (fc.flow !== "purchase-journey") continue;
-    const plpStep = fc.steps?.find((s) => s.name === "navigate-plp" && s.status === "ok");
-    if (plpStep?.url) return plpStep.url;
+    // The interactive `plp` flow captures the PLP page directly too (no
+    // purchase-journey required) — so a `--flows plp`-only run can still
+    // feed this check a URL instead of falling all the way back to
+    // scraping the home page.
+    if (fc.flow !== "purchase-journey" && fc.flow !== "plp") continue;
+    if (fc.flow === "purchase-journey") {
+      const plpStep = fc.steps?.find((s) => s.name === "navigate-plp" && s.status === "ok");
+      if (plpStep?.url) return plpStep.url;
+    }
     // Fallback: any PLP-looking URL in the captured pages
     const plpPage: PageCapture | undefined = fc.pages.find((p) => {
       try {
@@ -289,10 +360,34 @@ function pickPlpUrl(flows: CheckContext["prodFlows"]): string | null {
   return null;
 }
 
-function setOverlap(a: string[], b: string[]): number {
-  if (a.length === 0 || b.length === 0) return 0;
-  const sa = new Set(a);
-  let common = 0;
-  for (const x of b) if (sa.has(x)) common++;
-  return common / Math.max(a.length, b.length);
+/** Overlap helper used by the fetch-based fallback — re-exported from the
+ *  shared pure module so this file and `engine/flows/simple.ts` can't
+ *  drift on the overlap formula. */
+const setOverlap = hrefOverlap;
+
+interface PlpStepPaginationData {
+  /** Mode reported by `detect-pagination-mode` ("unknown" if that step is missing). */
+  mode: string;
+  /** Status of `verify-pagination` ("skipped" for mode=none, null if the step never ran). */
+  verifyStatus: "ok" | "skipped" | "failed" | null;
+  detail?: Record<string, unknown>;
+}
+
+/**
+ * Pull the interactive pagination verdict out of a side's `plp` FlowCapture,
+ * if one ran. Returns null when no `plp` flow (with these steps) is present
+ * — the caller then falls back entirely to the fetch-based probe for that
+ * side, exactly like before this feature existed.
+ */
+function pickPlpStepData(flows: FlowCapture[]): PlpStepPaginationData | null {
+  for (const fc of flows) {
+    if (fc.flow !== "plp") continue;
+    const steps = fc.steps ?? [];
+    const detectStep = steps.find((s) => s.name === "detect-pagination-mode");
+    const verifyStep = steps.find((s) => s.name === "verify-pagination");
+    if (!detectStep && !verifyStep) continue;
+    const mode = (detectStep?.detail?.mode as string | undefined) ?? "unknown";
+    return { mode, verifyStatus: verifyStep?.status ?? null, detail: verifyStep?.detail };
+  }
+  return null;
 }

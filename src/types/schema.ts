@@ -524,6 +524,9 @@ export const ParityRc = z.object({
       loginSubmit: z.string().optional(),
       loginErrorMessage: z.string().optional(),
       accountMenuTrigger: z.string().optional(),
+      // PLP pagination flow
+      paginationNext: z.string().optional(),
+      loadMoreButton: z.string().optional(),
     })
     .default({}),
   skipSteps: z.array(z.string()).default([]),

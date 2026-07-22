@@ -60,3 +60,10 @@ export const CART_INTERACTIONS_STEP_LABELS: Record<string, string> = {
 
 /** Cart-interactions steps whose failure is critical. */
 export const CART_INTERACTIONS_CRITICAL_STEPS = new Set(["seed-cart", "remove-item"]);
+
+/** Human labels for the PLP-flow interactive pagination steps. */
+export const PLP_STEP_LABELS: Record<string, string> = {
+  "detect-pagination-mode": "Detectar modo de paginação",
+  paginate: "Paginar (próxima página / carregar mais / scroll)",
+  "verify-pagination": "Verificar resultado da paginação",
+};
