@@ -184,14 +184,29 @@ export function getCheckByName(name: string): Check | undefined {
  * access to whatever checks finished before the interrupt. The push
  * happens in the per-check `.then()` so ordering reflects completion
  * order, not declaration order. Review feedback on PR #59.
+ *
+ * `checkFilter`, if provided (M3 module selection — `--only`/`--skip`),
+ * narrows the check set to run: only checks whose registered name is in
+ * the set are invoked, the rest are omitted from the result entirely
+ * (not present as "skipped" entries — that's what makes scoped runs
+ * lighter/faster, not just quieter). We resolve names via
+ * `ALL_CHECKS_BY_NAME`/`getCheckByName` rather than invoking-then-filtering,
+ * since a check's `CheckResult.name` is only known after it runs.
+ * `undefined` (the default) preserves the full `ALL_CHECKS` behavior.
  */
 export async function runAllChecks(
   ctx: CheckContext,
   outResults?: CheckResult[],
+  checkFilter?: Set<string>,
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = outResults ?? [];
+  const checksToRun = checkFilter
+    ? Array.from(checkFilter)
+        .map((name) => getCheckByName(name))
+        .filter((c): c is Check => c !== undefined)
+    : ALL_CHECKS;
   await Promise.all(
-    ALL_CHECKS.map(async (check) => {
+    checksToRun.map(async (check) => {
       const start = Date.now();
       try {
         const r = await check(ctx);

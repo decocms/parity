@@ -12,7 +12,7 @@ import { fixCommand } from "./commands/fix.ts";
 import { htmlCommand } from "./commands/html.ts";
 import { journeyCommand } from "./commands/journey.ts";
 import { learnedStats } from "./commands/learned.ts";
-import { listCommand } from "./commands/list.ts";
+import { listCommand, listModulesCommand } from "./commands/list.ts";
 import { prCommand } from "./commands/pr.ts";
 import { promptCommand } from "./commands/prompt.ts";
 import { reportCommand } from "./commands/report.ts";
@@ -163,6 +163,18 @@ program
     "--no-interactive",
     "Disable the interactive selector prompt that auto-fires in a TTY without an LLM provider. Use in scripts and CI where stdin is technically a TTY but you don't want to pause. Issue #72.",
   )
+  .option(
+    "--only <modules>",
+    "Scope the run to these modules and/or single checks (comma-separated). Module names: e2e, seo, visual, vitals, cache, console, html, network. Single-check granularity via `check:<name>`, e.g. `--only e2e,check:cache-coverage`. Run `parity list modules` for the full check/flow mapping. Default: all modules. M3 module selection.",
+  )
+  .option(
+    "--skip <modules>",
+    "Subtract these modules and/or single checks (comma-separated, same syntax as --only) from whatever base set was chosen (all modules, or --only's set if both are given). M3 module selection.",
+  )
+  .option(
+    "--why <text>",
+    "Free-text reason for this run's scope, stored in report.json as `selectionReason`. Purely informational. M3 module selection.",
+  )
   .action(async (opts) => {
     // --flow is just sugar for --flows with a single value
     if (opts.flow) {
@@ -262,7 +274,17 @@ program
   .option("--output <dir>", "Output directory", "./parity-output")
   .action((opts) => {
     process.exit(listCommand(opts.output));
-  });
+  })
+  .addCommand(
+    new Command("modules")
+      .description(
+        "List the 8 selectable check modules (M3 module selection) with their descriptions, checks, and flows — see --only/--skip on `parity run`.",
+      )
+      .option("--json", "Emit structured JSON instead of human-readable text", false)
+      .action((opts) => {
+        process.exit(listModulesCommand(Boolean(opts.json)));
+      }),
+  );
 
 program
   .command("serve")

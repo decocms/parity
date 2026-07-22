@@ -6,10 +6,12 @@ import type { Browser } from "playwright";
 import { runAllChecks } from "../checks/index.ts";
 import type { CheckContext } from "../checks/index.ts";
 import { pairCaptures } from "../checks/lib/pairing.ts";
+import { MODULES, type ModuleName, resolveSelection } from "../checks/modules.ts";
 import { resolveSitemapUrls } from "../diff/sitemap.ts";
 import { launchBrowser, newContext, stopTracing, userAgentFor } from "../engine/browser.ts";
 import { capturePage, installVitalsCollector } from "../engine/collect.ts";
 import { runFlow } from "../engine/flows.ts";
+import { promptForModuleSelection } from "../engine/interactive-module-prompt.ts";
 import { disableInteractive, isInteractiveMode } from "../engine/interactive-selector-prompt.ts";
 import { discoverPagesFromSitemap } from "../engine/sitemap-discover.ts";
 import { SCORE_VERSION, computeVerdict } from "../engine/verdict.ts";
@@ -179,12 +181,36 @@ export interface RunOptions {
    * in a TTY without an LLM provider. Set by `--no-interactive`. Issue #72.
    */
   interactive?: boolean;
+  /**
+   * Comma-separated module names and/or `check:<name>` entries to scope
+   * the run to (M3 module selection). See `src/checks/modules.ts`.
+   * Absent → all modules run (full back-compat).
+   */
+  only?: string;
+  /**
+   * Comma-separated module names and/or `check:<name>` entries to
+   * subtract from the resolved set (applied after `--only`, or from the
+   * full module set when `--only` is absent).
+   */
+  skip?: string;
+  /**
+   * Free-text reason for this run's scope — plumbed through to
+   * `Run.selectionReason` in report.json. Purely informational for now;
+   * a later phase may surface it more prominently.
+   */
+  why?: string;
 }
 
 type PresetDefaults = Partial<
   Pick<
     RunOptions,
-    "flows" | "viewports" | "vitalsPages" | "visualPages" | "noVisualDiff" | "autoSelectors"
+    | "flows"
+    | "viewports"
+    | "vitalsPages"
+    | "visualPages"
+    | "noVisualDiff"
+    | "autoSelectors"
+    | "only"
   >
 >;
 
@@ -216,6 +242,10 @@ const PRESETS: Record<NonNullable<RunOptions["preset"]>, PresetDefaults> = {
     viewports: "mobile",
     vitalsPages: 5,
     visualPages: 3,
+    // Module-scoped (M3): CI cares about functional regressions, HTML
+    // structure and console errors — not full SEO/visual/vitals audits.
+    // Explicit `--only`/`--skip` from the user still wins (see applyPreset).
+    only: "e2e,html,console",
   },
 };
 
@@ -348,7 +378,87 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       ),
     );
   }
-  const flows = opts.flows.split(",").map((s) => s.trim()) as FlowName[];
+  // M3 module selection (docs/ROADMAP-1.0.md phase A): resolve --only/--skip
+  // into a concrete module/check/flow set. When neither flag (nor --preset,
+  // which may set --only itself) is given in a TTY, nudge the dev with an
+  // interactive checkbox prompt instead of silently running everything;
+  // non-TTY/scripted callers just get a one-line heads-up and proceed
+  // unchanged (no hard requirement — see ROADMAP-1.0's non-goals).
+  let interactivePromptShown = false;
+  if (!opts.only && !opts.skip && !rawOpts.preset) {
+    if (process.stdin.isTTY && opts.interactive !== false) {
+      const chosen = await promptForModuleSelection();
+      interactivePromptShown = true;
+      if (chosen && chosen.length < Object.keys(MODULES).length) {
+        opts.only = chosen.join(",");
+      }
+    }
+  }
+
+  const selection = resolveSelection({ only: opts.only, skip: opts.skip });
+  if (selection.errors.length > 0) {
+    console.error(chalk.red("  --only/--skip: invalid value(s):"));
+    for (const e of selection.errors) console.error(chalk.red(`    - ${e}`));
+    console.error(chalk.dim(`\n  valid modules: ${Object.keys(MODULES).join(", ")}`));
+    return 2;
+  }
+  const hasSelection = Boolean(opts.only || opts.skip);
+
+  const FLOWS_COMMANDER_DEFAULT = "purchase-journey";
+  const userSetFlows = rawOpts.flows !== undefined && rawOpts.flows !== FLOWS_COMMANDER_DEFAULT;
+
+  let flows: FlowName[];
+  if (hasSelection) {
+    // Narrow to what the selected modules actually need, unioned with any
+    // flows the user explicitly asked for via --flows/--flow — but don't
+    // force-capture flows nothing selected needs (that's the whole point
+    // of scoping: a lighter/faster run). Issue: M3 module selection.
+    const explicitFlows = userSetFlows
+      ? (opts.flows
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean) as FlowName[])
+      : [];
+    flows = Array.from(new Set([...explicitFlows, ...selection.flows]));
+    console.log(
+      chalk.dim(
+        `  modules: ${selection.modules.join(", ") || "(none)"} → flows: ${flows.join(",")}`,
+      ),
+    );
+  } else {
+    flows = opts.flows.split(",").map((s) => s.trim()) as FlowName[];
+    if (!interactivePromptShown) {
+      console.log(
+        chalk.dim(
+          "  no --only/--skip given — running ALL modules; pass --only to scope the run for a lighter/faster result",
+        ),
+      );
+    }
+  }
+
+  // Sitemap/LLM-dependent crawl passes are wasted work when no selected
+  // module needs them — auto-zero the same way `applySmartDefaults` does
+  // for the no-LLM case, only when the caller never touched the flag.
+  if (hasSelection) {
+    const needsSitemapPages = selection.modules.some((m) => MODULES[m].needsSitemapPages);
+    const needsLlmPass = selection.modules.some((m) => MODULES[m].needsLlm);
+    const VITALS_PAGES_DEFAULT = 10;
+    const VISUAL_PAGES_DEFAULT = 5;
+    if (!needsSitemapPages && opts.vitalsPages === VITALS_PAGES_DEFAULT) {
+      opts.vitalsPages = 0;
+      console.log(
+        chalk.dim("  vitals-pages auto-set to 0 (no selected module needs sitemap-page crawling)"),
+      );
+    }
+    if (!needsLlmPass && opts.visualPages === VISUAL_PAGES_DEFAULT) {
+      opts.visualPages = 0;
+      opts.noVisualDiff = true;
+      console.log(
+        chalk.dim("  visual-pages auto-set to 0 (no selected module needs the visual-diff pass)"),
+      );
+    }
+  }
+
   const viewports = opts.viewports.split(",").map((s) => s.trim()) as Viewport[];
   const failOn = opts.failOn
     .split(",")
@@ -1042,7 +1152,11 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     // captures whatever already completed (review feedback on PR #59).
     // The returned `checks` is the SAME array reference, so assigning
     // back is unnecessary.
-    const checks = await runAllChecks(checkCtx, partialChecks);
+    const checks = await runAllChecks(
+      checkCtx,
+      partialChecks,
+      hasSelection ? selection.checkNames : undefined,
+    );
     checksHb.stop();
     stampPhase("checks");
     spinner.succeed(`Checks concluídos (${checks.length})`);
@@ -1158,6 +1272,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       seo,
       baseline: baselineSection,
       timings: runTimings,
+      selectionReason: opts.why,
     };
 
     const reportStart = performance.now();

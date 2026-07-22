@@ -14,6 +14,7 @@
 | `parity compare` | Compare a run against a baseline |
 | `parity baseline` | Manage baselines (`set`, `list`, `unset`) |
 | `parity list` | List saved runs |
+| `parity list modules` | List the 8 selectable check modules (`--only`/`--skip` targets), with `--json` |
 | `parity check` | Run a single check (`<name>`) — skips sitemap + LLM aggregation; sub-10s loop |
 | `parity console` | Sub-10s capture of console errors/warnings + network failures for one URL |
 | `parity html` | Dump page/selector HTML or unified diff prod×cand (prettier + jsdiff) |
@@ -38,6 +39,61 @@ Run any command with `--help` for the full flag list.
 
 - `--X` (no `no-` prefix) → enable / opt-in (default OFF unless preset overrides)
 - `--no-X` → disable / opt-out (default ON unless preset overrides)
+
+## Module selection: `--only`, `--skip`, `--why`
+
+`parity run` groups its ~28 checks into 8 **modules** so you can scope a run
+to just the part you care about — lighter and faster than a full run.
+`parity list modules` prints the current mapping (add `--json` for
+structured output); `docs/checks.md` also has a Module column for the
+check-name → module direction.
+
+| Module | Covers |
+| --- | --- |
+| `e2e` | Functional flows: purchase journey, search, cart interactions, login, PDP gallery/breadcrumbs, PLP sorting |
+| `seo` | Meta/SEO parity, deep audit, 404 handling, footer links, pagination, HTTP status |
+| `visual` | Visual regression (LLM Vision), banner aspect ratio, cookie/CEP modal CLS |
+| `vitals` | Web Vitals (mobile) |
+| `cache` | Cache-header coverage |
+| `console` | Console error baseline |
+| `html` | HTML structural diff, lazy sections, image loading health, picture dims |
+| `network` | Network request summary delta |
+
+```bash
+# e2e sozinho — just the functional flows, nothing else
+parity run --prod https://www.example.com --cand https://example.deco-cx.workers.dev --only e2e
+
+# everything except visual + vitals (skip the slow LLM/sitemap passes)
+parity run --prod ... --cand ... --skip visual,vitals
+
+# a module plus one extra single check, at check-level granularity
+parity run --prod ... --cand ... --only e2e,check:cache-coverage
+
+# annotate why the run was scoped this way (stored in report.json as `selectionReason`)
+parity run --prod ... --cand ... --only e2e --why "smoke test before deploy"
+```
+
+Rules:
+
+- `--only` is the base set (default: all 8 modules). `--skip` subtracts from
+  whatever base was chosen (all modules, or `--only`'s set if both are given).
+- Both flags accept module names and/or `check:<name>` entries, comma-separated.
+- No `--only`/`--skip` at all → **unchanged behavior**: all checks run, all
+  flows captured, exactly like before module selection existed.
+- When a selection narrows which flows are needed, only those flows are
+  captured — `--flows`/`--flow` still works standalone and is unioned in.
+  Sitemap crawling (`vitals-pages`) and the visual-diff capture pass are
+  auto-skipped when no selected module needs them (mirrors the existing
+  no-LLM smart-defaults behavior).
+- Presets are module-aware too: `--preset ci` implies `--only e2e,html,console`
+  unless you pass an explicit `--only`/`--skip`, which always wins.
+- Running from a TTY with none of `--only`/`--skip`/`--preset` set shows an
+  interactive checkbox-style prompt (all modules pre-checked) so you can
+  narrow the run on the spot. Non-TTY callers (CI, scripts) just get a
+  one-line heads-up and proceed with everything — this is *never* a hard
+  requirement.
+- Unknown module/check names in `--only`/`--skip` exit with code 2 and a
+  list of valid names.
 
 ## Visual Diff tab
 
