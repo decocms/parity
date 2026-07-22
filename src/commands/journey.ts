@@ -11,7 +11,7 @@ import { type Platform, detectPlatform } from "../learned/platform.ts";
 import { promoteStepsFromFlow } from "../learned/promote.ts";
 import { loadLearned, saveLearned } from "../learned/repo.ts";
 import { isLlmAvailable, providerLabel } from "../llm/client.ts";
-import { discoverSelectorsFromUrl } from "../llm/discover-selectors.ts";
+import { discoverSelectorsFromUrl, mergeDiscoveredSelectors } from "../llm/discover-selectors.ts";
 import { createRunDir, newRunId, writeRunReportHtml, writeRunReportJson } from "../storage/fs.ts";
 import type {
   FlowCapture,
@@ -120,18 +120,7 @@ export async function journeyCommand(opts: JourneyOptions): Promise<number> {
       platform = detectPlatform({ url: opts.prod, html });
       if (opts.autoSelectors !== false && isLlmAvailable()) {
         const discovered = await discoverSelectorsFromUrl(opts.prod, html, {});
-        if (discovered) {
-          const before = rc.selectors;
-          rc.selectors = {
-            categoryLink: before.categoryLink ?? discovered.categoryLink,
-            productCard: before.productCard ?? discovered.productCard,
-            buyButton: before.buyButton ?? discovered.buyButton,
-            minicartTrigger: before.minicartTrigger ?? discovered.minicartTrigger,
-            cepInputPdp: before.cepInputPdp ?? discovered.cepInputPdp,
-            cepInputCart: before.cepInputCart ?? discovered.cepInputCart,
-            checkoutButton: before.checkoutButton ?? discovered.checkoutButton,
-          };
-        }
+        if (discovered) mergeDiscoveredSelectors(rc.selectors, discovered);
       }
     }
   } catch {
