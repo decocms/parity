@@ -33,6 +33,7 @@ const STEP_NAMES = [
   "increment-qty",
   "decrement-qty",
   "apply-invalid-coupon",
+  "apply-valid-coupon",
   "remove-item",
   "verify-empty-state",
 ] as const;
@@ -480,8 +481,9 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
     const before7 = await parseCartTotals(page, ctx);
     let couponErrorShown = false;
     let couponSubmitted = false;
+    const invalidCode = ctx.rc.coupon?.invalidCode ?? "INVALIDCOUPON123-XYZ";
     if (couponInputHit) {
-      await couponInputHit.locator.fill("INVALIDCOUPON123-XYZ").catch(() => undefined);
+      await couponInputHit.locator.fill(invalidCode).catch(() => undefined);
       const submitHit = await findElement(page, ctx, {
         key: "cartCouponSubmit",
         intent:
@@ -541,10 +543,100 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
     await screenshotStable(page, { path: screenshotPath(ctx, "cart-7-coupon") });
     reportEnd(7, "apply-invalid-coupon", couponStatus, Date.now() - t7);
 
-    // Step 8: remove-item — loop until the cart has no rows left (max 3
+    // Step 8: apply-valid-coupon — only when rc.coupon.validCode is
+    // configured (parity has no way to know a real discount code on its
+    // own); otherwise skipped. Passes when the total drops or a discount
+    // totalizer/row appears — either signal is enough since some stores
+    // apply the discount to a sub-line rather than the grand total shown
+    // by `cartTotalPrice`.
+    reportStart(8, "apply-valid-coupon");
+    const t8b = Date.now();
+    const validCode = ctx.rc.coupon?.validCode;
+    let validCouponStatus: StepCapture["status"] = "skipped";
+    let validCouponNote: string | undefined;
+    let before8b: CartTotals | undefined;
+    let after8b: CartTotals | undefined;
+    if (!validCode) {
+      validCouponNote = "rc.coupon.validCode não configurado";
+    } else {
+      const couponInputHit2 = await findElement(page, ctx, {
+        key: "cartCouponInput",
+        intent: "Encontrar o <input> de CUPOM no carrinho aberto (mesmo campo do cupom inválido).",
+        budget,
+        stepName: "cart-coupon-input-valid",
+      });
+      if (!couponInputHit2) {
+        validCouponNote = "coupon input não encontrado";
+      } else {
+        before8b = await parseCartTotals(page, ctx);
+        await couponInputHit2.locator.fill(validCode).catch(() => undefined);
+        const submitHit2 = await findElement(page, ctx, {
+          key: "cartCouponSubmit",
+          intent: "Encontrar o botão de submeter cupom junto ao input de cupom no carrinho.",
+          budget,
+          stepName: "cart-coupon-submit-valid",
+        });
+        if (!submitHit2) {
+          validCouponNote = "submit button não encontrado";
+        } else {
+          await submitHit2.locator.click({ timeout: 3_000 }).catch(() => undefined);
+          await waitForCartMutation(page, ctx, () => false, 2_000);
+          after8b = await parseCartTotals(page, ctx);
+          const priceBefore = before8b.price ? parsePriceBRL(before8b.price) : null;
+          const priceAfter = after8b.price ? parsePriceBRL(after8b.price) : null;
+          const priceDropped =
+            priceBefore !== null && priceAfter !== null ? priceAfter < priceBefore : false;
+          const discountText = await withCap(
+            page
+              .locator("body")
+              .innerText()
+              .catch(() => ""),
+            1_500,
+            "",
+          );
+          const discountRowShown = /(desconto|discount|cupom aplicado|coupon applied)/i.test(
+            discountText,
+          );
+          validCouponStatus = priceDropped || discountRowShown ? "ok" : "failed";
+          validCouponNote =
+            validCouponStatus === "ok"
+              ? undefined
+              : `priceDropped=${priceDropped}(${priceBefore}→${priceAfter}) discountRowShown=${discountRowShown}`;
+        }
+      }
+    }
+    steps.push({
+      step: 8,
+      name: "apply-valid-coupon",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: validCouponStatus,
+      durationMs: Date.now() - t8b,
+      screenshotPath: screenshotPath(ctx, "cart-8b-valid-coupon"),
+      selectorKey: "cartCouponInput",
+      note: validCouponNote,
+      actionDescription:
+        validCouponStatus === "ok"
+          ? "Cupom válido aplicado — desconto refletido"
+          : `apply-valid-coupon ${validCouponStatus}: ${validCouponNote ?? ""}`,
+      cartItemValidation: validCode
+        ? {
+            action: "apply-valid-coupon",
+            before: before8b,
+            after: after8b,
+            succeeded: validCouponStatus === "ok",
+          }
+        : undefined,
+    });
+    if (validCouponStatus !== "skipped") {
+      await screenshotStable(page, { path: screenshotPath(ctx, "cart-8b-valid-coupon") });
+    }
+    reportEnd(8, "apply-valid-coupon", validCouponStatus, Date.now() - t8b, validCouponNote);
+
+    // Step 9: remove-item — loop until the cart has no rows left (max 3
     // iterations) so `verify-empty-state` still passes even when the cart
     // now holds 2 items (add-second-item).
-    reportStart(8, "remove-item");
+    reportStart(9, "remove-item");
     const t8 = Date.now();
     const before8 = after7;
     let removeHit = await findElement(page, ctx, {
@@ -577,7 +669,7 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
       }
     }
     steps.push({
-      step: 8,
+      step: 9,
       name: "remove-item",
       side: ctx.side,
       viewport: ctx.viewport,
@@ -600,19 +692,19 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
     });
     await screenshotStable(page, { path: screenshotPath(ctx, "cart-8-remove") });
     reportEnd(
-      8,
+      9,
       "remove-item",
       foundRemoveButton ? (removed ? "ok" : "failed") : "skipped",
       Date.now() - t8,
     );
 
-    // Step 9: verify-empty-state
-    reportStart(9, "verify-empty-state");
+    // Step 10: verify-empty-state
+    reportStart(10, "verify-empty-state");
     const t9 = Date.now();
     const emptyText = await detectEmptyCartBanner(page);
     const emptyStatus: StepCapture["status"] = emptyText ? "ok" : removed ? "failed" : "skipped";
     steps.push({
-      step: 9,
+      step: 10,
       name: "verify-empty-state",
       side: ctx.side,
       viewport: ctx.viewport,
@@ -625,7 +717,7 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
       note: emptyText ?? undefined,
     });
     await screenshotStable(page, { path: screenshotPath(ctx, "cart-9-empty") });
-    reportEnd(9, "verify-empty-state", emptyStatus, Date.now() - t9);
+    reportEnd(10, "verify-empty-state", emptyStatus, Date.now() - t9);
   } finally {
     await page.close().catch(() => undefined);
   }

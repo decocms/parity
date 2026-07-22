@@ -52,6 +52,7 @@ export const CART_INTERACTIONS_STEP_LABELS: Record<string, string> = {
   "increment-qty": "Incrementar quantidade",
   "decrement-qty": "Decrementar quantidade",
   "apply-invalid-coupon": "Aplicar cupom inválido",
+  "apply-valid-coupon": "Aplicar cupom válido",
   "remove-item": "Remover item",
   "verify-empty-state": "Verificar estado vazio",
 };

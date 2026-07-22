@@ -126,3 +126,33 @@ describe("cartInteractionsFlow", () => {
     expect(r.issues.length).toBe(0);
   });
 });
+
+describe("apply-valid-coupon", () => {
+  it("high (não critical) quando ok em prod mas failed em cand — não é CRITICAL_STEPS", () => {
+    const r = cartInteractionsFlow(
+      makeContext({
+        prodFlows: [flow("prod", [step("apply-valid-coupon", "ok", "prod")])],
+        candFlows: [
+          flow("cand", [step("apply-valid-coupon", "failed", "cand", "desconto não aplicado")]),
+        ],
+      }),
+    );
+    const issue = r.issues.find((i) => i.id.includes("apply-valid-coupon"));
+    expect(issue?.severity).toBe("high");
+    expect(r.status).toBe("warn");
+  });
+
+  it("single-site: skipped não gera issue (sem validCode configurado)", () => {
+    const r = cartInteractionsFlow(
+      makeContext({
+        candFlows: [
+          flow("cand", [
+            step("apply-valid-coupon", "skipped", "cand", "rc.coupon.validCode não configurado"),
+          ]),
+        ],
+      }),
+    );
+    expect(r.status).toBe("pass");
+    expect(r.issues.length).toBe(0);
+  });
+});
