@@ -511,6 +511,8 @@ export const ParityRc = z.object({
       cartCouponInput: z.string().optional(),
       cartCouponSubmit: z.string().optional(),
       cartTotalPrice: z.string().optional(),
+      /** VTEX-only: seller-code input in cart/checkout (informational orderForm probe). */
+      sellerCodeInput: z.string().optional(),
       // PDP gallery + related
       pdpGalleryThumbnail: z.string().optional(),
       pdpGalleryMain: z.string().optional(),

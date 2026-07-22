@@ -293,6 +293,16 @@ export const DEFAULT_SELECTORS = {
     ".vtex-minicart-2-x-totalValue",
     "[data-fs-cart-total]",
   ],
+  // VTEX-only: seller-code field, usually a debug/admin-facing input on
+  // cart/checkout pages (some storefront themes expose it for CS/backoffice
+  // testing). Rare on default checkout, hence the narrow candidate list.
+  sellerCodeInput: [
+    "input[name*='seller' i]",
+    "input[placeholder*='seller' i]",
+    "input[placeholder*='vendedor' i]",
+    "input[aria-label*='vendedor' i]",
+    "[data-seller-code] input",
+  ],
   // ── PDP gallery + related ──────────────────────────────────────────────
   pdpGalleryThumbnail: [
     "[data-gallery-thumb]",

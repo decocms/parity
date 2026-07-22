@@ -53,6 +53,7 @@ export const CART_INTERACTIONS_STEP_LABELS: Record<string, string> = {
   "decrement-qty": "Decrementar quantidade",
   "apply-invalid-coupon": "Aplicar cupom inválido",
   "apply-valid-coupon": "Aplicar cupom válido",
+  "seller-code-null": "Probe VTEX: seller-code null (informativo)",
   "remove-item": "Remover item",
   "verify-empty-state": "Verificar estado vazio",
 };

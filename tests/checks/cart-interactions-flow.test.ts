@@ -156,3 +156,82 @@ describe("apply-valid-coupon", () => {
     expect(r.issues.length).toBe(0);
   });
 });
+
+describe("seller-code-null (VTEX probe — never blocking)", () => {
+  it("nunca gera severidade acima de low, mesmo com nota de anomalia", () => {
+    const r = cartInteractionsFlow(
+      makeContext({
+        candFlows: [
+          flow("cand", [
+            step(
+              "seller-code-null",
+              "ok",
+              "cand",
+              "seller=null aceito, mas carrinho pareceu esvaziar — anomalia não-bloqueante, investigar",
+            ),
+          ]),
+        ],
+      }),
+    );
+    const issue = r.issues.find((i) => i.id.includes("seller-code-null"));
+    expect(issue?.severity).toBe("low");
+    expect(issue?.inconclusive).toBe(true);
+    expect(r.status).not.toBe("fail");
+  });
+
+  it("sem nota de anomalia não gera issue nenhuma", () => {
+    const r = cartInteractionsFlow(
+      makeContext({
+        candFlows: [
+          flow("cand", [
+            step("seller-code-null", "ok", "cand", "seller=null aceito, carrinho intacto"),
+          ]),
+        ],
+      }),
+    );
+    expect(r.issues.length).toBe(0);
+    expect(r.status).toBe("pass");
+  });
+
+  it("skipped em loja não-VTEX não gera issue", () => {
+    const r = cartInteractionsFlow(
+      makeContext({
+        candFlows: [
+          flow("cand", [
+            step(
+              "seller-code-null",
+              "skipped",
+              "cand",
+              'plataforma "shopify" não é VTEX — probe pulado',
+            ),
+          ]),
+        ],
+      }),
+    );
+    expect(r.issues.length).toBe(0);
+  });
+
+  it("comparativo: anomalia em qualquer lado gera issue low, nunca critical", () => {
+    const r = cartInteractionsFlow(
+      makeContext({
+        prodFlows: [
+          flow("prod", [
+            step(
+              "seller-code-null",
+              "ok",
+              "prod",
+              "seller=null aceito, mas carrinho pareceu esvaziar — anomalia não-bloqueante, investigar",
+            ),
+          ]),
+        ],
+        candFlows: [
+          flow("cand", [
+            step("seller-code-null", "ok", "cand", "seller=null aceito, carrinho intacto"),
+          ]),
+        ],
+      }),
+    );
+    expect(r.issues.every((i) => i.severity === "low")).toBe(true);
+    expect(r.status).not.toBe("fail");
+  });
+});
