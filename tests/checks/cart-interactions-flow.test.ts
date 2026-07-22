@@ -157,6 +157,86 @@ describe("apply-valid-coupon", () => {
   });
 });
 
+describe("verify-cart-persistence", () => {
+  it("critical quando ok em prod mas failed em cand (comparativo) — regressão de persistência", () => {
+    const prod = [step("seed-cart", "ok", "prod"), step("verify-cart-persistence", "ok", "prod")];
+    const cand = [
+      step("seed-cart", "ok", "cand"),
+      step("verify-cart-persistence", "failed", "cand", "qty 1→0 após reload"),
+    ];
+    const r = cartInteractionsFlow(
+      makeContext({ prodFlows: [flow("prod", prod)], candFlows: [flow("cand", cand)] }),
+    );
+    const issue = r.issues.find((i) => i.id.includes("verify-cart-persistence"));
+    expect(issue?.severity).toBe("critical");
+    expect(r.status).toBe("fail");
+  });
+
+  it("single-site: high (não critical) quando falha sozinha", () => {
+    const r = cartInteractionsFlow(
+      makeContext({
+        candFlows: [
+          flow("cand", [
+            step("verify-cart-persistence", "failed", "cand", "carrinho esvaziou no reload"),
+          ]),
+        ],
+      }),
+    );
+    const issue = r.issues.find((i) => i.id.includes("verify-cart-persistence"));
+    expect(issue?.severity).toBe("high");
+  });
+
+  it("não está em CART_INTERACTIONS_CRITICAL_STEPS (não escala sozinho no single-site)", () => {
+    const r = cartInteractionsFlow(
+      makeContext({
+        candFlows: [flow("cand", [step("verify-cart-persistence", "ok", "cand")])],
+      }),
+    );
+    expect(r.issues.length).toBe(0);
+    expect(r.status).toBe("pass");
+  });
+});
+
+describe("set-qty-input", () => {
+  it("medium (nunca critical) quando falha em cand no comparativo", () => {
+    const prod = [step("seed-cart", "ok", "prod"), step("set-qty-input", "ok", "prod")];
+    const cand = [
+      step("seed-cart", "ok", "cand"),
+      step("set-qty-input", "failed", "cand", "qty não mudou para 3"),
+    ];
+    const r = cartInteractionsFlow(
+      makeContext({ prodFlows: [flow("prod", prod)], candFlows: [flow("cand", cand)] }),
+    );
+    const issue = r.issues.find((i) => i.id.includes("set-qty-input"));
+    expect(issue?.severity).toBe("medium");
+    expect(r.status).not.toBe("fail");
+  });
+
+  it("single-site: medium quando falha sozinho", () => {
+    const r = cartInteractionsFlow(
+      makeContext({
+        candFlows: [flow("cand", [step("set-qty-input", "failed", "cand", "sem input de qty")])],
+      }),
+    );
+    const issue = r.issues.find((i) => i.id.includes("set-qty-input"));
+    expect(issue?.severity).toBe("medium");
+  });
+
+  it("skipped (input renderizado como texto) não gera issue", () => {
+    const r = cartInteractionsFlow(
+      makeContext({
+        candFlows: [
+          flow("cand", [
+            step("set-qty-input", "skipped", "cand", "quantidade renderizada como texto"),
+          ]),
+        ],
+      }),
+    );
+    expect(r.issues.length).toBe(0);
+    expect(r.status).toBe("pass");
+  });
+});
+
 describe("seller-code-null (VTEX probe — never blocking)", () => {
   it("nunca gera severidade acima de low, mesmo com nota de anomalia", () => {
     const r = cartInteractionsFlow(
