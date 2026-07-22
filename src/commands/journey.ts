@@ -3,6 +3,10 @@ import { join } from "node:path";
 import chalk from "chalk";
 import ora from "ora";
 import type { Browser } from "playwright";
+import {
+  PJ_CRITICAL_STEPS as CRITICAL_STEPS,
+  PJ_STEP_LABELS_NUMBERED as STEP_LABELS,
+} from "../checks/lib/step-names.ts";
 import { launchBrowser, newContext, stopTracing, userAgentFor } from "../engine/browser.ts";
 import { installVitalsCollector } from "../engine/collect.ts";
 import { type StepProgressEvent, runFlow } from "../engine/flows.ts";
@@ -45,27 +49,6 @@ export interface JourneyOptions {
    */
   acceptProdQuirks?: boolean;
 }
-
-const STEP_LABELS: Record<string, string> = {
-  "visit-home": "1. visit-home",
-  "navigate-plp": "2. navigate-plp",
-  "enter-pdp": "3. enter-pdp",
-  "select-variant": "4. select-variant",
-  "shipping-calc-pdp": "5. shipping-calc-pdp",
-  "add-to-cart": "6. add-to-cart",
-  "open-minicart": "7. open-minicart",
-  "shipping-calc-cart": "8. shipping-calc-cart",
-  "go-checkout": "9. go-checkout",
-};
-
-const CRITICAL_STEPS = new Set([
-  "visit-home",
-  "navigate-plp",
-  "enter-pdp",
-  "add-to-cart",
-  "open-minicart",
-  "go-checkout",
-]);
 
 interface StepRow {
   name: string;

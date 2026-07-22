@@ -1,26 +1,9 @@
 import type { CheckResult, FlowCapture, Issue, StepCapture, Viewport } from "../types/schema.ts";
 import type { CheckContext } from "./index.ts";
-
-const STEP_LABELS: Record<string, string> = {
-  "visit-home": "Visitar home",
-  "navigate-plp": "Navegar para categoria (PLP)",
-  "enter-pdp": "Entrar em PDP",
-  "select-variant": "Selecionar variante (tamanho/cor/quantidade)",
-  "shipping-calc-pdp": "Cálculo de frete na PDP",
-  "add-to-cart": "Adicionar ao carrinho",
-  "open-minicart": "Abrir minicart",
-  "shipping-calc-cart": "Cálculo de frete no carrinho",
-  "go-checkout": "Ir para checkout",
-};
-
-const CRITICAL_STEPS = new Set([
-  "visit-home",
-  "navigate-plp",
-  "enter-pdp",
-  "add-to-cart",
-  "open-minicart",
-  "go-checkout",
-]);
+import {
+  PJ_CRITICAL_STEPS as CRITICAL_STEPS,
+  PJ_STEP_LABELS as STEP_LABELS,
+} from "./lib/step-names.ts";
 
 export function purchaseJourneyFlow(ctx: CheckContext): CheckResult {
   const start = Date.now();

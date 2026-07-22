@@ -134,8 +134,14 @@ function installChromiumSync(): number {
   // against, so the post-install retry still fails.
   const localCli = resolveLocalPlaywrightCli();
   const cmd = localCli
-    ? { command: process.execPath, args: [localCli, "install", "chromium", "chromium-headless-shell"] }
-    : { command: "npx", args: ["--yes", "playwright", "install", "chromium", "chromium-headless-shell"] };
+    ? {
+        command: process.execPath,
+        args: [localCli, "install", "chromium", "chromium-headless-shell"],
+      }
+    : {
+        command: "npx",
+        args: ["--yes", "playwright", "install", "chromium", "chromium-headless-shell"],
+      };
   const result = spawnSync(cmd.command, cmd.args, {
     stdio: "inherit",
     env: process.env,

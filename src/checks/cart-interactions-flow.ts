@@ -1,18 +1,10 @@
 import type { CheckResult, Issue } from "../types/schema.ts";
 import type { CheckContext } from "./index.ts";
 import { buildPairEvidence, findFlow, findStep, isSingleSite } from "./lib/flow-pairing.ts";
-
-const STEP_LABELS: Record<string, string> = {
-  "seed-cart": "Semear carrinho (add product)",
-  "read-baseline": "Ler baseline (qty/price)",
-  "increment-qty": "Incrementar quantidade",
-  "decrement-qty": "Decrementar quantidade",
-  "apply-invalid-coupon": "Aplicar cupom inválido",
-  "remove-item": "Remover item",
-  "verify-empty-state": "Verificar estado vazio",
-};
-
-const CRITICAL_STEPS = new Set(["seed-cart", "remove-item"]);
+import {
+  CART_INTERACTIONS_CRITICAL_STEPS as CRITICAL_STEPS,
+  CART_INTERACTIONS_STEP_LABELS as STEP_LABELS,
+} from "./lib/step-names.ts";
 
 /**
  * Step-by-step parity check for the cart-interactions flow. Critical when
