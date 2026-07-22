@@ -1,5 +1,27 @@
 import chalk from "chalk";
+import { MODULES } from "../checks/modules.ts";
 import { listRuns, loadRun } from "../storage/fs.ts";
+
+/**
+ * `parity list modules` — prints the 8 selectable modules (M3 module
+ * selection) with their descriptions and check/flow membership, so
+ * `--only`/`--skip` values are discoverable without reading source.
+ */
+export function listModulesCommand(json: boolean): number {
+  if (json) {
+    console.log(JSON.stringify(MODULES, null, 2));
+    return 0;
+  }
+  for (const mod of Object.values(MODULES)) {
+    console.log(`  ${chalk.bold(mod.name)}  ${chalk.dim(mod.description)}`);
+    console.log(`    checks: ${mod.checks.join(", ")}`);
+    console.log(`    flows:  ${mod.flows.join(", ")}`);
+    if (mod.needsSitemapPages) console.log(chalk.dim("    needs sitemap-page crawling"));
+    if (mod.needsLlm) console.log(chalk.dim("    needs an LLM pass for full value"));
+    console.log("");
+  }
+  return 0;
+}
 
 export function listCommand(output: string): number {
   const runs = listRuns(output);

@@ -467,6 +467,12 @@ export const Run = z.object({
       phases: z.array(z.object({ phase: z.string(), durationMs: z.number() })),
     })
     .optional(),
+  /**
+   * Free-text reason for this run's module scope, passed via `--why`
+   * (M3 module selection). Purely informational — not parsed or used in
+   * scoring. Optional so older reports still validate.
+   */
+  selectionReason: z.string().optional(),
 });
 export type Run = z.infer<typeof Run>;
 
