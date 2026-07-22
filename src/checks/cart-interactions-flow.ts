@@ -66,9 +66,15 @@ export function cartInteractionsFlow(ctx: CheckContext): CheckResult {
       const label = STEP_LABELS[name] ?? name;
 
       if (p.status === "ok" && c.status === "failed") {
+        // `validate-multi-item` isn't in CRITICAL_STEPS (a flaky "couldn't
+        // find a second product" shouldn't hard-fail the whole flow), but
+        // a cart that used to hold 2+ items on prod and can only hold 1
+        // post-migration on cand IS a real regression — escalate that
+        // specific comparative case to critical.
+        const isMultiItemRegression = name === "validate-multi-item";
         issues.push({
           id: `cart-interactions:${viewport}:${name}:failed-cand`,
-          severity: CRITICAL_STEPS.has(name) ? "critical" : "high",
+          severity: CRITICAL_STEPS.has(name) || isMultiItemRegression ? "critical" : "high",
           category: "functional",
           check: "cart-interactions-flow",
           summary: `[${viewport}] "${label}" falhou em cand (passou em prod) — ${c.note ?? c.actionDescription ?? ""}`,

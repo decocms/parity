@@ -31,7 +31,7 @@ const FLOW_DEADLINE_MS: Record<FlowName, number> = {
   pdp: 240_000,
   "purchase-journey": 420_000, // 9 steps × ~30s + LLM recovery + variant heuristic scroll
   search: 300_000, // 6 steps (home + autocomplete + results + no-results + empty)
-  "cart-interactions": 240_000, // 7 steps (seed via PJ + qty + coupon + remove)
+  "cart-interactions": 330_000, // 9 steps (seed + multi-item add/validate + qty + coupon + remove) — one extra PLP+PDP round trip
   login: 180_000, // 5 steps (gated, only with credentials)
 };
 

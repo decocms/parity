@@ -77,4 +77,52 @@ describe("cartInteractionsFlow", () => {
     );
     expect(r.issues.some((i) => i.severity === "critical")).toBe(true);
   });
+
+  it("passa quando validate-multi-item ok em ambos os lados", () => {
+    const prod = [
+      step("seed-cart", "ok", "prod"),
+      step("add-second-item", "ok", "prod"),
+      step("validate-multi-item", "ok", "prod"),
+    ];
+    const cand = prod.map((s) => ({ ...s, side: "cand" as const }));
+    const r = cartInteractionsFlow(
+      makeContext({ prodFlows: [flow("prod", prod)], candFlows: [flow("cand", cand)] }),
+    );
+    expect(r.status).toBe("pass");
+  });
+
+  it("critical quando validate-multi-item ok em prod mas failed em cand (comparativo)", () => {
+    const prod = [
+      step("seed-cart", "ok", "prod"),
+      step("add-second-item", "ok", "prod"),
+      step("validate-multi-item", "ok", "prod"),
+    ];
+    const cand = [
+      step("seed-cart", "ok", "cand"),
+      step("add-second-item", "ok", "cand"),
+      step("validate-multi-item", "failed", "cand", "carrinho só aceitou 1 item"),
+    ];
+    const r = cartInteractionsFlow(
+      makeContext({ prodFlows: [flow("prod", prod)], candFlows: [flow("cand", cand)] }),
+    );
+    const issue = r.issues.find((i) => i.id.includes("validate-multi-item"));
+    expect(issue?.severity).toBe("critical");
+    expect(r.status).toBe("fail");
+  });
+
+  it("single-site: skipped quando add-second-item não achou 2º produto (não falha o flow)", () => {
+    const r = cartInteractionsFlow(
+      makeContext({
+        candFlows: [
+          flow("cand", [
+            step("seed-cart", "ok", "cand"),
+            step("add-second-item", "skipped", "cand", "PLP só tem um produto"),
+            step("validate-multi-item", "skipped", "cand", "add-second-item não completou"),
+          ]),
+        ],
+      }),
+    );
+    expect(r.status).toBe("pass");
+    expect(r.issues.length).toBe(0);
+  });
 });
