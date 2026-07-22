@@ -46,6 +46,8 @@ export const PJ_CRITICAL_STEPS = new Set([
 /** Human labels for the cart-interactions steps. */
 export const CART_INTERACTIONS_STEP_LABELS: Record<string, string> = {
   "seed-cart": "Semear carrinho (add product)",
+  "add-second-item": "Adicionar segundo item ao carrinho",
+  "validate-multi-item": "Validar carrinho multi-item",
   "read-baseline": "Ler baseline (qty/price)",
   "increment-qty": "Incrementar quantidade",
   "decrement-qty": "Decrementar quantidade",

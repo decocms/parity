@@ -477,16 +477,47 @@ export async function detectEmptyCartBanner(page: Page): Promise<string | null> 
   return null;
 }
 
+export interface CartTotals {
+  qty?: number;
+  price?: string;
+  /** Number of visible cart-item rows (multi-item cart support). */
+  items?: number;
+  /** Sum of ALL visible quantity inputs found (not just the first row). */
+  totalQty?: number;
+}
+
+/**
+ * Parse a BRL-formatted currency string (e.g. "R$ 1.234,56") into a number
+ * (1234.56). Returns null when no currency-shaped number is found.
+ *
+ * Also tolerates a plain dot-decimal fallback ("129.90") for stores that
+ * render prices without thousands separators or currency symbol.
+ */
+export function parsePriceBRL(text: string): number | null {
+  const brl = text.match(/(\d{1,3}(?:\.\d{3})*|\d+),(\d{2})\b/);
+  if (brl) {
+    const intPart = brl[1]!.replace(/\./g, "");
+    const decPart = brl[2]!;
+    const n = Number.parseInt(intPart, 10) + Number.parseInt(decPart, 10) / 100;
+    return Number.isFinite(n) ? n : null;
+  }
+  const plain = text.match(/(\d+)\.(\d{2})\b/);
+  if (plain) {
+    const n = Number.parseInt(plain[1]!, 10) + Number.parseInt(plain[2]!, 10) / 100;
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 /**
  * Read the quantity input value + total price from an open minicart/cart.
  *
- * Best-effort: any selector miss returns undefined for that field.
+ * Best-effort: any selector miss returns undefined for that field. Also
+ * reports `items` (visible cart-item-row count) and `totalQty` (sum of ALL
+ * visible quantity inputs) to support multi-item cart validation.
  */
-export async function parseCartTotals(
-  page: Page,
-  ctx: FlowContext,
-): Promise<{ qty?: number; price?: string }> {
-  const out: { qty?: number; price?: string } = {};
+export async function parseCartTotals(page: Page, ctx: FlowContext): Promise<CartTotals> {
+  const out: CartTotals = {};
   // Qty: try quantityInput inside any cart row, else any visible quantity input.
   const qtySelectors = [
     ...selFor(ctx, "cartItemRow").map((s) => `${s} input[type='number']`),
@@ -508,6 +539,71 @@ export async function parseCartTotals(
       break;
     }
   }
+
+  // totalQty: sum across ALL visible quantity inputs (multi-item cart) —
+  // stop at the first selector group that yields any matches.
+  for (const sel of qtySelectors) {
+    try {
+      const loc = page.locator(sel);
+      const count = await withCap(loc.count(), 1_000, 0);
+      if (count === 0) continue;
+      let sum = 0;
+      let found = false;
+      for (let i = 0; i < Math.min(count, 20); i++) {
+        const el = loc.nth(i);
+        const visible = await withCap(
+          el.isVisible({ timeout: 300 }).catch(() => false),
+          500,
+          false,
+        );
+        if (!visible) continue;
+        const value = await withCap(
+          el.inputValue().catch(() => ""),
+          500,
+          "",
+        );
+        const n = Number.parseInt(value, 10);
+        if (Number.isFinite(n) && n > 0) {
+          sum += n;
+          found = true;
+        }
+      }
+      if (found) {
+        out.totalQty = sum;
+        break;
+      }
+    } catch {
+      /* try next */
+    }
+  }
+
+  // items: count of visible cart-item-row matches.
+  for (const sel of selFor(ctx, "cartItemRow")) {
+    try {
+      const loc = page.locator(sel);
+      const count = await withCap(loc.count(), 1_000, 0);
+      if (count === 0) continue;
+      let visibleCount = 0;
+      for (let i = 0; i < Math.min(count, 20); i++) {
+        const visible = await withCap(
+          loc
+            .nth(i)
+            .isVisible({ timeout: 300 })
+            .catch(() => false),
+          500,
+          false,
+        );
+        if (visible) visibleCount++;
+      }
+      if (visibleCount > 0) {
+        out.items = visibleCount;
+        break;
+      }
+    } catch {
+      /* try next */
+    }
+  }
+
   // Price: cartTotalPrice innerText
   for (const sel of selFor(ctx, "cartTotalPrice")) {
     const text = await withCap(
@@ -525,4 +621,45 @@ export async function parseCartTotals(
     }
   }
   return out;
+}
+
+/**
+ * Wait for a cart mutation to settle instead of a blind `waitForTimeout`.
+ * Races three signals:
+ *   (a) polling `parseCartTotals` every ~250ms until `predicate(totals)` is true
+ *   (b) a page response matching a cart/checkout API pattern (one extra
+ *       settle read is taken afterwards, then we return regardless of the
+ *       predicate — the API round-trip completing is itself strong signal)
+ *   (c) a hard `capMs` timeout
+ *
+ * Always returns the last totals it read (never throws).
+ */
+export async function waitForCartMutation(
+  page: Page,
+  ctx: FlowContext,
+  predicate: (totals: CartTotals) => boolean,
+  capMs = 2_500,
+): Promise<CartTotals> {
+  const deadline = Date.now() + capMs;
+  let responseSeen = false;
+  page
+    .waitForResponse((r) => /api\/checkout|orderForm|\/cart\b/i.test(r.url()), {
+      timeout: capMs,
+    })
+    .then(() => {
+      responseSeen = true;
+    })
+    .catch(() => undefined);
+
+  let totals = await parseCartTotals(page, ctx);
+  while (Date.now() < deadline) {
+    if (predicate(totals)) return totals;
+    if (responseSeen) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return await parseCartTotals(page, ctx);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    totals = await parseCartTotals(page, ctx);
+  }
+  return totals;
 }

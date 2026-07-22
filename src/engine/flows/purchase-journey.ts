@@ -850,7 +850,7 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
   }
 }
 
-interface VariantSelectionResult {
+export interface VariantSelectionResult {
   /** Human-readable description of every action taken (joined into actionDescription). */
   actions: string[];
   /** First selector key that produced an action, for learned-selectors promotion. */
@@ -868,7 +868,7 @@ interface VariantSelectionResult {
  * whether the page is *demanding* variant selection (so the caller can decide
  * how alarmed to be about a skip).
  */
-async function selectVariant(page: Page, ctx: FlowContext): Promise<VariantSelectionResult> {
+export async function selectVariant(page: Page, ctx: FlowContext): Promise<VariantSelectionResult> {
   const actions: string[] = [];
   let primarySelectorKey: string | undefined;
   let primarySelector: string | undefined;

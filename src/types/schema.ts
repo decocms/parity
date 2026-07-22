@@ -160,9 +160,30 @@ export const StepCapture = z.object({
   /** For cart-interactions flow: before/after snapshot of qty + price for the action. */
   cartItemValidation: z
     .object({
-      action: z.enum(["increment", "decrement", "remove", "apply-coupon"]),
-      before: z.object({ qty: z.number().optional(), price: z.string().optional() }).optional(),
-      after: z.object({ qty: z.number().optional(), price: z.string().optional() }).optional(),
+      action: z.enum([
+        "increment",
+        "decrement",
+        "remove",
+        "apply-coupon",
+        "add-second-item",
+        "validate-multi-item",
+      ]),
+      before: z
+        .object({
+          qty: z.number().optional(),
+          price: z.string().optional(),
+          items: z.number().optional(),
+          totalQty: z.number().optional(),
+        })
+        .optional(),
+      after: z
+        .object({
+          qty: z.number().optional(),
+          price: z.string().optional(),
+          items: z.number().optional(),
+          totalQty: z.number().optional(),
+        })
+        .optional(),
       succeeded: z.boolean(),
     })
     .optional(),
