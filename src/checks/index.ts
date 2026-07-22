@@ -22,9 +22,11 @@ import { loginFlow } from "./login-flow.ts";
 import { metaSeoParity } from "./meta-seo.ts";
 import { networkSummaryDelta } from "./network-summary.ts";
 import { notFoundParity } from "./not-found-parity.ts";
+import { pdpBreadcrumbs } from "./pdp-breadcrumbs.ts";
 import { pdpGalleryRelated } from "./pdp-gallery-related.ts";
 import { pictureMissingDims } from "./picture-missing-dims.ts";
 import { plpPagination } from "./plp-pagination.ts";
+import { plpSorting } from "./plp-sorting.ts";
 import { purchaseJourneyFlow } from "./purchase-journey-flow.ts";
 import { searchAutocomplete } from "./search-autocomplete.ts";
 import { searchNoResults } from "./search-no-results.ts";
@@ -90,6 +92,8 @@ export const ALL_CHECKS: Check[] = [
   loginFlow,
   pictureMissingDims,
   plpPagination,
+  pdpBreadcrumbs,
+  plpSorting,
 ];
 
 /**
@@ -128,6 +132,8 @@ export const ALL_CHECKS_BY_NAME: Record<string, Check> = {
   "login-flow": loginFlow,
   "picture-missing-dims": pictureMissingDims,
   "plp-pagination": plpPagination,
+  "pdp-breadcrumbs": pdpBreadcrumbs,
+  "plp-sorting": plpSorting,
 };
 
 /**
