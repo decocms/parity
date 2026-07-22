@@ -29,11 +29,35 @@ com invalidação real.
 | Milestone | Versão | Escopo | Status |
 | --- | --- | --- | --- |
 | **M1 Estabilizar** | 0.12.x | Merge #116 (score v2) · fix #118 · invalidação do cache de seletores (TTL 7d + fingerprint estrutural + zod) · merge de TODAS as chaves descobertas (bug: 7 de ~14 eram descartadas) · dedupe da compaction HTML (`html-compact.ts`) · ciclo de vida learned-selectors (`origin: verified/llm-guess`, staleness por `lastValidated`) | 🚧 em andamento |
-| **M2 E2E completo** | 0.13.x | Split de `flows.ts` (3.9k linhas → `src/engine/flows/`) · robustez (waitForCartMutation, selectVariant no seed, memoização de seletores) · **multi-item no carrinho** · **cupom configurável** (`rc.coupon`, passo `apply-valid-coupon`) · **seller "null" VTEX via UI** (informativo, nunca bloqueia) · **paginação interativa** (3 modos) · `verify-cart-persistence` · `pdp-breadcrumbs` · `plp-sorting` · `set-qty-input` | ⬜ |
+| **M2 E2E completo** | 0.13.x | Split de `flows.ts` (3.9k linhas → `src/engine/flows/`) · robustez (waitForCartMutation, selectVariant no seed, memoização de seletores) · **multi-item no carrinho** · **cupom configurável** (`rc.coupon`, passo `apply-valid-coupon`) · **seller "null" VTEX via UI** (informativo, nunca bloqueia) · **paginação interativa** (3 modos) · `verify-cart-persistence` · `pdp-breadcrumbs` · `plp-sorting` · `set-qty-input` · **flow `spa-navigation`** (#54: F5 vs navegação client-side `<Link>`, diff de DOM/sections + console — pega globals sumindo e hydration mismatch que só aparece em SPA) · **check de flood `_serverFn`/preload** (#54: budget de requests por hover) | ⬜ |
 | **M3 Seleção + score** | 0.14.x | Registry de módulos (`e2e, seo, visual, vitals, cache, console, html, network`) · `parity run --only/--skip/--why` · prompt interativo checkbox no TTY · presets module-aware · score v2 **por módulo** + composto (nota reflete só o que rodou) · trend só entre runs comparáveis · `parity list modules --json` | ⬜ |
 | **M4 Descoberta v2** | 0.15.x | Descoberta multi-página (home+PLP+PDP) · confidence por chave · few-shots por plataforma · **validação ao vivo** dos seletores antes de cachear · `parity learned --validate` | ⬜ |
 | **M5 Extract** | 0.16.x | `parity extract`: evolução da máquina de `parity section`/`fix` para extração single-site — detecção automática de componentes (header/footer/nav/shelf/…), HTML + computed styles + screenshots + CSS source + **assets/links/textos**, exporters plugáveis (markdown p/ agentes de migração + JSON manifest) | ⬜ |
 | **M6 Release** | 1.0.0 | Matriz completa nas migrações de referência · freeze de flags · docs · CHANGELOG · publish npm | ⬜ |
+
+## Aprendizados das issues (auditoria jul/2026)
+
+Varredura de todas as issues (abertas e fechadas) atrás de pistas de bugs e
+melhorias ainda não endereçadas:
+
+- **#54 (Bagaggio post-mortem)** — a fonte mais rica: 6 classes de bugs que o
+  parity não pegou. Incorporado ao M2: flow `spa-navigation` (prioridade
+  máxima segundo a própria issue) e budget de `_serverFn`/preload. Já coberto
+  desde então: `picture-missing-dims` (CLS de `<img>` sem dims), classificação
+  de console hydration. **Pós-1.0**: debug bridge (`window.__DECO_DEBUG__`,
+  depende de suporte no deco-start), diff pre/post-hydrate completo,
+  atribuição de CLS por elemento, cenário de pressão de memória (worker OOM).
+- **#102** — tier de modelo importa: selector-discovery/step-recovery em Haiku
+  regrediu a jornada; ficaram em Sonnet. O M4 (descoberta v2) mantém Sonnet e
+  mede antes de qualquer downgrade de custo.
+- **#100** — dashboard dizia "3/3 completed" quando a jornada abortou no passo
+  3\. Verificar na 1.0 que todo aborto precoce fica explícito no report.
+- **#53** — runs isolados por flow com saída estruturada: é exatamente o M3
+  (`--only`), validando a direção.
+- **#12 / #47 / #46 / #40 / #22** — falsos positivos históricos (session quirk
+  VTEX, cart-reveal unknown, eager rendering, pixels async, carousel) já
+  tratados; padrão a manter: todo check novo do M2 nasce com fixture de falso
+  positivo no teste.
 
 ## Non-goals da 1.0
 
