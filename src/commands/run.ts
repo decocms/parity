@@ -25,7 +25,7 @@ import {
   setForcedProvider,
   setLlmLanguage,
 } from "../llm/client.ts";
-import { discoverSelectorsFromUrl } from "../llm/discover-selectors.ts";
+import { discoverSelectorsFromUrl, mergeDiscoveredSelectors } from "../llm/discover-selectors.ts";
 import { fingerprintPdp, matchPdps } from "../llm/match-pdp.ts";
 import {
   type ModelTier,
@@ -435,16 +435,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
           noCache: opts.refreshSelectors === true,
         });
         if (discovered) {
-          const before = rc.selectors;
-          rc.selectors = {
-            categoryLink: before.categoryLink ?? discovered.categoryLink,
-            productCard: before.productCard ?? discovered.productCard,
-            buyButton: before.buyButton ?? discovered.buyButton,
-            minicartTrigger: before.minicartTrigger ?? discovered.minicartTrigger,
-            cepInputPdp: before.cepInputPdp ?? discovered.cepInputPdp,
-            cepInputCart: before.cepInputCart ?? discovered.cepInputCart,
-            checkoutButton: before.checkoutButton ?? discovered.checkoutButton,
-          };
+          mergeDiscoveredSelectors(rc.selectors, discovered);
           const added = Object.entries(discovered).filter(([_k, v]) => v).length;
           discoverSpinner.succeed(`${added} seletor(es) inferido(s) pelo LLM`);
         } else {

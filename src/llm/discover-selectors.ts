@@ -1,30 +1,58 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import * as cheerio from "cheerio";
+import { z } from "zod";
 import { callTool } from "./client.ts";
+import { compactHtmlForSelectors, computeHtmlFingerprint } from "./html-compact.ts";
+
+export { compactHtmlForSelectors } from "./html-compact.ts";
 
 const CACHE_DIR = ".parity-cache";
+const CACHE_SCHEMA_VERSION = 1;
+const DEFAULT_TTL_DAYS = 7;
 
-export interface DiscoveredSelectors {
-  categoryLink?: string;
-  productCard?: string;
-  buyButton?: string;
-  minicartTrigger?: string;
-  cepInputPdp?: string;
-  cepInputCart?: string;
-  checkoutButton?: string;
+export const DiscoveredSelectorsSchema = z.object({
+  categoryLink: z.string().optional(),
+  productCard: z.string().optional(),
+  buyButton: z.string().optional(),
+  minicartTrigger: z.string().optional(),
+  cepInputPdp: z.string().optional(),
+  cepInputCart: z.string().optional(),
+  checkoutButton: z.string().optional(),
   // Search flow
-  searchTrigger?: string;
-  searchInput?: string;
-  searchSuggestions?: string;
+  searchTrigger: z.string().optional(),
+  searchInput: z.string().optional(),
+  searchSuggestions: z.string().optional(),
   // PDP gallery + related (visible on PDP, not home — LLM should leave empty if unsure)
-  pdpGalleryThumbnail?: string;
-  pdpGalleryMain?: string;
-  pdpRelatedShelf?: string;
+  pdpGalleryThumbnail: z.string().optional(),
+  pdpGalleryMain: z.string().optional(),
+  pdpRelatedShelf: z.string().optional(),
   // Login (only meaningful when rc.login.enabled === true; LLM may leave empty)
-  loginTrigger?: string;
-  accountMenuTrigger?: string;
-}
+  loginTrigger: z.string().optional(),
+  accountMenuTrigger: z.string().optional(),
+});
+export type DiscoveredSelectors = z.infer<typeof DiscoveredSelectorsSchema>;
+
+/**
+ * On-disk cache envelope (issue: the old format was the raw
+ * `DiscoveredSelectors` JSON with NO invalidation — host-only key, no TTL,
+ * no content awareness; a site redesign silently served stale selectors
+ * forever unless someone remembered `--refresh-selectors`).
+ *
+ * Invalidation rules (any → re-discover):
+ *   - `schemaVersion` mismatch (old/legacy format included)
+ *   - `createdAt` older than TTL (default 7 days, `PARITY_SELECTOR_CACHE_TTL_DAYS`)
+ *   - `htmlFingerprint` differs from the current page's structural fingerprint
+ *   - JSON parse / schema validation failure (file is deleted + warned)
+ */
+export const SelectorCacheEntrySchema = z.object({
+  schemaVersion: z.number(),
+  createdAt: z.string(),
+  htmlFingerprint: z.string(),
+  selectors: DiscoveredSelectorsSchema,
+  /** Live-validation results (populated by the validate-selectors pass). */
+  validated: z.record(z.string(), z.boolean()).optional(),
+});
+export type SelectorCacheEntry = z.infer<typeof SelectorCacheEntrySchema>;
 
 const DISCOVER_SELECTORS_TOOL = {
   name: "report_selectors",
@@ -187,156 +215,6 @@ REGRAS:
 Responda SEMPRE via tool_use report_selectors. Não escreva texto livre fora da tool call.
 `.trim();
 
-/**
- * Reduce HTML to the chunks the LLM actually needs to infer selectors,
- * to fit comfortably in a Sonnet context. Key passes:
- *
- *   1. Drop the obvious heavy noise (scripts, styles, SVG, JSON-LD, etc).
- *   2. Strip Tailwind utility-class soup — the typical Deco TanStack card
- *      has `class="card w-full card-compact group rounded border ..."`
- *      where every word is a utility token. None of it is useful for
- *      identifying the element; it just blows up the prompt. We keep
- *      classes that look semantic (single-token, no spaces, has a dash
- *      OR plain word, < 40 chars) and drop the rest.
- *   3. Strip URL-encoded JSON in data-event / data-track attrs (Deco
- *      sites embed product analytics blobs that can be 5-10kb each).
- *   4. Re-extract the shelf region using broader patterns (Deco TanStack
- *      uses `[data-product-list]`; Bagaggio carries `aria-label="view product"`
- *      on the actual product link).
- */
-export function compactHtmlForSelectors(html: string, maxChars = 30_000): string {
-  try {
-    const $ = cheerio.load(html);
-    // Drop irrelevant heavy parts
-    $("script, style, noscript, svg, picture source, link[rel='stylesheet']").remove();
-    $("[type='application/ld+json']").remove();
-    // Strip noisy attributes that don't help selector discovery — these are
-    // usually huge URL-encoded JSON blobs (analytics events).
-    $("*").each((_, el) => {
-      const attrs = (el as { attribs?: Record<string, string> }).attribs ?? {};
-      for (const name of Object.keys(attrs)) {
-        if (name === "data-event" || name === "data-track" || name === "data-analytics") {
-          const value = attrs[name] ?? "";
-          // Replace the value with a short marker so the structural fact "this
-          // element carries a tracking attr" survives (sometimes useful to
-          // detect product cards) without the multi-kb blob.
-          if (value.length > 100) attrs[name] = "[…]";
-        }
-        // Drop inline style — never used as a selector anchor.
-        if (name === "style") delete attrs[name];
-      }
-      // Tailwind utility-class purge. Keep tokens that look like semantic
-      // names (have a dash AND don't contain weird chars, or are single
-      // descriptive words). Drop classic utility patterns: "w-full",
-      // "h-12", "flex", "items-center", "bg-primary", "lg:text-xs",
-      // "min-h-12", "after:bg-no-repeat", etc.
-      if (attrs.class) {
-        const tokens = attrs.class.split(/\s+/).filter(Boolean);
-        const kept = tokens.filter((t) => isSemanticClass(t));
-        const joined = kept.join(" ");
-        if (joined) {
-          attrs.class = joined;
-        } else {
-          // Drop the attribute entirely when nothing semantic remains —
-          // cheerio's attribs type is `Record<string, string>` so we
-          // can't assign undefined; delete is the right tool here.
-          // biome-ignore lint/performance/noDelete: cheerio attribs are a plain object that needs the key gone, not undefined.
-          delete attrs.class;
-        }
-      }
-    });
-
-    const sections: string[] = [];
-
-    // Always include the head meta (helps detect platform)
-    const head = $("head").clone();
-    head
-      .find(
-        "title, meta[name='generator'], meta[name='vtex'], meta[name='platform'], link[rel='canonical']",
-      )
-      .each((_, el) => {
-        sections.push($.html(el)!);
-      });
-
-    // Header + nav
-    $("header, nav, [role='banner']").each((_, el) => {
-      sections.push($.html(el)!);
-    });
-
-    // First "shelf"/product list-like region. Includes:
-    // - explicit data attrs from VTEX / Deco classic
-    // - `data-product-list` from Deco TanStack (bagaggio pattern)
-    // - any `<a aria-label="view product">` link's container
-    const shelf = $(
-      "[data-product-card], [data-deco='view-product'], [data-product-list], article a[href*='/p/'], article a[href*='/products/'], a[aria-label='view product']",
-    )
-      .closest("section, ul, div")
-      .first();
-    if (shelf.length > 0) sections.push($.html(shelf)!);
-
-    // Forms (search, newsletter, login) — may contain useful affordances
-    $("form").each((_, el) => {
-      sections.push($.html(el)!);
-    });
-
-    // Footer for completeness
-    const footer = $("footer").first();
-    if (footer.length > 0) sections.push($.html(footer)!);
-
-    const joined = sections.join("\n<!-- ── section break ── -->\n");
-    if (joined.length <= maxChars) return joined;
-    return `${joined.slice(0, maxChars)}\n<!-- TRUNCATED -->`;
-  } catch {
-    return html.slice(0, maxChars);
-  }
-}
-
-/**
- * Heuristic: should this class token survive the Tailwind purge?
- *
- * Keep:
- *   - Single descriptive word: `card`, `header`, `product-card`
- *   - Component-style hyphenated: `product-list`, `nav-item`
- *   - Platform prefixed: `vtex-*`, `fs-*`, `shopify-*`, `bag-*`
- *
- * Drop:
- *   - Utility tokens: `w-full`, `h-12`, `lg:text-xs`, `after:bg-no-repeat`
- *   - Pseudo-prefixed: `hover:*`, `lg:*`, `sm:*`, `2xl:*`, `dark:*`, `before:*`
- *   - Numeric utilities: `h-12`, `min-h-9`, `w-[198px]`
- *   - Anything with `:` or `[` (Tailwind variants / arbitrary values)
- *   - Single-letter or very short cryptic tokens: `p`, `m`, `px`, `py`
- */
-function isSemanticClass(token: string): boolean {
-  if (token.length === 0 || token.length > 40) return false;
-  if (token.includes(":") || token.includes("[") || token.includes("/")) return false;
-  // Numeric/utility shape: "h-12", "min-h-9", "px-5", "gap-1"
-  if (/^[a-z]{1,4}(-[a-z]{1,3})?-\d/.test(token)) return false;
-  // Single-letter + digit (`m2`, `p5`)
-  if (/^[a-z]{1,2}\d+$/.test(token)) return false;
-  // Pure prefix tokens
-  if (
-    /^(w|h|p|m|px|py|pt|pb|pl|pr|mt|mb|ml|mr|gap|flex|grid|text|bg|border|rounded|shadow|opacity|cursor|min|max)-/i.test(
-      token,
-    ) &&
-    !/^(text|bg|border)-(primary|secondary|accent|brand|warning|error|success|muted|base|surface)$/i.test(
-      token,
-    )
-  ) {
-    // Keep semantic color tokens like `text-primary` / `bg-brand`; drop
-    // everything else from this list.
-    return false;
-  }
-  // Plain bare tokens like `flex`, `block`, `hidden`, `relative`, `absolute`
-  if (
-    /^(flex|grid|block|inline|hidden|relative|absolute|fixed|static|sticky|visible|invisible|truncate|uppercase|lowercase|capitalize|italic|underline|overline|line-through|no-underline|antialiased|subpixel-antialiased|whitespace|break-words|break-all|object-cover|object-contain|object-fill|object-none|object-scale-down|select-none|select-text|select-all|pointer-events-none|pointer-events-auto|appearance-none|resize-none|leading-none|font-bold|font-medium|font-semibold|font-light|tracking-wide|tracking-tight)$/.test(
-      token,
-    )
-  ) {
-    return false;
-  }
-  return true;
-}
-
 export interface DiscoverOptions {
   /** Skip cache and always hit the LLM */
   noCache?: boolean;
@@ -352,14 +230,11 @@ export async function discoverSelectorsFromUrl(
   const host = safeHost(url);
   const cacheDir = opts.cacheDir ?? CACHE_DIR;
   const cachePath = join(cacheDir, `selectors-${host}.json`);
+  const fingerprint = computeHtmlFingerprint(html);
 
   if (!opts.noCache && existsSync(cachePath)) {
-    try {
-      const cached = JSON.parse(readFileSync(cachePath, "utf8")) as DiscoveredSelectors;
-      return cached;
-    } catch {
-      /* ignore corrupt cache */
-    }
+    const cached = readCacheEntry(cachePath, fingerprint);
+    if (cached) return cached.selectors;
   }
 
   const compacted = compactHtmlForSelectors(html);
@@ -408,8 +283,75 @@ export async function discoverSelectorsFromUrl(
     selectors.checkoutButton = undefined;
   }
   if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
-  writeFileSync(cachePath, `${JSON.stringify(selectors, null, 2)}\n`, "utf8");
+  const entry: SelectorCacheEntry = {
+    schemaVersion: CACHE_SCHEMA_VERSION,
+    createdAt: new Date().toISOString(),
+    htmlFingerprint: fingerprint,
+    selectors,
+  };
+  writeFileSync(cachePath, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
   return selectors;
+}
+
+function cacheTtlMs(): number {
+  const days = Number(process.env.PARITY_SELECTOR_CACHE_TTL_DAYS ?? DEFAULT_TTL_DAYS);
+  return (Number.isFinite(days) && days > 0 ? days : DEFAULT_TTL_DAYS) * 24 * 60 * 60 * 1000;
+}
+
+/**
+ * Load + validate a cache entry, applying every invalidation rule. Returns
+ * null on any miss; a corrupt/legacy file is deleted so the next write
+ * starts clean instead of silently short-circuiting discovery forever.
+ */
+function readCacheEntry(cachePath: string, currentFingerprint: string): SelectorCacheEntry | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(cachePath, "utf8"));
+  } catch {
+    console.warn(`[discover-selectors] cache corrompido em ${cachePath}; redescubrindo`);
+    try {
+      unlinkSync(cachePath);
+    } catch {
+      /* best-effort */
+    }
+    return null;
+  }
+  const result = SelectorCacheEntrySchema.safeParse(parsed);
+  if (!result.success || result.data.schemaVersion !== CACHE_SCHEMA_VERSION) {
+    // Legacy format (raw DiscoveredSelectors) or version bump — re-discover.
+    console.warn(`[discover-selectors] cache em formato antigo em ${cachePath}; redescubrindo`);
+    try {
+      unlinkSync(cachePath);
+    } catch {
+      /* best-effort */
+    }
+    return null;
+  }
+  const entry = result.data;
+  const age = Date.now() - Date.parse(entry.createdAt);
+  if (!Number.isFinite(age) || age > cacheTtlMs()) return null; // TTL expired
+  if (entry.htmlFingerprint !== currentFingerprint) return null; // site structure changed
+  return entry;
+}
+
+/**
+ * Merge discovered selectors into an rc-style selectors map. EVERY
+ * discovered key lands unless the user's .parityrc.json already sets it —
+ * user overrides always win. Mutates and returns `target`.
+ *
+ * Extracted because run.ts and journey.ts each hand-merged only 7 of the
+ * discovered keys (silently discarding search/pdpGallery/login keys), and
+ * journey.ts additionally REPLACED the map, dropping unrelated user keys.
+ */
+export function mergeDiscoveredSelectors<
+  T extends Partial<Record<keyof DiscoveredSelectors, string>>,
+>(target: T, discovered: DiscoveredSelectors): T {
+  for (const key of Object.keys(discovered) as (keyof DiscoveredSelectors)[]) {
+    if (discovered[key] && target[key] === undefined) {
+      target[key] = discovered[key] as T[keyof DiscoveredSelectors];
+    }
+  }
+  return target;
 }
 
 /**

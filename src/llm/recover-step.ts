@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import { callTool } from "./client.ts";
+import { isSemanticClassToken } from "./html-compact.ts";
 
 export type RecoveryAction = "click" | "fill" | "press";
 
@@ -75,36 +76,6 @@ export function compactHtmlForRecovery(html: string, maxChars = 12_000): string 
   } catch {
     return html.slice(0, maxChars);
   }
-}
-
-/**
- * Same heuristic as `discover-selectors.ts:isSemanticClass`. Kept inline
- * here to avoid coupling the two files; the rules are simple enough that
- * duplication beats an import cycle.
- */
-function isSemanticClassToken(token: string): boolean {
-  if (token.length === 0 || token.length > 40) return false;
-  if (token.includes(":") || token.includes("[") || token.includes("/")) return false;
-  if (/^[a-z]{1,4}(-[a-z]{1,3})?-\d/.test(token)) return false;
-  if (/^[a-z]{1,2}\d+$/.test(token)) return false;
-  if (
-    /^(w|h|p|m|px|py|pt|pb|pl|pr|mt|mb|ml|mr|gap|flex|grid|text|bg|border|rounded|shadow|opacity|cursor|min|max)-/i.test(
-      token,
-    ) &&
-    !/^(text|bg|border)-(primary|secondary|accent|brand|warning|error|success|muted|base|surface)$/i.test(
-      token,
-    )
-  ) {
-    return false;
-  }
-  if (
-    /^(flex|grid|block|inline|hidden|relative|absolute|fixed|static|sticky|visible|invisible|truncate|uppercase|lowercase|capitalize|italic|underline|overline|line-through|no-underline|antialiased|subpixel-antialiased|whitespace|break-words|break-all|object-cover|object-contain|object-fill|object-none|object-scale-down|select-none|select-text|select-all|pointer-events-none|pointer-events-auto|appearance-none|resize-none|leading-none|font-bold|font-medium|font-semibold|font-light|tracking-wide|tracking-tight)$/.test(
-      token,
-    )
-  ) {
-    return false;
-  }
-  return true;
 }
 
 export interface RecoverInput {
