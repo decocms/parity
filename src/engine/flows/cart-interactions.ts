@@ -34,6 +34,7 @@ const STEP_NAMES = [
   "decrement-qty",
   "apply-invalid-coupon",
   "apply-valid-coupon",
+  "seller-code-null",
   "remove-item",
   "verify-empty-state",
 ] as const;
@@ -633,10 +634,80 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
     }
     reportEnd(8, "apply-valid-coupon", validCouponStatus, Date.now() - t8b, validCouponNote);
 
-    // Step 9: remove-item — loop until the cart has no rows left (max 3
+    // Step 9: seller-code-null — VTEX-only, informational orderForm probe.
+    // Typing "null" (the literal string) into a seller-code field is a
+    // known VTEX quirk: the platform accepts it and resolves the seller
+    // itself, so this validates the cart/orderForm accepts the mutation
+    // without the flow needing to know a real seller id. Gated to
+    // vtex/vtex-fs; NEVER fails the run — status is only ok/skipped/warn,
+    // and any anomaly surfaces as a low-severity, inconclusive note (see
+    // src/checks/cart-interactions-flow.ts, which must never escalate this
+    // step to critical/high).
+    reportStart(9, "seller-code-null");
+    const t7b = Date.now();
+    let sellerStatus: StepCapture["status"] = "skipped";
+    let sellerNote: string | undefined;
+    if (ctx.platform !== "vtex" && ctx.platform !== "vtex-fs") {
+      sellerNote = `plataforma "${ctx.platform ?? "custom"}" não é VTEX — probe pulado`;
+    } else {
+      const sellerHit = await findElement(page, ctx, {
+        key: "sellerCodeInput",
+        intent:
+          "Encontrar um campo de CÓDIGO DE VENDEDOR ('seller code') no carrinho/checkout — raro, geralmente um recurso de debug/backoffice VTEX. Retornar vazio se não existir.",
+        budget,
+        stepName: "cart-seller-code",
+      });
+      if (!sellerHit) {
+        sellerNote = "campo de código de vendedor não encontrado nesta loja";
+      } else {
+        const before9 = await parseCartTotals(page, ctx);
+        await sellerHit.locator.fill("null").catch(() => undefined);
+        const submitHit9 = await findElement(page, ctx, {
+          key: "cartCouponSubmit",
+          intent:
+            "Botão de submeter próximo ao campo de código de vendedor (mesmo padrão de submit do cupom).",
+          budget,
+          stepName: "cart-seller-code-submit",
+        });
+        if (submitHit9) {
+          await submitHit9.locator.click({ timeout: 3_000 }).catch(() => undefined);
+        } else {
+          await sellerHit.locator.press("Enter").catch(() => undefined);
+        }
+        await waitForCartMutation(page, ctx, () => false, 1_500);
+        const after9 = await parseCartTotals(page, ctx);
+        // "Accepted" = cart still intact (no crash/blank state). This is a
+        // health probe, not a functional assertion — a cart that stays
+        // populated after the mutation is the only signal we look for.
+        // NOTE: status is deliberately ALWAYS "ok" here (StepCapture has no
+        // "warn" status) — an anomaly is surfaced only via `note`, and the
+        // comparative check (cart-interactions-flow.ts) must treat this
+        // step as informational-only regardless of note content.
+        const cartIntact = (after9.items ?? after9.qty ?? 0) > 0 || (before9.items ?? 0) === 0;
+        sellerStatus = "ok";
+        sellerNote = cartIntact
+          ? "seller=null aceito, carrinho intacto"
+          : "seller=null aceito, mas carrinho pareceu esvaziar — anomalia não-bloqueante, investigar";
+      }
+    }
+    steps.push({
+      step: 9,
+      name: "seller-code-null",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: sellerStatus,
+      durationMs: Date.now() - t7b,
+      screenshotPath: screenshotPath(ctx, "cart-7b-seller-null"),
+      selectorKey: "sellerCodeInput",
+      note: sellerNote,
+      actionDescription: `seller-code-null (probe informativo VTEX): ${sellerNote ?? ""}`,
+    });
+    reportEnd(9, "seller-code-null", sellerStatus, Date.now() - t7b, sellerNote);
+
+    // Step 10: remove-item — loop until the cart has no rows left (max 3
     // iterations) so `verify-empty-state` still passes even when the cart
     // now holds 2 items (add-second-item).
-    reportStart(9, "remove-item");
+    reportStart(10, "remove-item");
     const t8 = Date.now();
     const before8 = after7;
     let removeHit = await findElement(page, ctx, {
@@ -669,7 +740,7 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
       }
     }
     steps.push({
-      step: 9,
+      step: 10,
       name: "remove-item",
       side: ctx.side,
       viewport: ctx.viewport,
@@ -692,19 +763,19 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
     });
     await screenshotStable(page, { path: screenshotPath(ctx, "cart-8-remove") });
     reportEnd(
-      9,
+      10,
       "remove-item",
       foundRemoveButton ? (removed ? "ok" : "failed") : "skipped",
       Date.now() - t8,
     );
 
-    // Step 10: verify-empty-state
-    reportStart(10, "verify-empty-state");
+    // Step 11: verify-empty-state
+    reportStart(11, "verify-empty-state");
     const t9 = Date.now();
     const emptyText = await detectEmptyCartBanner(page);
     const emptyStatus: StepCapture["status"] = emptyText ? "ok" : removed ? "failed" : "skipped";
     steps.push({
-      step: 10,
+      step: 11,
       name: "verify-empty-state",
       side: ctx.side,
       viewport: ctx.viewport,
@@ -717,7 +788,7 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
       note: emptyText ?? undefined,
     });
     await screenshotStable(page, { path: screenshotPath(ctx, "cart-9-empty") });
-    reportEnd(10, "verify-empty-state", emptyStatus, Date.now() - t9);
+    reportEnd(11, "verify-empty-state", emptyStatus, Date.now() - t9);
   } finally {
     await page.close().catch(() => undefined);
   }

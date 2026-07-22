@@ -1,4 +1,4 @@
-import type { CheckResult, Issue } from "../types/schema.ts";
+import type { CheckResult, Issue, StepCapture } from "../types/schema.ts";
 import type { CheckContext } from "./index.ts";
 import { buildPairEvidence, findFlow, findStep, isSingleSite } from "./lib/flow-pairing.ts";
 import {
@@ -38,6 +38,15 @@ export function cartInteractionsFlow(ctx: CheckContext): CheckResult {
       const flow = prodFlow ?? candFlow;
       if (!flow) continue;
       for (const step of flow.steps ?? []) {
+        // seller-code-null is an informational VTEX probe (issue: the
+        // "digitar null no código de vendedor" trick) — it never fails
+        // (status is always ok/skipped) but an anomalous cart state is
+        // still worth a heads-up. Always low severity + inconclusive,
+        // regardless of side/mode, and NEVER escalated.
+        if (step.name === "seller-code-null" && step.note?.includes("anomalia")) {
+          issues.push(sellerCodeNullAnomalyIssue(viewport, step.side, step));
+          continue;
+        }
         if (step.status === "failed") {
           issues.push({
             id: `cart-interactions:${viewport}:${step.name}:failed`,
@@ -64,6 +73,15 @@ export function cartInteractionsFlow(ctx: CheckContext): CheckResult {
       const c = candSteps.get(name);
       if (!p || !c) continue;
       const label = STEP_LABELS[name] ?? name;
+
+      if (name === "seller-code-null") {
+        for (const step of [p, c]) {
+          if (step.note?.includes("anomalia")) {
+            issues.push(sellerCodeNullAnomalyIssue(viewport, step.side, step));
+          }
+        }
+        continue;
+      }
 
       if (p.status === "ok" && c.status === "failed") {
         // `validate-multi-item` isn't in CRITICAL_STEPS (a flaky "couldn't
@@ -106,5 +124,23 @@ export function cartInteractionsFlow(ctx: CheckContext): CheckResult {
     durationMs: Date.now() - start,
     summary: `${issues.length} issue(s) — mode: ${single ? "single-site" : "comparative"}`,
     issues,
+  };
+}
+
+/**
+ * The seller-code-null probe (VTEX-only, "digitar null no código de
+ * vendedor" trick) NEVER fails the run — it's a health signal, not a
+ * functional assertion. An anomaly always surfaces at low severity and
+ * `inconclusive: true`, on both single-site and comparative runs.
+ */
+function sellerCodeNullAnomalyIssue(viewport: string, side: string, step: StepCapture): Issue {
+  return {
+    id: `cart-interactions:${viewport}:seller-code-null:anomaly:${side}`,
+    severity: "low",
+    inconclusive: true,
+    category: "functional",
+    check: "cart-interactions-flow",
+    summary: `[${viewport}/${side}] Probe VTEX seller-code=null: ${step.note}`,
+    evidence: step.screenshotPath ? [{ kind: "screenshot", path: step.screenshotPath }] : [],
   };
 }

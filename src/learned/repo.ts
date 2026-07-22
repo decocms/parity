@@ -30,6 +30,7 @@ export const SelectorKey = z.enum([
   "cartCouponInput",
   "cartCouponSubmit",
   "cartTotalPrice",
+  "sellerCodeInput",
   // PDP gallery + related
   "pdpGalleryThumbnail",
   "pdpGalleryMain",
