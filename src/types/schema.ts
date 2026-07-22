@@ -168,6 +168,7 @@ export const StepCapture = z.object({
         "apply-valid-coupon",
         "add-second-item",
         "validate-multi-item",
+        "verify-persistence",
       ]),
       before: z
         .object({

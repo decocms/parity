@@ -8,6 +8,7 @@ import {
   parseCartTotals,
   parsePriceBRL,
   readCartCount,
+  waitForCartHydration,
   waitForCartMutation,
 } from "./cart-helpers.ts";
 import { selectVariant } from "./purchase-journey.ts";
@@ -30,8 +31,10 @@ const STEP_NAMES = [
   "add-second-item",
   "validate-multi-item",
   "read-baseline",
+  "verify-cart-persistence",
   "increment-qty",
   "decrement-qty",
+  "set-qty-input",
   "apply-invalid-coupon",
   "apply-valid-coupon",
   "seller-code-null",
@@ -386,8 +389,75 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
     await screenshotStable(page, { path: screenshotPath(ctx, "cart-4-baseline") });
     reportEnd(4, "read-baseline", "ok", Date.now() - t4);
 
-    // Step 5: increment-qty
-    reportStart(5, "increment-qty");
+    // Step 5: verify-cart-persistence — reload the page and confirm the
+    // cart survived. Classic migration regression: orderForm moved from a
+    // persistent cookie to volatile client state, so a reload silently
+    // empties the cart. We reuse `baseline` (step 4) as the "before"
+    // snapshot instead of re-reading it, since nothing mutated the cart
+    // between the two steps.
+    reportStart(5, "verify-cart-persistence");
+    const t4b = Date.now();
+    await page.reload({ waitUntil: "load" }).catch(() => undefined);
+    await waitForCartHydration(page).catch(() => undefined);
+    let persistRowVisible = await firstVisibleLocator(page, selFor(ctx, "cartItemRow"));
+    if (!persistRowVisible) {
+      // Cart UI collapsed on reload (common for drawer-style minicarts) —
+      // try to reopen it before giving up on reading post-reload totals.
+      const reopenTrigger = await firstVisibleLocator(page, selFor(ctx, "minicartTrigger"));
+      if (reopenTrigger) {
+        await openMinicart(page, reopenTrigger, ctx, null).catch(() => undefined);
+        persistRowVisible = await firstVisibleLocator(page, selFor(ctx, "cartItemRow"));
+      }
+    }
+    const persistAfter = await waitForCartMutation(page, ctx, () => true, 2_500);
+    const persistBeforeQty = baseline.totalQty ?? baseline.qty ?? 0;
+    const persistBeforeItems = baseline.items ?? 0;
+    const persistAfterQty = persistAfter.totalQty ?? persistAfter.qty ?? 0;
+    const persistAfterItems = persistAfter.items ?? 0;
+    let persistStatus: StepCapture["status"];
+    let persistNote: string | undefined;
+    if (persistBeforeQty === 0 && persistBeforeItems === 0) {
+      persistStatus = "skipped";
+      persistNote = "baseline vazio — nada pra validar persistência";
+    } else {
+      const qtyOk = persistBeforeQty > 0 ? persistAfterQty >= persistBeforeQty : true;
+      const itemsOk = persistBeforeItems > 0 ? persistAfterItems >= persistBeforeItems : true;
+      persistStatus = qtyOk && itemsOk ? "ok" : "failed";
+      persistNote =
+        persistStatus === "ok"
+          ? undefined
+          : `qty ${persistBeforeQty}→${persistAfterQty}, items ${persistBeforeItems}→${persistAfterItems}${persistRowVisible ? "" : " (cart row not visible after reload)"}`;
+    }
+    steps.push({
+      step: 5,
+      name: "verify-cart-persistence",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: persistStatus,
+      durationMs: Date.now() - t4b,
+      url: page.url(),
+      screenshotPath: screenshotPath(ctx, "cart-4b-persistence"),
+      note: persistNote,
+      actionDescription:
+        persistStatus === "ok"
+          ? `Carrinho sobreviveu ao reload: qty ${persistBeforeQty}→${persistAfterQty}, items ${persistBeforeItems}→${persistAfterItems}`
+          : persistStatus === "skipped"
+            ? "Baseline vazio — nada pra validar persistência"
+            : `Carrinho NÃO sobreviveu ao reload: ${persistNote ?? ""}`,
+      cartItemValidation: {
+        action: "verify-persistence",
+        before: baseline,
+        after: persistAfter,
+        succeeded: persistStatus === "ok",
+      },
+    });
+    if (persistStatus !== "skipped") {
+      await screenshotStable(page, { path: screenshotPath(ctx, "cart-4b-persistence") });
+    }
+    reportEnd(5, "verify-cart-persistence", persistStatus, Date.now() - t4b, persistNote);
+
+    // Step 6: increment-qty
+    reportStart(6, "increment-qty");
     const t5 = Date.now();
     const incHit = await findElement(page, ctx, {
       key: "cartQuantityIncrement",
@@ -404,7 +474,7 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
       incOk = (incAfter.qty ?? 0) > (baseline.qty ?? 0);
     }
     steps.push({
-      step: 5,
+      step: 6,
       name: "increment-qty",
       side: ctx.side,
       viewport: ctx.viewport,
@@ -424,10 +494,10 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
       },
     });
     await screenshotStable(page, { path: screenshotPath(ctx, "cart-5-increment") });
-    reportEnd(5, "increment-qty", incHit ? (incOk ? "ok" : "failed") : "skipped", Date.now() - t5);
+    reportEnd(6, "increment-qty", incHit ? (incOk ? "ok" : "failed") : "skipped", Date.now() - t5);
 
-    // Step 6: decrement-qty
-    reportStart(6, "decrement-qty");
+    // Step 7: decrement-qty
+    reportStart(7, "decrement-qty");
     const t6 = Date.now();
     const decHit = await findElement(page, ctx, {
       key: "cartQuantityDecrement",
@@ -447,7 +517,7 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
       decOk = (decAfter.qty ?? 0) < (incAfter.qty ?? Number.POSITIVE_INFINITY);
     }
     steps.push({
-      step: 6,
+      step: 7,
       name: "decrement-qty",
       side: ctx.side,
       viewport: ctx.viewport,
@@ -467,10 +537,60 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
       },
     });
     await screenshotStable(page, { path: screenshotPath(ctx, "cart-6-decrement") });
-    reportEnd(6, "decrement-qty", decHit ? (decOk ? "ok" : "failed") : "skipped", Date.now() - t6);
+    reportEnd(7, "decrement-qty", decHit ? (decOk ? "ok" : "failed") : "skipped", Date.now() - t6);
 
-    // Step 7: apply-invalid-coupon
-    reportStart(7, "apply-invalid-coupon");
+    // Step 8: set-qty-input — fill the quantity <input> directly with "3"
+    // instead of clicking +/- repeatedly. Many minicarts render quantity
+    // as read-only text (not an <input>) — that's expected and should be
+    // "skipped", not "failed".
+    reportStart(8, "set-qty-input");
+    const t6b = Date.now();
+    const qtyInputHit = await firstVisibleLocator(page, selFor(ctx, "quantityInput"));
+    let qtyInputStatus: StepCapture["status"] = "skipped";
+    let qtyInputNote: string | undefined;
+    let qtyInputAfter: CartTotals = {};
+    if (!qtyInputHit) {
+      qtyInputNote =
+        "quantidade renderizada como texto (sem <input>) — não dá pra setar diretamente";
+    } else {
+      await qtyInputHit.locator.fill("3").catch(() => undefined);
+      await qtyInputHit.locator.press("Enter").catch(() => undefined);
+      qtyInputAfter = await waitForCartMutation(
+        page,
+        ctx,
+        (t) => (t.qty ?? 0) === 3 || (t.totalQty ?? 0) === 3,
+      );
+      const gotThree = (qtyInputAfter.qty ?? 0) === 3 || (qtyInputAfter.totalQty ?? 0) === 3;
+      qtyInputStatus = gotThree ? "ok" : "failed";
+      qtyInputNote = gotThree
+        ? undefined
+        : `qty após fill('3') = ${qtyInputAfter.qty ?? qtyInputAfter.totalQty ?? "?"}`;
+    }
+    steps.push({
+      step: 8,
+      name: "set-qty-input",
+      side: ctx.side,
+      viewport: ctx.viewport,
+      status: qtyInputStatus,
+      durationMs: Date.now() - t6b,
+      screenshotPath: screenshotPath(ctx, "cart-6b-set-qty"),
+      selectorKey: "quantityInput",
+      usedSelector: qtyInputHit?.selector,
+      note: qtyInputNote,
+      actionDescription:
+        qtyInputStatus === "ok"
+          ? `Fill('3') no quantity input → qty=${qtyInputAfter.qty ?? qtyInputAfter.totalQty ?? "?"}`
+          : qtyInputStatus === "skipped"
+            ? qtyInputNote
+            : `set-qty-input failed: ${qtyInputNote ?? ""}`,
+    });
+    if (qtyInputStatus !== "skipped") {
+      await screenshotStable(page, { path: screenshotPath(ctx, "cart-6b-set-qty") });
+    }
+    reportEnd(8, "set-qty-input", qtyInputStatus, Date.now() - t6b, qtyInputNote);
+
+    // Step 9: apply-invalid-coupon
+    reportStart(9, "apply-invalid-coupon");
     const t7 = Date.now();
     const couponInputHit = await findElement(page, ctx, {
       key: "cartCouponInput",
@@ -520,7 +640,7 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
         : "skipped"
       : "skipped";
     steps.push({
-      step: 7,
+      step: 9,
       name: "apply-invalid-coupon",
       side: ctx.side,
       viewport: ctx.viewport,
@@ -542,15 +662,15 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
       },
     });
     await screenshotStable(page, { path: screenshotPath(ctx, "cart-7-coupon") });
-    reportEnd(7, "apply-invalid-coupon", couponStatus, Date.now() - t7);
+    reportEnd(9, "apply-invalid-coupon", couponStatus, Date.now() - t7);
 
-    // Step 8: apply-valid-coupon — only when rc.coupon.validCode is
+    // Step 10: apply-valid-coupon — only when rc.coupon.validCode is
     // configured (parity has no way to know a real discount code on its
     // own); otherwise skipped. Passes when the total drops or a discount
     // totalizer/row appears — either signal is enough since some stores
     // apply the discount to a sub-line rather than the grand total shown
     // by `cartTotalPrice`.
-    reportStart(8, "apply-valid-coupon");
+    reportStart(10, "apply-valid-coupon");
     const t8b = Date.now();
     const validCode = ctx.rc.coupon?.validCode;
     let validCouponStatus: StepCapture["status"] = "skipped";
@@ -607,7 +727,7 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
       }
     }
     steps.push({
-      step: 8,
+      step: 10,
       name: "apply-valid-coupon",
       side: ctx.side,
       viewport: ctx.viewport,
@@ -632,9 +752,9 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
     if (validCouponStatus !== "skipped") {
       await screenshotStable(page, { path: screenshotPath(ctx, "cart-8b-valid-coupon") });
     }
-    reportEnd(8, "apply-valid-coupon", validCouponStatus, Date.now() - t8b, validCouponNote);
+    reportEnd(10, "apply-valid-coupon", validCouponStatus, Date.now() - t8b, validCouponNote);
 
-    // Step 9: seller-code-null — VTEX-only, informational orderForm probe.
+    // Step 11: seller-code-null — VTEX-only, informational orderForm probe.
     // Typing "null" (the literal string) into a seller-code field is a
     // known VTEX quirk: the platform accepts it and resolves the seller
     // itself, so this validates the cart/orderForm accepts the mutation
@@ -643,7 +763,7 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
     // and any anomaly surfaces as a low-severity, inconclusive note (see
     // src/checks/cart-interactions-flow.ts, which must never escalate this
     // step to critical/high).
-    reportStart(9, "seller-code-null");
+    reportStart(11, "seller-code-null");
     const t7b = Date.now();
     let sellerStatus: StepCapture["status"] = "skipped";
     let sellerNote: string | undefined;
@@ -691,7 +811,7 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
       }
     }
     steps.push({
-      step: 9,
+      step: 11,
       name: "seller-code-null",
       side: ctx.side,
       viewport: ctx.viewport,
@@ -702,12 +822,12 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
       note: sellerNote,
       actionDescription: `seller-code-null (probe informativo VTEX): ${sellerNote ?? ""}`,
     });
-    reportEnd(9, "seller-code-null", sellerStatus, Date.now() - t7b, sellerNote);
+    reportEnd(11, "seller-code-null", sellerStatus, Date.now() - t7b, sellerNote);
 
-    // Step 10: remove-item — loop until the cart has no rows left (max 3
+    // Step 12: remove-item — loop until the cart has no rows left (max 3
     // iterations) so `verify-empty-state` still passes even when the cart
     // now holds 2 items (add-second-item).
-    reportStart(10, "remove-item");
+    reportStart(12, "remove-item");
     const t8 = Date.now();
     const before8 = after7;
     let removeHit = await findElement(page, ctx, {
@@ -740,7 +860,7 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
       }
     }
     steps.push({
-      step: 10,
+      step: 12,
       name: "remove-item",
       side: ctx.side,
       viewport: ctx.viewport,
@@ -763,19 +883,19 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
     });
     await screenshotStable(page, { path: screenshotPath(ctx, "cart-8-remove") });
     reportEnd(
-      10,
+      12,
       "remove-item",
       foundRemoveButton ? (removed ? "ok" : "failed") : "skipped",
       Date.now() - t8,
     );
 
-    // Step 11: verify-empty-state
-    reportStart(11, "verify-empty-state");
+    // Step 13: verify-empty-state
+    reportStart(13, "verify-empty-state");
     const t9 = Date.now();
     const emptyText = await detectEmptyCartBanner(page);
     const emptyStatus: StepCapture["status"] = emptyText ? "ok" : removed ? "failed" : "skipped";
     steps.push({
-      step: 11,
+      step: 13,
       name: "verify-empty-state",
       side: ctx.side,
       viewport: ctx.viewport,
@@ -788,7 +908,7 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
       note: emptyText ?? undefined,
     });
     await screenshotStable(page, { path: screenshotPath(ctx, "cart-9-empty") });
-    reportEnd(11, "verify-empty-state", emptyStatus, Date.now() - t9);
+    reportEnd(13, "verify-empty-state", emptyStatus, Date.now() - t9);
   } finally {
     await page.close().catch(() => undefined);
   }

@@ -50,7 +50,14 @@ export function cartInteractionsFlow(ctx: CheckContext): CheckResult {
         if (step.status === "failed") {
           issues.push({
             id: `cart-interactions:${viewport}:${step.name}:failed`,
-            severity: CRITICAL_STEPS.has(step.name) ? "critical" : "high",
+            severity: CRITICAL_STEPS.has(step.name)
+              ? "critical"
+              : // set-qty-input is a nice-to-have alternate interaction path
+                // (many minicarts render qty as read-only text) — never worth
+                // more than medium, even when it fails outright.
+                step.name === "set-qty-input"
+                ? "medium"
+                : "high",
             category: "functional",
             check: "cart-interactions-flow",
             summary: `[${viewport}] Step "${STEP_LABELS[step.name] ?? step.name}" falhou: ${step.note ?? step.actionDescription ?? ""}`,
@@ -90,9 +97,23 @@ export function cartInteractionsFlow(ctx: CheckContext): CheckResult {
         // post-migration on cand IS a real regression — escalate that
         // specific comparative case to critical.
         const isMultiItemRegression = name === "validate-multi-item";
+        // Same reasoning for `verify-cart-persistence`: prod keeping the
+        // cart across a reload while cand loses it is a textbook
+        // orderForm/cookie-vs-client-state migration regression, so it's
+        // escalated even though the step itself isn't hard-critical.
+        const isPersistenceRegression = name === "verify-cart-persistence";
+        const severity =
+          CRITICAL_STEPS.has(name) || isMultiItemRegression || isPersistenceRegression
+            ? "critical"
+            : // set-qty-input is an alternate, nice-to-have interaction path
+              // (many minicarts don't even expose a fillable qty input) —
+              // never worth more than medium.
+              name === "set-qty-input"
+              ? "medium"
+              : "high";
         issues.push({
           id: `cart-interactions:${viewport}:${name}:failed-cand`,
-          severity: CRITICAL_STEPS.has(name) || isMultiItemRegression ? "critical" : "high",
+          severity,
           category: "functional",
           check: "cart-interactions-flow",
           summary: `[${viewport}] "${label}" falhou em cand (passou em prod) — ${c.note ?? c.actionDescription ?? ""}`,

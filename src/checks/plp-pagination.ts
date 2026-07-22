@@ -285,7 +285,8 @@ function withPage(url: string, n: number): string {
  * category PLP — a depth-1 or depth-2 path not containing `/p` (product),
  * `/cart`, `/checkout`, `/account`, etc.
  */
-async function discoverPlpFromHome(homeUrl: string): Promise<string | null> {
+/** Exported for reuse by `plp-sorting.ts`. */
+export async function discoverPlpFromHome(homeUrl: string): Promise<string | null> {
   try {
     const res = await fetch(homeUrl, {
       headers: {
@@ -332,7 +333,8 @@ async function discoverPlpFromHome(homeUrl: string): Promise<string | null> {
   }
 }
 
-function pickPlpUrl(flows: CheckContext["prodFlows"]): string | null {
+/** Exported for reuse by `plp-sorting.ts` — same "where's the PLP" heuristic. */
+export function pickPlpUrl(flows: CheckContext["prodFlows"]): string | null {
   for (const fc of flows) {
     // The interactive `plp` flow captures the PLP page directly too (no
     // purchase-journey required) — so a `--flows plp`-only run can still

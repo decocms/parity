@@ -21,10 +21,12 @@ Every check `parity` runs, what it catches, and when it fires.
 | **Search autocomplete**       | Typing reveals suggestions; cand keeps parity with prod                |
 | **Search results**            | Same keyword returns comparable product counts                         |
 | **Search no-results**         | Unicode garbage term shows empty state, doesn't match products         |
-| **Cart interactions**         | Multi-item add / increment / decrement / coupon (invalid + optional valid) / VTEX seller-null probe / remove all behave in cand |
+| **Cart interactions**         | Multi-item add / increment / decrement / set-qty-input / cart persistence across reload / coupon (invalid + optional valid) / VTEX seller-null probe / remove all behave in cand |
 | **404 parity**                | Invalid URL returns 404 (no catch-all 200 in cand)                     |
 | **Cookie/CEP modal CLS**      | Modals don't introduce layout shifts >0.1 in cand                      |
 | **PDP gallery + related**     | Image gallery + "Related products" shelf still render                  |
+| **PDP breadcrumbs**           | Breadcrumb trail (markup or JSON-LD `BreadcrumbList`) still renders on PDP |
+| **PLP sorting**                | A sort query param (`?sort=`/`?orderBy=`) actually reorders products in cand like it does in prod |
 | **Footer links health**       | Institutional links (privacy, contact, etc.) aren't broken in cand     |
 | **Login flow** _(opt-in)_     | Valid credentials log in; invalid ones show a clear error              |
 | **Picture missing dims**      | Static CLS detector — `<picture>` without explicit width/height        |
