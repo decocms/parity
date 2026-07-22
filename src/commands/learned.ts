@@ -11,13 +11,15 @@ export function learnedStats(): number {
   }
   console.log(chalk.bold(`\nlearned-selectors stats (${LEARNED_PATH})\n`));
   for (const p of stats.platforms) {
+    const staleNote = p.staleSelectors > 0 ? ` · ${chalk.yellow(`${p.staleSelectors} stale`)}` : "";
     console.log(
-      `${chalk.cyan(p.platform)}: ${p.activeSelectors} active · ${chalk.dim(`${p.deprecatedSelectors} deprecated`)}`,
+      `${chalk.cyan(p.platform)}: ${p.activeSelectors} active (${p.verifiedSelectors} verified, ${p.llmGuessSelectors} llm-guess) · ${chalk.dim(`${p.deprecatedSelectors} deprecated`)}${staleNote}`,
     );
     for (const top of p.topByKey) {
       const sr = `${(top.successRate * 100).toFixed(0)}%`;
+      const originTag = top.origin === "llm-guess" ? chalk.yellow(" [guess]") : "";
       console.log(
-        `   ${chalk.dim(top.key.padEnd(18))} ${chalk.green(sr.padStart(4))}  ${chalk.dim(`(${top.hosts} hosts)`)}  ${top.selector}`,
+        `   ${chalk.dim(top.key.padEnd(18))} ${chalk.green(sr.padStart(4))}  ${chalk.dim(`(${top.hosts} hosts)`)}  ${top.selector}${originTag}`,
       );
     }
     console.log("");

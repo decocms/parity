@@ -17,10 +17,14 @@ export interface PromoteResult {
 
 /**
  * Walk the steps captured by a flow and update the learned-selectors library:
- *   - LLM-recovered selectors are PROMOTED with successRate 0.5
+ *   - LLM-recovered selectors from OK steps are PROMOTED as `llm-guess`
+ *     (successRate 0.35 — below anything ever confirmed by a normal run;
+ *     a later non-recovery success upgrades them to `verified`)
  *   - "ok" steps bump the existing selector's successRate
- *   - "failed" steps decrement; if successRate < 0.3 after ≥3 attempts the
- *     entry is deprecated and removed from rotation
+ *   - "failed" steps decrement — including LLM-recovered ones, which
+ *     previously were promoted even when the step FAILED; if successRate
+ *     < 0.3 after ≥3 attempts the entry is deprecated and removed from
+ *     rotation
  *
  * Selectors that aren't a single re-usable CSS/Playwright string (e.g. a
  * composite like "input[...] → +" that describes a multi-element walk) are
@@ -42,7 +46,7 @@ export function promoteStepsFromFlow(
     const parsed = SelectorKey.safeParse(step.selectorKey);
     if (!parsed.success) continue;
     const key = parsed.data;
-    if (step.recoveredByLlm) {
+    if (step.recoveredByLlm && step.status === "ok") {
       promoteFromLlm(learned, platform, key, step.usedSelector, host);
       promoted++;
     } else if (step.status === "ok") {
