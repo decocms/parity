@@ -156,3 +156,99 @@ describe("statsFromLib", () => {
     expect(stats.platforms.find((p) => p.platform === "shopify")?.totalSelectors).toBe(1);
   });
 });
+
+describe("lifecycle: origin + staleness (M1.3)", () => {
+  const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+
+  it("promoteFromLlm seeds as llm-guess at 0.35", () => {
+    const lib = emptyLib();
+    const entry = promoteFromLlm(lib, "vtex", "buyButton", ".guess", "h");
+    expect(entry.origin).toBe("llm-guess");
+    expect(entry.successRate).toBe(0.35);
+  });
+
+  it("recordSuccess upgrades an llm-guess to verified", () => {
+    const lib = emptyLib();
+    promoteFromLlm(lib, "vtex", "buyButton", ".guess", "h");
+    const entry = recordSuccess(lib, "vtex", "buyButton", ".guess", "h2");
+    expect(entry.origin).toBe("verified");
+  });
+
+  it("verified entries rank above llm-guesses regardless of rate", () => {
+    const lib = emptyLib();
+    promoteFromLlm(lib, "vtex", "buyButton", ".guess", "h"); // 0.35 guess
+    recordSuccess(lib, "vtex", "buyButton", ".proven", "h"); // 1.0 verified
+    // inflate the guess rate above the verified one
+    const slot = lib.platforms.vtex!.buyButton!;
+    slot.find((e) => e.selector === ".guess")!.successRate = 1;
+    slot.find((e) => e.selector === ".proven")!.successRate = 0.6;
+    const list = getLearnedSelectors(lib, "vtex", "buyButton");
+    expect(list[0]?.selector).toBe(".proven");
+  });
+
+  it("stale entries (>90d) decay below recently validated ones", () => {
+    const lib = emptyLib();
+    recordSuccess(lib, "vtex", "buyButton", ".stale-champion", "h");
+    recordSuccess(lib, "vtex", "buyButton", ".fresh", "h");
+    const slot = lib.platforms.vtex!.buyButton!;
+    const champ = slot.find((e) => e.selector === ".stale-champion")!;
+    champ.successRate = 0.9;
+    champ.lastValidated = daysAgo(120); // effective 0.45
+    slot.find((e) => e.selector === ".fresh")!.successRate = 0.6; // effective 0.6
+    const list = getLearnedSelectors(lib, "vtex", "buyButton");
+    expect(list[0]?.selector).toBe(".fresh");
+  });
+
+  it("llm-guesses expire after 180d without confirmation; verified do not", () => {
+    const lib = emptyLib();
+    promoteFromLlm(lib, "vtex", "buyButton", ".old-guess", "h");
+    recordSuccess(lib, "vtex", "buyButton", ".old-verified", "h");
+    const slot = lib.platforms.vtex!.buyButton!;
+    slot.find((e) => e.selector === ".old-guess")!.lastValidated = daysAgo(200);
+    slot.find((e) => e.selector === ".old-verified")!.lastValidated = daysAgo(200);
+    const list = getLearnedSelectors(lib, "vtex", "buyButton");
+    expect(list.find((e) => e.selector === ".old-guess")).toBeUndefined();
+    expect(list.find((e) => e.selector === ".old-verified")).toBeDefined();
+  });
+
+  it("legacy entries without origin parse as verified (auto-migration)", () => {
+    const raw = {
+      schemaVersion: "0.1",
+      platforms: {
+        vtex: {
+          buyButton: [
+            {
+              selector: ".legacy",
+              confirmedHosts: ["h"],
+              successRate: 0.8,
+              totalAttempts: 5,
+              lastValidated: new Date().toISOString(),
+            },
+          ],
+        },
+      },
+    };
+    const dir = makeTmpDir();
+    try {
+      const path = join(dir.path, "learned.json");
+      writeFileSync(path, JSON.stringify(raw), "utf8");
+      const lib = loadLearned(path);
+      expect(lib.platforms.vtex?.buyButton?.[0]?.origin).toBe("verified");
+    } finally {
+      dir.cleanup();
+    }
+  });
+
+  it("statsFromLib reports verified/guess/stale counts", () => {
+    const lib = emptyLib();
+    recordSuccess(lib, "vtex", "buyButton", ".v", "h");
+    promoteFromLlm(lib, "vtex", "categoryLink", ".g", "h");
+    lib.platforms.vtex!.buyButton![0]!.lastValidated = daysAgo(120);
+    const stats = statsFromLib(lib);
+    const p = stats.platforms.find((x) => x.platform === "vtex")!;
+    expect(p.verifiedSelectors).toBe(1);
+    expect(p.llmGuessSelectors).toBe(1);
+    expect(p.staleSelectors).toBe(1);
+    expect(p.topByKey.find((t) => t.key === "categoryLink")?.origin).toBe("llm-guess");
+  });
+});
