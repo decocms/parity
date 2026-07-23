@@ -86,6 +86,21 @@ describe("recordSuccess / recordFailure / promoteFromLlm", () => {
     expect(e.confirmedHosts).toEqual(["h"]);
   });
 
+  it("promoteFromLlm(verified=true) seeds directly at origin verified / rate 1 (M4 validated+high-confidence path)", () => {
+    const lib = emptyLib();
+    const entry = promoteFromLlm(lib, "vtex", "buyButton", ".validated", "h", true);
+    expect(entry.origin).toBe("verified");
+    expect(entry.successRate).toBe(1);
+    expect(entry.totalAttempts).toBe(1);
+  });
+
+  it("promoteFromLlm(verified=false or omitted) keeps the pre-M4 llm-guess seeding", () => {
+    const lib = emptyLib();
+    const entry = promoteFromLlm(lib, "vtex", "buyButton", ".unvalidated", "h");
+    expect(entry.origin).toBe("llm-guess");
+    expect(entry.successRate).toBe(0.35);
+  });
+
   it("recordFailure deprecates after 3 attempts with <30% success rate", () => {
     const lib = emptyLib();
     promoteFromLlm(lib, "vtex", "buyButton", ".x", "h");
