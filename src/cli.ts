@@ -8,6 +8,7 @@ import { consoleCommand } from "./commands/console.ts";
 import { cssTraceCommand } from "./commands/css-trace.ts";
 import { e2eCommand } from "./commands/e2e.ts";
 import { explainCommand } from "./commands/explain.ts";
+import { extractCommand } from "./commands/extract.ts";
 import { fixCommand } from "./commands/fix.ts";
 import { htmlCommand } from "./commands/html.ts";
 import { journeyCommand } from "./commands/journey.ts";
@@ -149,7 +150,7 @@ program
   )
   .option(
     "--llm-model <overrides>",
-    "Per-feature model override, e.g. visual-diff=claude-opus-4-7,explain=claude-opus-4-7. Features: selector-discovery, step-recovery, search-terms, plp-matching, pdp-matching, section-understanding, visual-diff, issue-aggregation, explain. Issue #66.",
+    "Per-feature model override, e.g. visual-diff=claude-opus-4-7,explain=claude-opus-4-7. Features: selector-discovery, step-recovery, search-terms, plp-matching, pdp-matching, section-understanding, visual-diff, issue-aggregation, explain, component-detection. Issue #66.",
   )
   .option(
     "--llm-tier-default <tier>",
@@ -656,6 +657,43 @@ program
         outDir: opts.outDir,
         json: opts.json,
         noLlm: !opts.llm,
+      }),
+    );
+  });
+
+program
+  .command("extract")
+  .description(
+    "Single-site AI-ready component extraction (M5). No prod×cand comparison — captures structured data (HTML, computed styles, screenshot, assets, links, text) about a site's UI components (header, footer, nav, shelves, hero, minicart, ...) to feed an AI agent doing a from-scratch migration with no source code access.",
+  )
+  .requiredOption("--url <url>", "Site to extract from")
+  .option(
+    "--pages <list>",
+    'Comma-separated pages: literal paths/URLs, and/or "category-auto"/"pdp-auto" to auto-discover a PLP/PDP from the home page. Default: "/" (home only).',
+  )
+  .option(
+    "--components <list>",
+    "Comma-separated role allowlist, e.g. header,footer,nav,shelf,banner,hero,minicart. Default: all detected components.",
+  )
+  .option("--viewport <viewport>", "mobile | desktop | tablet", "mobile")
+  .option("--format <fmt>", "md | json | both", "both")
+  .option("--out <dir>", "Output directory", "./parity-extract")
+  .option(
+    "--no-llm",
+    "Skip the optional LLM component-relabeling pass (heuristic detection always runs regardless).",
+  )
+  .option("--json", "Emit one-line JSON instead of pretty text", false)
+  .action(async (opts) => {
+    process.exit(
+      await extractCommand({
+        url: opts.url,
+        pages: opts.pages,
+        components: opts.components,
+        viewport: opts.viewport,
+        format: opts.format,
+        outDir: opts.out,
+        noLlm: !opts.llm,
+        json: opts.json,
       }),
     );
   });
