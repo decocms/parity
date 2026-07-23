@@ -117,11 +117,39 @@ function renderDashboard(run: Run): string {
     </div>
   </div>
 
+  ${renderModuleScores(run)}
+
   <div class="tiles">
     ${tiles.map((t) => renderTile(t)).join("")}
   </div>
 
   ${renderTopIssues(run, "")}`;
+}
+
+/**
+ * Per-module score chips (M3 phase B — adaptive scoring), shown when the
+ * run has module-scoped data. Intentionally minimal — a small additional
+ * block, not a redesign of the dashboard: just `module: score (status)`
+ * chips reusing the existing `.score-delta`-style dim text and inline
+ * colors already used elsewhere on this dashboard.
+ */
+function renderModuleScores(run: Run): string {
+  if (!run.moduleVerdicts || run.moduleVerdicts.length === 0) return "";
+  const chips = run.moduleVerdicts
+    .map((mv) => {
+      const color =
+        mv.status === "pass"
+          ? "var(--state-good)"
+          : mv.status === "warn"
+            ? "var(--state-warn)"
+            : "var(--state-bad)";
+      return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:rgba(128,128,128,0.12);font-size:12px" title="${esc(mv.checksRun)} check(s) · ${esc(mv.pagesAnalyzed)} page(s) analyzed">
+        <strong>${esc(mv.module)}</strong>
+        <span style="color:${color};font-variant-numeric:tabular-nums">${mv.score}</span>
+      </span>`;
+    })
+    .join("");
+  return `<div class="module-scores" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">${chips}</div>`;
 }
 
 interface Tile {

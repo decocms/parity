@@ -185,4 +185,36 @@ describe("findPreviousRun", () => {
   it("returns null when there is no comparable run", () => {
     expect(findPreviousRun(dir.path, HOSTS)).toBeNull();
   });
+
+  describe("module-scoped comparability (M3 module scoring)", () => {
+    it("only matches a previous run with the SAME module set", () => {
+      writeRunFixture("2026-01-01", { verdict: { score: 40, modulesRun: ["e2e", "seo"] } });
+      const prev = findPreviousRun(dir.path, { ...HOSTS, modulesRun: ["e2e", "seo"] });
+      expect(prev?.id).toBe("2026-01-01");
+    });
+
+    it("skips a previous run whose module set differs (not apples-to-apples)", () => {
+      writeRunFixture("2026-01-01", { verdict: { score: 40, modulesRun: ["e2e"] } });
+      expect(findPreviousRun(dir.path, { ...HOSTS, modulesRun: ["e2e", "seo"] })).toBeNull();
+    });
+
+    it("module-set match is order/dedup independent", () => {
+      writeRunFixture("2026-01-01", {
+        verdict: { score: 40, modulesRun: ["seo", "e2e", "e2e"] },
+      });
+      const prev = findPreviousRun(dir.path, { ...HOSTS, modulesRun: ["e2e", "seo"] });
+      expect(prev?.id).toBe("2026-01-01");
+    });
+
+    it("does not filter by module when the current run has no module data (legacy path)", () => {
+      writeRunFixture("2026-01-01", { verdict: { score: 40, modulesRun: ["e2e"] } });
+      const prev = findPreviousRun(dir.path, HOSTS);
+      expect(prev?.id).toBe("2026-01-01");
+    });
+
+    it("treats a previous run with no modulesRun as an empty set for comparison", () => {
+      writeRunFixture("2026-01-01", { verdict: { score: 40 } });
+      expect(findPreviousRun(dir.path, { ...HOSTS, modulesRun: ["e2e"] })).toBeNull();
+    });
+  });
 });

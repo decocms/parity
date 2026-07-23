@@ -14,7 +14,12 @@ import { runFlow } from "../engine/flows.ts";
 import { promptForModuleSelection } from "../engine/interactive-module-prompt.ts";
 import { disableInteractive, isInteractiveMode } from "../engine/interactive-selector-prompt.ts";
 import { discoverPagesFromSitemap } from "../engine/sitemap-discover.ts";
-import { SCORE_VERSION, computeVerdict } from "../engine/verdict.ts";
+import {
+  SCORE_VERSION,
+  computeCompositeVerdict,
+  computeModuleVerdicts,
+  computeVerdict,
+} from "../engine/verdict.ts";
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
 import { type Platform, detectPlatform } from "../learned/platform.ts";
 import { promoteStepsFromFlow } from "../learned/promote.ts";
@@ -1200,14 +1205,30 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     // Normalize the score over the number of paired (path × viewport)
     // captures — the unit issues multiply over. See src/engine/verdict.ts.
     const pagesAnalyzed = pairCaptures(checkCtx.prodPages, checkCtx.candPages).pairs.length;
-    const verdict = computeVerdict(checks, allIssues, { pagesAnalyzed });
+    // Adaptive scoring (M3 phase B): every check belongs to exactly one
+    // module (src/checks/modules.ts), so module verdicts are basically
+    // always computable — decision: ALWAYS compute them, and use the
+    // composite as the reported verdict whenever at least one module
+    // matched (i.e. essentially always in practice). This makes
+    // `--only e2e` score purely on e2e without a separate code path, and
+    // degrades to the legacy `computeVerdict` only for edge cases where no
+    // check name maps to a registered module (e.g. future/unregistered
+    // checks) — see docs/ROADMAP-1.0.md M3 phase B.
+    const moduleVerdicts = computeModuleVerdicts(checks, allIssues);
+    const verdict =
+      moduleVerdicts.length > 0
+        ? computeCompositeVerdict(moduleVerdicts, checks, allIssues)
+        : computeVerdict(checks, allIssues, { pagesAnalyzed });
 
-    // Score trend vs the last completed run against the same host pair.
+    // Score trend vs the last completed run against the same host pair AND
+    // (when this run used module selection) the same module set — a run
+    // scored on `--only e2e` alone isn't apples-to-apples with a full run.
     const prevRun = findPreviousRun(opts.output, {
       prodUrl: opts.prod,
       candUrl: opts.cand,
       excludeRunId: runId,
       scoreVersion: SCORE_VERSION,
+      modulesRun: verdict.modulesRun,
     });
     const previousRun = prevRun
       ? { ...prevRun, scoreDelta: verdict.score - prevRun.score }
@@ -1273,6 +1294,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       baseline: baselineSection,
       timings: runTimings,
       selectionReason: opts.why,
+      moduleVerdicts: moduleVerdicts.length > 0 ? moduleVerdicts : undefined,
     };
 
     const reportStart = performance.now();
@@ -1695,6 +1717,20 @@ function printSummary(
   console.log(
     `     issues: ${chalk.red(verdict.critical)} critical · ${chalk.yellow(verdict.high)} high · ${verdict.medium} medium · ${chalk.dim(`${verdict.low} low`)}`,
   );
+  if (run.moduleVerdicts && run.moduleVerdicts.length > 0) {
+    const perModule = run.moduleVerdicts
+      .map((mv) => {
+        const colored =
+          mv.status === "pass"
+            ? chalk.green(mv.score)
+            : mv.status === "warn"
+              ? chalk.yellow(mv.score)
+              : chalk.red(mv.score);
+        return `${mv.module} ${colored}`;
+      })
+      .join(" · ");
+    console.log(`     modules: ${perModule} → composite ${score}`);
+  }
   if (run.visualDiff) {
     const vd = run.visualDiff;
     const parityIcon = vd.parityOk ? chalk.green("✔") : chalk.red("✖");

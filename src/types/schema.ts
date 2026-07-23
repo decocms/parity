@@ -404,8 +404,33 @@ export const Verdict = z.object({
   checksPassed: z.number(),
   checksFailed: z.number(),
   checksSkipped: z.number(),
+  /**
+   * Module names (M3 module selection) that contributed to this verdict's
+   * score — populated when the verdict came from `computeCompositeVerdict`
+   * (i.e. per-module scoring was available). Absent for legacy/no-module
+   * verdicts.
+   */
+  modulesRun: z.array(z.string()).optional(),
 });
 export type Verdict = z.infer<typeof Verdict>;
+
+/**
+ * Per-module verdict (M3 phase B — adaptive scoring). Mirrors `Verdict`'s
+ * shape but scoped to one module's checks/issues; see
+ * `computeModuleVerdicts` in src/engine/verdict.ts.
+ */
+export const ModuleVerdict = z.object({
+  module: z.string(),
+  score: z.number().min(0).max(100),
+  status: z.enum(["pass", "warn", "fail"]),
+  critical: z.number(),
+  high: z.number(),
+  medium: z.number(),
+  low: z.number(),
+  checksRun: z.number(),
+  pagesAnalyzed: z.number(),
+});
+export type ModuleVerdict = z.infer<typeof ModuleVerdict>;
 
 export const Run = z.object({
   schemaVersion: z.literal("0.1"),
@@ -473,6 +498,13 @@ export const Run = z.object({
    * scoring. Optional so older reports still validate.
    */
   selectionReason: z.string().optional(),
+  /**
+   * Per-module score breakdown (M3 phase B — adaptive scoring), populated
+   * whenever at least one check mapped to a module. Absent on legacy
+   * report.json files. See `computeModuleVerdicts`/`computeCompositeVerdict`
+   * in src/engine/verdict.ts.
+   */
+  moduleVerdicts: z.array(ModuleVerdict).optional(),
 });
 export type Run = z.infer<typeof Run>;
 

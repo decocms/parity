@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   FAIL_SCORE_CAP,
   SCORE_VERSION,
+  computeCompositeVerdict,
+  computeModuleVerdicts,
   computeScore,
   computeVerdict,
   derivePagesAnalyzed,
@@ -225,5 +227,138 @@ describe("computeVerdict", () => {
     );
     expect(v.high).toBe(2);
     expect(v.low).toBe(1);
+  });
+});
+
+describe("computeModuleVerdicts", () => {
+  it("a module with no checks present is absent from the result (not zero-scored)", () => {
+    const checks = [makeCheck({ name: "cache-coverage" })];
+    const verdicts = computeModuleVerdicts(checks, []);
+    expect(verdicts.map((v) => v.module)).toEqual(["cache"]);
+  });
+
+  it("checks not registered to any module are ignored (no crash, no bogus module)", () => {
+    const checks = [makeCheck({ name: "some-unregistered-future-check" })];
+    const verdicts = computeModuleVerdicts(checks, []);
+    expect(verdicts).toEqual([]);
+  });
+
+  it("scopes issues to their owning module via issue.check, independent of other modules' issues", () => {
+    const checks = [makeCheck({ name: "cache-coverage" }), makeCheck({ name: "meta-seo-parity" })];
+    const issues = [
+      makeIssue({ id: "1", check: "cache-coverage", severity: "critical", page: "/p::mobile" }),
+      makeIssue({ id: "2", check: "meta-seo-parity", severity: "low", page: "/p::mobile" }),
+    ];
+    const verdicts = computeModuleVerdicts(checks, issues);
+    const cache = verdicts.find((v) => v.module === "cache")!;
+    const seo = verdicts.find((v) => v.module === "seo")!;
+    expect(cache.critical).toBe(1);
+    expect(cache.status).toBe("fail");
+    expect(cache.score).toBeLessThanOrEqual(FAIL_SCORE_CAP);
+    expect(seo.critical).toBe(0);
+    expect(seo.low).toBe(1);
+    expect(seo.status).toBe("pass");
+    expect(seo.score).toBeGreaterThan(FAIL_SCORE_CAP);
+  });
+
+  it("derives pagesAnalyzed per-module from that module's own checks/issues", () => {
+    const checks = [
+      makeCheck({ name: "cache-coverage", data: { pairs: 5 } }),
+      makeCheck({ name: "meta-seo-parity", data: { pairs: 20 } }),
+    ];
+    const verdicts = computeModuleVerdicts(checks, []);
+    expect(verdicts.find((v) => v.module === "cache")!.pagesAnalyzed).toBe(5);
+    expect(verdicts.find((v) => v.module === "seo")!.pagesAnalyzed).toBe(20);
+  });
+
+  it("a module with all-pass checks and zero issues still appears (empty issue list, not absent)", () => {
+    const checks = [makeCheck({ name: "cache-coverage", status: "pass" })];
+    const verdicts = computeModuleVerdicts(checks, []);
+    expect(verdicts).toHaveLength(1);
+    expect(verdicts[0]!.status).toBe("pass");
+    expect(verdicts[0]!.score).toBe(100);
+  });
+
+  it("result is sorted by module name (deterministic order)", () => {
+    const checks = [
+      makeCheck({ name: "web-vitals-mobile" }),
+      makeCheck({ name: "cache-coverage" }),
+    ];
+    const verdicts = computeModuleVerdicts(checks, []);
+    expect(verdicts.map((v) => v.module)).toEqual(["cache", "vitals"]);
+  });
+});
+
+describe("computeCompositeVerdict", () => {
+  it("single-module case degenerates to that module's own score", () => {
+    const checks = [makeCheck({ name: "cache-coverage" })];
+    const issues = [
+      makeIssue({ id: "1", check: "cache-coverage", severity: "high", page: "/p::mobile" }),
+    ];
+    const moduleVerdicts = computeModuleVerdicts(checks, issues);
+    const composite = computeCompositeVerdict(moduleVerdicts, checks, issues);
+    expect(composite.score).toBe(moduleVerdicts[0]!.score);
+    expect(composite.modulesRun).toEqual(["cache"]);
+  });
+
+  it("weights modules by pagesAnalyzed (a bigger module dominates the composite)", () => {
+    const checks = [
+      makeCheck({ name: "cache-coverage", data: { pairs: 1 } }), // small, bad score
+      makeCheck({ name: "web-vitals-mobile", data: { pairs: 99 } }), // huge, clean
+    ];
+    const issues = [
+      makeIssue({ id: "1", check: "cache-coverage", severity: "high", page: "/p::mobile" }),
+    ];
+    const moduleVerdicts = computeModuleVerdicts(checks, issues);
+    const composite = computeCompositeVerdict(moduleVerdicts, checks, issues);
+    // vitals module is clean (score 100) and has 99x the weight of cache's
+    // slightly-dinged module — composite should land close to 100, not a
+    // plain average of the two (which would be ~90).
+    expect(composite.score).toBeGreaterThan(90);
+  });
+
+  it("plain average when weights are equal", () => {
+    const checks = [
+      makeCheck({ name: "cache-coverage", data: { pairs: 10 } }),
+      makeCheck({ name: "console-errors-baseline", data: { pairs: 10 } }),
+    ];
+    const issues = [
+      makeIssue({ id: "1", check: "cache-coverage", severity: "high", page: "/p::mobile" }),
+    ];
+    const moduleVerdicts = computeModuleVerdicts(checks, issues);
+    const composite = computeCompositeVerdict(moduleVerdicts, checks, issues);
+    const consoleMv = moduleVerdicts.find((v) => v.module === "console")!;
+    const cacheMv = moduleVerdicts.find((v) => v.module === "cache")!;
+    expect(consoleMv.score).toBe(100);
+    expect(composite.score).toBe(Math.round((consoleMv.score + cacheMv.score) / 2));
+  });
+
+  it("any module in fail status caps the composite score, even if the weighted average would be higher", () => {
+    const checks = [
+      makeCheck({ name: "cache-coverage", status: "fail", data: { pairs: 1 } }),
+      makeCheck({ name: "web-vitals-mobile", data: { pairs: 1 } }),
+    ];
+    const composite = computeCompositeVerdict(computeModuleVerdicts(checks, []), checks, []);
+    expect(composite.status).toBe("fail");
+    expect(composite.score).toBeLessThanOrEqual(FAIL_SCORE_CAP);
+  });
+
+  it("modulesRun is populated and sorted", () => {
+    const checks = [
+      makeCheck({ name: "web-vitals-mobile" }),
+      makeCheck({ name: "cache-coverage" }),
+    ];
+    const composite = computeCompositeVerdict(computeModuleVerdicts(checks, []), checks, []);
+    expect(composite.modulesRun).toEqual(["cache", "vitals"]);
+  });
+
+  it("checksRun/checksPassed/etc stay GLOBAL counts across all checks passed in, not just scored ones", () => {
+    const checks = [
+      makeCheck({ name: "cache-coverage", status: "pass" }),
+      makeCheck({ name: "unregistered-check", status: "fail" }),
+    ];
+    const composite = computeCompositeVerdict(computeModuleVerdicts(checks, []), checks, []);
+    expect(composite.checksRun).toBe(2);
+    expect(composite.checksFailed).toBe(1);
   });
 });
