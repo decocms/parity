@@ -11,7 +11,7 @@ import { explainCommand } from "./commands/explain.ts";
 import { fixCommand } from "./commands/fix.ts";
 import { htmlCommand } from "./commands/html.ts";
 import { journeyCommand } from "./commands/journey.ts";
-import { learnedStats } from "./commands/learned.ts";
+import { learnedStats, learnedValidate } from "./commands/learned.ts";
 import { listCommand, listModulesCommand } from "./commands/list.ts";
 import { prCommand } from "./commands/pr.ts";
 import { promptCommand } from "./commands/prompt.ts";
@@ -667,6 +667,16 @@ program
     new Command("stats").description("Print learned-selectors stats per platform").action(() => {
       process.exit(learnedStats());
     }),
+  )
+  .addCommand(
+    new Command("validate")
+      .description(
+        "Debug: run selector discovery + live-validation against a single URL and print a table (not part of `parity run`)",
+      )
+      .requiredOption("--url <url>", "URL to fetch + discover + validate")
+      .action(async (opts: { url: string }) => {
+        process.exit(await learnedValidate(opts.url));
+      }),
   );
 
 program.parseAsync(process.argv);

@@ -29,6 +29,17 @@ export const DiscoveredSelectorsSchema = z.object({
   // Login (only meaningful when rc.login.enabled === true; LLM may leave empty)
   loginTrigger: z.string().optional(),
   accountMenuTrigger: z.string().optional(),
+  /**
+   * Snake-case-free (camelCase) key names the model itself flagged as
+   * uncertain (mirrors the `reasoning` field's spirit — free-form signal,
+   * but structured enough to parse and act on). A key can appear here even
+   * when its selector is non-empty: the model still returns its best guess
+   * (never discarded), but downstream promotion to the learned-selectors
+   * library must NOT treat it as `origin: "verified"` even if it later
+   * live-validates — low confidence from the model is an independent
+   * signal from "the selector matched an element".
+   */
+  lowConfidenceKeys: z.array(z.string()).optional(),
 });
 export type DiscoveredSelectors = z.infer<typeof DiscoveredSelectorsSchema>;
 
@@ -140,6 +151,12 @@ const DISCOVER_SELECTORS_TOOL = {
         type: "string",
         description: "1-2 sentence rationale describing what was inferred from the markup.",
       },
+      low_confidence_keys: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "List the snake_case field names above (e.g. 'buy_button', 'pdp_gallery_main') that you are NOT confident about — a plausible guess you filled in but wouldn't bet on. Do NOT list fields you left as empty string. This does not cause the guess to be discarded; it just flags it so the caller treats it as unverified.",
+      },
     },
     required: ["category_link", "product_card", "buy_button", "minicart_trigger"],
   },
@@ -149,10 +166,22 @@ const SYSTEM_PROMPT = `
 Você é um especialista em CSS selectors para crawlers/E2E de sites de e-commerce
 (VTEX, Shopify, Wake, Nuvemshop, custom).
 
-Dado o HTML de uma página inicial e a URL do site, identifique seletores robustos
-para os 7 elementos pedidos pela ferramenta report_selectors. Você só vê a HOME —
-inferir seletores de PDP, minicart, cart e checkout requer reconhecer convenções
-da plataforma (ex: VTEX usa "vtex-cart" classes, "vtex-store-components" etc).
+Dado o HTML de até 3 páginas do site (marcadas com \`### HOME\`, \`### PLP\` e \`### PDP\`
+no texto do usuário — PLP e PDP são OPCIONAIS, podem não estar presentes) e a URL do
+site, identifique seletores robustos para os elementos pedidos pela ferramenta
+report_selectors.
+
+IMPORTANTE sobre as seções: quando \`### PLP\` estiver presente, você está OLHANDO
+DIRETAMENTE pra uma página de listagem/categoria real — use ELA (não a home) como
+fonte primária pra \`product_card\` e qualquer seletor de paginação. Quando \`### PDP\`
+estiver presente, você está OLHANDO DIRETAMENTE pra uma página de produto real — use
+ELA como fonte primária pra \`buy_button\`, \`cep_input_pdp\`, \`pdp_gallery_thumbnail\`,
+\`pdp_gallery_main\` e \`pdp_related_shelf\`, em vez de adivinhar a convenção da
+plataforma só a partir da home. Quando uma seção NÃO estiver presente (PLP e/ou PDP
+ausentes), você só vê a HOME — nesse caso, inferir seletores de PDP/PLP, minicart,
+cart e checkout requer reconhecer convenções da plataforma (ex: VTEX usa "vtex-cart"
+classes, "vtex-store-components" etc), e se você não tiver alta confiança na
+convenção, retorne string vazia (regra 9) em vez de chutar.
 
 REGRAS:
 
@@ -203,14 +232,27 @@ REGRAS:
    \`search_suggestions\` quase nunca está visível na home (só após digitar); se você não detectar,
    retorne string vazia — NUNCA chute.
 
-9. **PDP gallery / related**: você está vendo a HOME, então NÃO consegue ver thumbnails de PDP nem
-   shelf de "Related Products". Só preencha esses 3 campos se você reconhecer a plataforma e tiver
-   alta confiança no padrão (ex: VTEX usa \`.vtex-store-components-3-x-productImageTag--main\`).
-   Caso contrário, deixe string vazia — defaults cuidam disso.
+9. **PDP gallery / related**: se a seção \`### PDP\` estiver presente, procure os seletores
+   DIRETAMENTE nela (thumbnails da galeria, imagem principal, shelf de "Related Products" /
+   "Você também pode gostar"). Se \`### PDP\` NÃO estiver presente, você só vê HOME (e talvez
+   PLP) — nesse caso só preencha esses 3 campos se reconhecer a plataforma e tiver alta
+   confiança no padrão (ex: VTEX usa \`.vtex-store-components-3-x-productImageTag--main\`).
+   Caso contrário, deixe string vazia — defaults cuidam disso. **NUNCA chute** só porque o
+   campo existe na ferramenta — string vazia é sempre uma resposta válida e preferível a um
+   palpite sem lastro no HTML fornecido.
 
 10. **Login**: \`login_trigger\` é o link "Entrar" / "Login" / ícone de pessoa na header (anônimo).
     \`account_menu_trigger\` é o que aparece QUANDO LOGADO ("Olá, João", avatar) — provavelmente
     NÃO está na home anônima. Se você só vê "Login", retorne string vazia para \`account_menu_trigger\`.
+    Essa regra vale mesmo com \`### PDP\`/\`### PLP\` presentes: se o elemento não aparece em
+    NENHUMA das seções fornecidas, retorne string vazia — nunca chute a partir de convenção
+    genérica quando você tem HTML real disponível e o elemento simplesmente não está lá.
+
+11. **Confiança (\`low_confidence_keys\`)**: para cada seletor não-vazio que você retornar, avalie
+    honestamente sua confiança. Se for um PALPITE baseado em convenção de plataforma (não em um
+    elemento que você viu literalmente no HTML fornecido), inclua o nome do campo (snake_case,
+    ex: \`"pdp_gallery_main"\`) na lista \`low_confidence_keys\`. Isso NÃO faz o valor ser descartado
+    — só sinaliza que ele não deve ser promovido como "verificado" antes de validação ao vivo.
 
 Responda SEMPRE via tool_use report_selectors. Não escreva texto livre fora da tool call.
 `.trim();
@@ -222,26 +264,94 @@ export interface DiscoverOptions {
   cacheDir?: string;
 }
 
-export async function discoverSelectorsFromUrl(
-  url: string,
-  html: string,
+/** Labeled HTML sources fed to the LLM. Only `home` is required. */
+export interface DiscoverInputs {
+  home: string;
+  plp?: string;
+  pdp?: string;
+}
+
+type SelectorStringKey = Exclude<keyof DiscoveredSelectors, "lowConfidenceKeys">;
+
+/** Per-key mapping between the tool's snake_case input fields and DiscoveredSelectors. */
+const SNAKE_TO_CAMEL: Record<string, SelectorStringKey> = {
+  category_link: "categoryLink",
+  product_card: "productCard",
+  buy_button: "buyButton",
+  minicart_trigger: "minicartTrigger",
+  cep_input_pdp: "cepInputPdp",
+  cep_input_cart: "cepInputCart",
+  checkout_button: "checkoutButton",
+  search_trigger: "searchTrigger",
+  search_input: "searchInput",
+  search_suggestions: "searchSuggestions",
+  pdp_gallery_thumbnail: "pdpGalleryThumbnail",
+  pdp_gallery_main: "pdpGalleryMain",
+  pdp_related_shelf: "pdpRelatedShelf",
+  login_trigger: "loginTrigger",
+  account_menu_trigger: "accountMenuTrigger",
+};
+
+/**
+ * Budget split across the (up to 3) HTML sources, within a 30k total
+ * ceiling — home gets the bigger share since it's always present and
+ * carries header/nav/footer context useful for every key, while PLP/PDP
+ * mainly ground ONE or two keys each.
+ */
+const HOME_MAX_CHARS = 12_000;
+const PLP_MAX_CHARS = 9_000;
+const PDP_MAX_CHARS = 9_000;
+
+/**
+ * Multi-page selector discovery. Accepts up to 3 labeled HTML sources so
+ * PDP-only keys (buyButton, cepInputPdp, pdpGallery*) and PLP-only keys
+ * (productCard) can be grounded in the actual page they live on, instead of
+ * asking the LLM to infer PDP/PLP markup conventions from the home page
+ * alone. `urls.home` is required; `urls.plp`/`urls.pdp` are optional and
+ * should be omitted together with the matching `html.plp`/`html.pdp` when
+ * that page couldn't be fetched.
+ *
+ * The on-disk cache is still keyed off the HOME url/host and HOME html
+ * fingerprint only (unchanged from the pre-M4 behavior) — a home-page
+ * redesign is by far the dominant invalidation signal, and keeping the
+ * cache key single-source avoids entangling PLP/PDP fetch flakiness
+ * (a PLP that 404s on one run and succeeds on the next) with the
+ * TTL/fingerprint invalidation contract callers already rely on.
+ */
+export async function discoverSelectors(
+  urls: { home: string; plp?: string; pdp?: string },
+  html: DiscoverInputs,
   opts: DiscoverOptions = {},
 ): Promise<DiscoveredSelectors | null> {
-  const host = safeHost(url);
+  const host = safeHost(urls.home);
   const cacheDir = opts.cacheDir ?? CACHE_DIR;
   const cachePath = join(cacheDir, `selectors-${host}.json`);
-  const fingerprint = computeHtmlFingerprint(html);
+  const fingerprint = computeHtmlFingerprint(html.home);
 
   if (!opts.noCache && existsSync(cachePath)) {
     const cached = readCacheEntry(cachePath, fingerprint);
     if (cached) return cached.selectors;
   }
 
-  const compacted = compactHtmlForSelectors(html);
-  const input = await callTool<Record<string, string>>({
+  const sections: string[] = [`URL: ${urls.home}`];
+  sections.push(
+    `### HOME\n\`\`\`html\n${compactHtmlForSelectors(html.home, HOME_MAX_CHARS)}\n\`\`\``,
+  );
+  if (html.plp) {
+    sections.push(
+      `### PLP${urls.plp ? ` (${urls.plp})` : ""}\n\`\`\`html\n${compactHtmlForSelectors(html.plp, PLP_MAX_CHARS)}\n\`\`\``,
+    );
+  }
+  if (html.pdp) {
+    sections.push(
+      `### PDP${urls.pdp ? ` (${urls.pdp})` : ""}\n\`\`\`html\n${compactHtmlForSelectors(html.pdp, PDP_MAX_CHARS)}\n\`\`\``,
+    );
+  }
+
+  const input = await callTool<Record<string, string> & { low_confidence_keys?: string[] }>({
     feature: "selector-discovery",
     systemPrompt: SYSTEM_PROMPT,
-    userText: `URL: ${url}\n\nHTML compactado da home:\n\`\`\`html\n${compacted}\n\`\`\``,
+    userText: sections.join("\n\n"),
     maxTokens: 1500,
     tool: {
       name: DISCOVER_SELECTORS_TOOL.name,
@@ -250,23 +360,15 @@ export async function discoverSelectorsFromUrl(
     },
   });
   if (!input) return null;
-  const selectors: DiscoveredSelectors = {
-    categoryLink: emptyToUndef(input.category_link),
-    productCard: emptyToUndef(input.product_card),
-    buyButton: emptyToUndef(input.buy_button),
-    minicartTrigger: emptyToUndef(input.minicart_trigger),
-    cepInputPdp: emptyToUndef(input.cep_input_pdp),
-    cepInputCart: emptyToUndef(input.cep_input_cart),
-    checkoutButton: emptyToUndef(input.checkout_button),
-    searchTrigger: emptyToUndef(input.search_trigger),
-    searchInput: emptyToUndef(input.search_input),
-    searchSuggestions: emptyToUndef(input.search_suggestions),
-    pdpGalleryThumbnail: emptyToUndef(input.pdp_gallery_thumbnail),
-    pdpGalleryMain: emptyToUndef(input.pdp_gallery_main),
-    pdpRelatedShelf: emptyToUndef(input.pdp_related_shelf),
-    loginTrigger: emptyToUndef(input.login_trigger),
-    accountMenuTrigger: emptyToUndef(input.account_menu_trigger),
-  };
+  const selectors: DiscoveredSelectors = {} as DiscoveredSelectors;
+  for (const [snakeKey, camelKey] of Object.entries(SNAKE_TO_CAMEL)) {
+    selectors[camelKey] = emptyToUndef(input[snakeKey]);
+  }
+  const knownCamelKeys = new Set<string>(Object.values(SNAKE_TO_CAMEL));
+  const lowConfidenceKeys = (input.low_confidence_keys ?? [])
+    .map((k) => SNAKE_TO_CAMEL[k] ?? k)
+    .filter((k) => knownCamelKeys.has(k));
+  if (lowConfidenceKeys.length > 0) selectors.lowConfidenceKeys = lowConfidenceKeys;
   // Sanity: the LLM commonly confuses the header cart icon with the
   // checkout button. If it returned the SAME selector (or a prefix match)
   // for both, drop checkoutButton — the cascade will fall back to defaults
@@ -291,6 +393,18 @@ export async function discoverSelectorsFromUrl(
   };
   writeFileSync(cachePath, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
   return selectors;
+}
+
+/**
+ * Backward-compatible, home-only wrapper. Kept so every existing caller
+ * (journey.ts, and any external script) keeps working unchanged.
+ */
+export async function discoverSelectorsFromUrl(
+  url: string,
+  html: string,
+  opts: DiscoverOptions = {},
+): Promise<DiscoveredSelectors | null> {
+  return discoverSelectors({ home: url }, { home: html }, opts);
 }
 
 function cacheTtlMs(): number {
@@ -335,6 +449,37 @@ function readCacheEntry(cachePath: string, currentFingerprint: string): Selector
 }
 
 /**
+ * Persist a live-validation map (from `engine/validate-selectors.ts`) into
+ * the `SelectorCacheEntry.validated` field of an already-written cache
+ * entry, so a later `--refresh-selectors`-free run can see which selectors
+ * were live-confirmed the last time discovery ran.
+ *
+ * Deliberately a separate step from `discoverSelectors()` rather than a
+ * parameter on it: validation needs a live `Page` (a real browser context),
+ * which doesn't exist yet at the point `discoverSelectors()` runs (pre-
+ * browser, plain `fetch()` only) — the caller (`run.ts`) launches a
+ * throwaway browser AFTER discovery returns, validates, then calls this to
+ * fold the result back into the same cache file.
+ */
+export function persistSelectorValidation(
+  homeUrl: string,
+  validated: Partial<Record<keyof DiscoveredSelectors, boolean>>,
+  cacheDir: string = CACHE_DIR,
+): void {
+  const host = safeHost(homeUrl);
+  const cachePath = join(cacheDir, `selectors-${host}.json`);
+  if (!existsSync(cachePath)) return;
+  try {
+    const parsed = SelectorCacheEntrySchema.safeParse(JSON.parse(readFileSync(cachePath, "utf8")));
+    if (!parsed.success) return;
+    const entry: SelectorCacheEntry = { ...parsed.data, validated };
+    writeFileSync(cachePath, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
+  } catch {
+    /* best-effort — a stale/missing cache file just means nothing to update */
+  }
+}
+
+/**
  * Merge discovered selectors into an rc-style selectors map. EVERY
  * discovered key lands unless the user's .parityrc.json already sets it —
  * user overrides always win. Mutates and returns `target`.
@@ -347,6 +492,8 @@ export function mergeDiscoveredSelectors<
   T extends Partial<Record<keyof DiscoveredSelectors, string>>,
 >(target: T, discovered: DiscoveredSelectors): T {
   for (const key of Object.keys(discovered) as (keyof DiscoveredSelectors)[]) {
+    // Metadata, not a selector string — never merges into rc.selectors.
+    if (key === "lowConfidenceKeys") continue;
     if (discovered[key] && target[key] === undefined) {
       target[key] = discovered[key] as T[keyof DiscoveredSelectors];
     }

@@ -209,16 +209,29 @@ export function recordFailure(
   return entry;
 }
 
+/**
+ * Seed (or bump) a learned-selectors entry from an LLM suggestion.
+ *
+ * @param verified - When `true`, the caller has independent live-confirmation
+ *   for this exact selector (M4: it live-validated via `validateSelectors`
+ *   on the page it's supposed to live on, AND the model itself did not flag
+ *   the key in `low_confidence_keys`). In that case the entry is seeded
+ *   directly at `origin: "verified"` / `successRate: 1`, same as a normal
+ *   flow-confirmed success — skipping the usual "unverified guess" limbo.
+ *   Defaults to `false` (today's pre-M4 behavior: seed as `llm-guess` below
+ *   anything ever confirmed live; a later real success upgrades it).
+ */
 export function promoteFromLlm(
   lib: LearnedSelectors,
   platform: Platform,
   key: SelectorKey,
   selector: string,
   host: string,
+  verified = false,
 ): SelectorEntry {
   const list = ensureSlot(lib, platform, key);
   const existing = list.find((e) => e.selector === selector);
-  if (existing) return recordSuccess(lib, platform, key, selector, host);
+  if (existing || verified) return recordSuccess(lib, platform, key, selector, host);
   // Unverified LLM suggestion: seed BELOW anything ever confirmed live
   // (0.35, was 0.5 — a guess used to sit mid-pack among proven selectors)
   // and tag provenance so ranking and expiry can treat it accordingly.
