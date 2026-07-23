@@ -86,9 +86,32 @@ export function loadRun(outputDir: string, runId: string): Run {
  * the requested one, so the first run after a formula upgrade shows "no
  * comparable previous run" instead of a bogus delta against the old scale.
  */
+/** Sorted-array set equality — order-independent, dedup-independent. */
+function sameModuleSet(a: string[], b: string[]): boolean {
+  const setA = new Set(a);
+  const setB = new Set(b);
+  if (setA.size !== setB.size) return false;
+  for (const m of setA) if (!setB.has(m)) return false;
+  return true;
+}
+
 export function findPreviousRun(
   outputDir: string,
-  opts: { prodUrl: string; candUrl: string; excludeRunId?: string; scoreVersion?: number },
+  opts: {
+    prodUrl: string;
+    candUrl: string;
+    excludeRunId?: string;
+    scoreVersion?: number;
+    /**
+     * Module names (M3 module scoring) the CURRENT run scored. When
+     * provided, a candidate previous run is only considered comparable if
+     * its own module set matches exactly — a run scored on `--only e2e`
+     * alone isn't apples-to-apples with a full run's composite score.
+     * When omitted (legacy/no-module runs), no module filtering happens —
+     * today's host+scoreVersion behavior is preserved.
+     */
+    modulesRun?: string[];
+  },
 ): { id: string; timestamp: string; score: number } | null {
   const hostOf = (url: string): string => {
     try {
@@ -108,7 +131,7 @@ export function findPreviousRun(
         prodUrl?: string;
         candUrl?: string;
         partial?: boolean;
-        verdict?: { score?: number; scoreVersion?: number };
+        verdict?: { score?: number; scoreVersion?: number; modulesRun?: string[] };
       };
       if (raw.partial) continue;
       if (typeof raw.verdict?.score !== "number") continue;
@@ -116,6 +139,10 @@ export function findPreviousRun(
         continue;
       if (hostOf(raw.prodUrl ?? "") !== prodHost || hostOf(raw.candUrl ?? "") !== candHost)
         continue;
+      if (opts.modulesRun && opts.modulesRun.length > 0) {
+        const candidateModules = raw.verdict?.modulesRun ?? [];
+        if (!sameModuleSet(candidateModules, opts.modulesRun)) continue;
+      }
       return {
         id: raw.id ?? entry.id,
         timestamp: raw.timestamp ?? entry.timestamp,

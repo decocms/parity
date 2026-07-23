@@ -95,6 +95,21 @@ Rules:
 - Unknown module/check names in `--only`/`--skip` exit with code 2 and a
   list of valid names.
 
+### Adaptive scoring
+
+The verdict score reflects **only the modules that ran**. Run `--only e2e`
+and the score is purely about the e2e checks; add `--only e2e,seo` and the
+composite blends both, weighted by how many page-pairs each module actually
+analyzed (a module that covered more ground counts for more). `report.json`
+carries the full breakdown under `moduleVerdicts` (one entry per module:
+`score`, `status`, severity counts, `checksRun`, `pagesAnalyzed`), and the
+top-level `verdict.modulesRun` lists which modules contributed. The CLI
+summary prints a `modules: e2e 72 · seo 91 → composite 78` line, `parity pr`'s
+markdown comment gets a `### Modules` table, and the HTML report's dashboard
+shows a small score chip per module. Score trend (`previousRun`) only compares
+against a prior run that scored the **same module set** — a `--only e2e` run
+is never diffed against a full run's composite.
+
 ## Visual Diff tab
 
 When `--visual-pages > 0` AND an LLM provider is configured, the report's **Visual Diff** tab shows per page:

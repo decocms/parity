@@ -133,6 +133,21 @@ function buildPrComment(run: Run, opts: PrCommandOptions): string {
   );
   lines.push("");
 
+  // Per-module score breakdown (M3 module scoring) — additive, only shown
+  // when the run had module-scoped data (i.e. essentially always, unless
+  // no check mapped to a registered module).
+  if (run.moduleVerdicts && run.moduleVerdicts.length > 0) {
+    lines.push("### Modules");
+    lines.push("");
+    lines.push("| Module | Score | Status |");
+    lines.push("| --- | --- | --- |");
+    for (const mv of run.moduleVerdicts) {
+      const statusEmoji = mv.status === "pass" ? "✅" : mv.status === "warn" ? "⚠" : "❌";
+      lines.push(`| ${mv.module} | ${mv.score}/100 | ${statusEmoji} ${mv.status} |`);
+    }
+    lines.push("");
+  }
+
   // Top issues — grouped by root cause (same check + normalized summary),
   // sorted by severity then affected-page count.
   const topGroups = groupIssues(run.topIssues.length > 0 ? run.topIssues : run.issues).slice(0, 10);

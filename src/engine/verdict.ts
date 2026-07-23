@@ -1,3 +1,4 @@
+import { type ModuleName, moduleOfCheck } from "../checks/modules.ts";
 import type { CheckResult, Issue, Verdict } from "../types/schema.ts";
 
 /**
@@ -132,5 +133,152 @@ export function computeVerdict(
     checksPassed,
     checksFailed,
     checksSkipped,
+  };
+}
+
+/**
+ * Per-module verdict (M3 phase B — see docs/ROADMAP-1.0.md). Scopes the
+ * SAME `computeScore`/`derivePagesAnalyzed`/status-derivation logic used
+ * by `computeVerdict` to just the checks (and their issues) that belong to
+ * one module, so a run that only selected a subset of modules (`--only`)
+ * produces a score that reflects only what actually ran.
+ */
+export interface ModuleVerdict {
+  module: ModuleName;
+  score: number;
+  status: "pass" | "warn" | "fail";
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  checksRun: number;
+  pagesAnalyzed: number;
+}
+
+/**
+ * Groups `checks`/`issues` by owning module and computes a `ModuleVerdict`
+ * for each module that has at least one check present in `checks` — a
+ * module with zero checks present is simply ABSENT from the result (not a
+ * zero-score entry), which is what makes the composite "reflect only what
+ * ran". Issues are attributed via `issue.check` (every check consistently
+ * sets this to its own name — verified across all check modules), falling
+ * back to `moduleOfCheck` on the owning `CheckResult.name` for checks with
+ * no issues at all (so an all-pass module still shows up).
+ */
+export function computeModuleVerdicts(checks: CheckResult[], issues: Issue[]): ModuleVerdict[] {
+  const checksByModule = new Map<ModuleName, CheckResult[]>();
+  for (const check of checks) {
+    const mod = moduleOfCheck(check.name);
+    if (!mod) continue; // unregistered/legacy check name — not scoreable per-module
+    if (!checksByModule.has(mod)) checksByModule.set(mod, []);
+    checksByModule.get(mod)!.push(check);
+  }
+
+  const issuesByModule = new Map<ModuleName, Issue[]>();
+  for (const issue of issues) {
+    const mod = moduleOfCheck(issue.check);
+    if (!mod) continue;
+    if (!issuesByModule.has(mod)) issuesByModule.set(mod, []);
+    issuesByModule.get(mod)!.push(issue);
+  }
+
+  const result: ModuleVerdict[] = [];
+  for (const [mod, modChecks] of checksByModule) {
+    const modIssues = issuesByModule.get(mod) ?? [];
+    const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+    for (const i of modIssues) counts[i.severity]++;
+
+    const checksFailed = modChecks.filter((c) => c.status === "fail").length;
+    const checksWarn = modChecks.filter((c) => c.status === "warn").length;
+
+    const pagesAnalyzed = derivePagesAnalyzed(modChecks, modIssues);
+    let { score } = computeScore(modIssues, { pagesAnalyzed });
+
+    const status: ModuleVerdict["status"] =
+      counts.critical > 0 || checksFailed > 0
+        ? "fail"
+        : counts.high > 0 || checksWarn > 0
+          ? "warn"
+          : "pass";
+    if (status === "fail") score = Math.min(score, FAIL_SCORE_CAP);
+
+    result.push({
+      module: mod,
+      score,
+      status,
+      critical: counts.critical,
+      high: counts.high,
+      medium: counts.medium,
+      low: counts.low,
+      checksRun: modChecks.length,
+      pagesAnalyzed,
+    });
+  }
+
+  // Deterministic order for rendering/tests.
+  result.sort((a, b) => a.module.localeCompare(b.module));
+  return result;
+}
+
+/**
+ * Composite verdict built from per-module verdicts — a weighted average
+ * (weight = each module's `pagesAnalyzed`, floored at 1 so a module with 0
+ * analyzed pages still counts instead of dividing by zero / being
+ * silently dropped) rather than a flat mean, so modules that covered more
+ * ground contribute proportionally more to the headline score.
+ *
+ * The returned `Verdict` keeps the EXACT same shape `computeVerdict`
+ * returns (drop-in replacement) — `checksRun`/`checksPassed`/`checksFailed`/
+ * `checksSkipped` stay GLOBAL counts across ALL checks passed in (not just
+ * the ones that mapped to a module), for backward-compat clarity: a
+ * consumer reading `verdict.checksRun` should still see "how many checks
+ * ran in this run", not "how many were scoreable".
+ */
+export function computeCompositeVerdict(
+  moduleVerdicts: ModuleVerdict[],
+  checks: CheckResult[],
+  issues: Issue[],
+): Verdict {
+  const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const i of issues) counts[i.severity]++;
+
+  const checksPassed = checks.filter((c) => c.status === "pass").length;
+  const checksFailed = checks.filter((c) => c.status === "fail").length;
+  const checksSkipped = checks.filter((c) => c.status === "skipped").length;
+  const checksWarn = checks.filter((c) => c.status === "warn").length;
+
+  let weightedScoreSum = 0;
+  let weightSum = 0;
+  let totalPagesAnalyzed = 0;
+  for (const mv of moduleVerdicts) {
+    const weight = Math.max(1, mv.pagesAnalyzed);
+    weightedScoreSum += mv.score * weight;
+    weightSum += weight;
+    totalPagesAnalyzed = Math.max(totalPagesAnalyzed, mv.pagesAnalyzed);
+  }
+  let score = weightSum > 0 ? Math.round(weightedScoreSum / weightSum) : 100;
+
+  const status: Verdict["status"] =
+    counts.critical > 0 || checksFailed > 0 || moduleVerdicts.some((mv) => mv.status === "fail")
+      ? "fail"
+      : counts.high > 0 || checksWarn > 0 || moduleVerdicts.some((mv) => mv.status === "warn")
+        ? "warn"
+        : "pass";
+  if (status === "fail") score = Math.min(score, FAIL_SCORE_CAP);
+
+  return {
+    status,
+    score,
+    scoreVersion: SCORE_VERSION,
+    pagesAnalyzed: totalPagesAnalyzed || derivePagesAnalyzed(checks, issues),
+    critical: counts.critical,
+    high: counts.high,
+    medium: counts.medium,
+    low: counts.low,
+    checksRun: checks.length,
+    checksPassed,
+    checksFailed,
+    checksSkipped,
+    modulesRun: moduleVerdicts.map((mv) => mv.module).sort(),
   };
 }
