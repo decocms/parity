@@ -17,7 +17,7 @@ com invalidação real.
 
 - [x] Zero bugs abertos: #118 (lazy-section false positive) e nota travada em 0 (#116) fechados
 - [ ] Todos os checks verdes ponta-a-ponta em **2 migrações de referência reais** (Fresh → TanStack)
-- [ ] `--only/--skip` + score por módulo shipped e documentados
+- [x] `--only/--skip` + score por módulo shipped e documentados
 - [x] Cache de seletores com invalidação (TTL + fingerprint) shipped — validação ao vivo fica no M4
 - [x] E2E novo rodando: carrinho multi-item, cupom válido/inválido configurável, seller-null (VTEX, informativo), paginação interativa (page-link / load-more / infinite-scroll), persistência do carrinho
 - [ ] Flow `spa-navigation` + budget de `_serverFn`/preload (M2.5, #54) — fast-follow antes do M6
@@ -32,7 +32,7 @@ com invalidação real.
 | **M1 Estabilizar** | 0.12.x | Merge #116 (score v2) · fix #118 · invalidação do cache de seletores (TTL 7d + fingerprint estrutural + zod) · merge de TODAS as chaves descobertas (bug: 7 de ~14 eram descartadas) · dedupe da compaction HTML (`html-compact.ts`) · ciclo de vida learned-selectors (`origin: verified/llm-guess`, staleness por `lastValidated`) | ✅ concluído |
 | **M2 E2E completo** | 0.13.x | Split de `flows.ts` (3.9k linhas → `src/engine/flows/`) · robustez (waitForCartMutation, selectVariant no seed) · **multi-item no carrinho** · **cupom configurável** (`rc.coupon`, passo `apply-valid-coupon`) · **seller "null" VTEX via UI** (informativo, nunca bloqueia) · **paginação interativa** (3 modos, check híbrido com fallback fetch) · `verify-cart-persistence` · `set-qty-input` · `pdp-breadcrumbs` · `plp-sorting` | ✅ concluído |
 | **M2.5 SPA-nav (fast-follow, #54)** | 0.13.x | **Flow `spa-navigation`** (F5 vs navegação client-side `<Link>` — diff de DOM/sections + console, pega globals sumindo e hydration mismatch só-SPA) · **check de flood `_serverFn`/preload** (budget de requests por hover). Escopados na auditoria de issues mas não entraram no corpo principal do M2 — ficam como próximo passo antes do M6. | ⬜ |
-| **M3 Seleção + score** | 0.14.x | Registry de módulos (`e2e, seo, visual, vitals, cache, console, html, network`) · `parity run --only/--skip/--why` · prompt interativo checkbox no TTY · presets module-aware · score v2 **por módulo** + composto (nota reflete só o que rodou) · trend só entre runs comparáveis · `parity list modules --json` | ⬜ |
+| **M3 Seleção + score** | 0.14.x | Registry de módulos (`e2e, seo, visual, vitals, cache, console, html, network`, 28 checks) · `parity run --only/--skip/--why` · prompt de seleção no TTY (readline, sem lib de TUI nova) · presets module-aware · score v2 **por módulo** + composto ponderado por páginas analisadas (nota reflete só o que rodou) · trend só entre runs com o mesmo conjunto de módulos · `parity list modules --json` | ✅ concluído |
 | **M4 Descoberta v2** | 0.15.x | Descoberta multi-página (home+PLP+PDP) · confidence por chave · few-shots por plataforma · **validação ao vivo** dos seletores antes de cachear · `parity learned --validate` | ⬜ |
 | **M5 Extract** | 0.16.x | `parity extract`: evolução da máquina de `parity section`/`fix` para extração single-site — detecção automática de componentes (header/footer/nav/shelf/…), HTML + computed styles + screenshots + CSS source + **assets/links/textos**, exporters plugáveis (markdown p/ agentes de migração + JSON manifest) | ⬜ |
 | **M6 Release** | 1.0.0 | Matriz completa nas migrações de referência · freeze de flags · docs · CHANGELOG · publish npm | ⬜ |
