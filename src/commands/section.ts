@@ -1,31 +1,27 @@
 import { mkdirSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import chalk from "chalk";
-import * as cheerio from "cheerio";
 import * as diff from "diff";
-import type { BrowserContext, Page } from "playwright";
+import type { BrowserContext } from "playwright";
 import prettier from "prettier";
 import { analyzeHeatmapRegions } from "../diff/heatmap-regions.ts";
 import { assembleSectionDiffBundle } from "../diff/section-bundle.ts";
 import { diffScreenshots } from "../diff/visual.ts";
 import { launchBrowser, newContext } from "../engine/browser.ts";
-import { cropPngBuffer } from "../engine/capture-utils.ts";
 import { stabilizeCarousels } from "../engine/carousel-stabilizer.ts";
 import { scrollFullPage, waitForSkeletonsToResolve } from "../engine/collect.ts";
 import {
   type ComputedStylesNotFound,
   type ComputedStylesResult,
   SECTION_STYLE_KEYS,
-  readComputedStyles,
 } from "../engine/computed-styles.ts";
-import { type CssSource, resolveFromTrace } from "../engine/css-source-resolver.ts";
+import type { CssSource } from "../engine/css-source-resolver.ts";
+import { captureSectionArtifacts, captureSectionScreenshot } from "../engine/section-capture.ts";
 import {
   invokeUnderstandingSummary,
   isUnderstandingAvailable,
 } from "../llm/section-understanding.ts";
 import type { Viewport } from "../types/schema.ts";
-import { traceLoadedPage } from "./css-trace.ts";
 
 export interface SectionOptions {
   prod: string;
@@ -267,37 +263,23 @@ async function gatherSide(
       ]);
     }
 
-    if (opts.wantHtml) {
-      try {
-        const fullHtml = await page.content();
-        const $ = cheerio.load(fullHtml);
-        const matches = $(opts.selector);
-        if (matches.length === 0) {
-          result.htmlError = `seletor '${opts.selector}' não casou nenhum elemento`;
-        } else {
-          result.html = $.html(matches.first());
-        }
-      } catch (err) {
-        result.htmlError = `falha lendo HTML: ${(err as Error).message}`;
-      }
-    }
-
-    if (opts.wantStyles) {
-      result.styles = await readComputedStyles(page, opts.selector);
-    }
-
-    if (opts.wantCssSource) {
-      try {
-        const trace = await traceLoadedPage(page, opts.url, opts.selector);
-        if (trace.found) {
-          result.cssSources = resolveFromTrace(trace, SECTION_STYLE_KEYS);
-        } else {
-          result.cssSourceError = `tracePage não encontrou '${opts.selector}'`;
-        }
-      } catch (err) {
-        result.cssSourceError = `tracePage falhou: ${(err as Error).message}`;
-      }
-    }
+    // Per-selector reads (HTML/computed-styles/CSS-source) live in the
+    // shared `captureSectionArtifacts` primitive (M5 extraction) — this
+    // function still owns navigation + carousel/scroll/skeleton
+    // stabilization above, which is a page-level (not per-selector)
+    // concern shared with `extract`'s per-page orchestration.
+    const artifacts = await captureSectionArtifacts(page, {
+      selector: opts.selector,
+      wantHtml: opts.wantHtml,
+      wantStyles: opts.wantStyles,
+      wantCssSource: opts.wantCssSource,
+      url: opts.url,
+    });
+    result.html = artifacts.html;
+    result.htmlError = artifacts.htmlError;
+    result.styles = artifacts.styles;
+    result.cssSources = artifacts.cssSources;
+    result.cssSourceError = artifacts.cssSourceError;
 
     if (opts.wantScreenshot) {
       await captureSectionScreenshot(page, opts.selector, opts.screenshotPath).then((err) => {
@@ -310,47 +292,6 @@ async function gatherSide(
     await ctx.close().catch(() => undefined);
   }
   return result;
-}
-
-async function captureSectionScreenshot(
-  page: Page,
-  selector: string,
-  outPath: string,
-): Promise<string | null> {
-  // Issue #51: v0.10.x switched to `locator.screenshot()` which renders the
-  // element in isolation — Tailwind JIT classes and page-level CSS cascade
-  // (@media, layers, global resets) don't apply, producing screenshots that
-  // diverge from the live rendering by 80%+. We restore the v0.8.x approach:
-  // full-page screenshot WITH the page's CSS context, then crop to the
-  // section's bounding box. The `gatherSide` caller runs `scrollFullPage` +
-  // `waitForSkeletonsToResolve` before this, mirroring the visual-diff path
-  // in `capturePage`.
-  try {
-    const loc = page.locator(selector).first();
-    if ((await loc.count()) === 0) {
-      return `seletor '${selector}' não casou nenhum elemento`;
-    }
-    await loc.scrollIntoViewIfNeeded({ timeout: 3_000 }).catch(() => undefined);
-    // Order matters: `page.screenshot({ fullPage: true })` may resize the
-    // viewport to the full document height, which can shift sticky headers
-    // and vh-based sizing. We measure `boundingBox()` *after* the screenshot
-    // so the crop coordinates match the rendered PNG. Review feedback on
-    // PR #57.
-    const fullPng = await page.screenshot({
-      fullPage: true,
-      animations: "disabled",
-      timeout: 15_000,
-    });
-    const box = await loc.boundingBox({ timeout: 3_000 });
-    if (!box || box.width <= 0 || box.height <= 0) {
-      return `seletor '${selector}' não tem boundingBox visível`;
-    }
-    const cropped = cropPngBuffer(fullPng, box);
-    await writeFile(outPath, cropped);
-    return null;
-  } catch (err) {
-    return `falha no screenshot: ${(err as Error).message}`;
-  }
 }
 
 function isValidUrl(s: string): boolean {
