@@ -17,7 +17,8 @@ export type Feature =
   | "section-understanding"
   | "visual-diff"
   | "issue-aggregation"
-  | "explain";
+  | "explain"
+  | "component-detection";
 
 export const ALL_FEATURES: readonly Feature[] = [
   "selector-discovery",
@@ -29,6 +30,7 @@ export const ALL_FEATURES: readonly Feature[] = [
   "visual-diff",
   "issue-aggregation",
   "explain",
+  "component-detection",
 ];
 
 export type ModelTier = "haiku" | "sonnet" | "opus";
@@ -57,6 +59,9 @@ export const DEFAULT_FEATURE_TIER: Record<Feature, ModelTier> = {
   "visual-diff": "sonnet",
   "issue-aggregation": "sonnet",
   explain: "opus",
+  // M5 `parity extract` optional component-relabeling pass — same tier as
+  // section-understanding (reads compacted HTML, no vision needed).
+  "component-detection": "sonnet",
 };
 
 /**

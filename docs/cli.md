@@ -20,6 +20,7 @@
 | `parity html` | Dump page/selector HTML or unified diff prod×cand (prettier + jsdiff) |
 | `parity section` | Focused prod×cand diff of a section: HTML + screenshot + computed styles |
 | `parity fix` | Pixel-perfect bundle: heatmap + CSS source + LLM-ready Markdown prompt |
+| `parity extract` | Single-site AI-ready component extraction (no prod×cand) — see `docs/extract.md` |
 | `parity prompt` | Export issues as a Markdown prompt for any LLM |
 | `parity explain` | LLM deep-dive on a specific issue (needs API key) |
 | `parity learned` | Inspect the learned-selectors library |

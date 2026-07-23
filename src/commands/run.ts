@@ -1768,7 +1768,7 @@ async function fetchHomeHtml(url: string, viewport: Viewport = "desktop"): Promi
  * than exporting a fetch-coupled helper across an unrelated module boundary
  * just to reuse it.
  */
-function firstProductHrefFromPlpHtml(html: string, baseUrl: string): string | null {
+export function firstProductHrefFromPlpHtml(html: string, baseUrl: string): string | null {
   const patterns = [/href="([^"]+\/p(?:\?[^"]*|\/[^"]+|))"/i, /href="([^"]+\/products\/[^"]+)"/i];
   for (const re of patterns) {
     const match = re.exec(html);
