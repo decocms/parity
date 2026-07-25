@@ -85,15 +85,19 @@ export async function captureSectionArtifacts(
 }
 
 /**
- * Full-page screenshot cropped to a selector's bounding box — preserves
- * page-level CSS context (Tailwind JIT, @media, global resets) that an
- * isolated `locator.screenshot()` would lose (issue #51).
+ * Screenshot of a single selector.
  *
- * `preCapturedFullPng` lets a caller that needs MANY crops from the SAME
- * page (e.g. `extract` capturing N detected components on one page) take
- * the expensive full-page screenshot once and reuse it, instead of
- * re-screenshotting per selector like `gatherSide` does (which only ever
- * captures one selector per page load, so the cost never showed up there).
+ * Two modes:
+ *  - Default (section/fix): `locator.screenshot()` — isolates the element
+ *    directly. The page's CSS (Tailwind JIT, @media, resets) is already
+ *    applied at capture time, so nothing is lost; and unlike full-page+crop
+ *    it can't mis-slice below-fold sections or fixed/absolute overlays
+ *    (megamenu panel, minicart drawer). The old full-page+crop approach
+ *    cropped in document space using viewport-relative `boundingBox()`
+ *    coords, so a scrolled-to element (e.g. the footer) grabbed the TOP of
+ *    the page instead. Element screenshot sidesteps that entirely.
+ *  - `preCapturedFullPng` (extract): many crops from ONE full-page PNG — keep
+ *    cropping, since re-screenshotting per selector would be wasteful there.
  */
 export async function captureSectionScreenshot(
   page: Page,
@@ -107,24 +111,22 @@ export async function captureSectionScreenshot(
       return `seletor '${selector}' não casou nenhum elemento`;
     }
     await loc.scrollIntoViewIfNeeded({ timeout: 3_000 }).catch(() => undefined);
-    // Order matters: `page.screenshot({ fullPage: true })` may resize the
-    // viewport to the full document height, which can shift sticky headers
-    // and vh-based sizing. We measure `boundingBox()` *after* the screenshot
-    // so the crop coordinates match the rendered PNG. Review feedback on
-    // PR #57.
-    const fullPng =
-      preCapturedFullPng ??
-      (await page.screenshot({
-        fullPage: true,
-        animations: "disabled",
-        timeout: 15_000,
-      }));
+
+    if (preCapturedFullPng) {
+      const box = await loc.boundingBox({ timeout: 3_000 });
+      if (!box || box.width <= 0 || box.height <= 0) {
+        return `seletor '${selector}' não tem boundingBox visível`;
+      }
+      const cropped = cropPngBuffer(preCapturedFullPng, box);
+      await writeFile(outPath, cropped);
+      return null;
+    }
+
     const box = await loc.boundingBox({ timeout: 3_000 });
     if (!box || box.width <= 0 || box.height <= 0) {
       return `seletor '${selector}' não tem boundingBox visível`;
     }
-    const cropped = cropPngBuffer(fullPng, box);
-    await writeFile(outPath, cropped);
+    await loc.screenshot({ path: outPath, animations: "disabled", timeout: 15_000 });
     return null;
   } catch (err) {
     return `falha no screenshot: ${(err as Error).message}`;

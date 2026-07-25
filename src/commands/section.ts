@@ -16,7 +16,9 @@ import {
   SECTION_STYLE_KEYS,
 } from "../engine/computed-styles.ts";
 import type { CssSource } from "../engine/css-source-resolver.ts";
+import { type Recipe, type RecipeStep, loadRecipe } from "../engine/recipe.ts";
 import { captureSectionArtifacts, captureSectionScreenshot } from "../engine/section-capture.ts";
+import { runRecipeSteps } from "../engine/section-steps.ts";
 import {
   invokeUnderstandingSummary,
   isUnderstandingAvailable,
@@ -24,6 +26,12 @@ import {
 import type { Viewport } from "../types/schema.ts";
 
 export interface SectionOptions {
+  /** Path to a recipe JSON that drives prod+cand to an interactive state.
+   * When set, it supplies prod/cand urls, per-side selectors, viewport,
+   * steps and maxPctDiff — the CLI flags below become optional overrides. */
+  recipe?: string;
+  /** Convergence gate: exit 0 when heatmap %-diff ≤ this (needs --heatmap). */
+  maxPctDiff?: string;
   prod: string;
   cand: string;
   selector: string;
@@ -70,9 +78,38 @@ export interface SectionOptions {
  * me everything about this section" invocation.
  */
 export async function sectionCommand(opts: SectionOptions): Promise<number> {
-  const viewport = parseViewport(opts.viewport);
+  // A recipe (when given) supplies urls / per-side selectors / viewport /
+  // interaction steps / maxPctDiff; the CLI flags act as fallbacks.
+  let recipe: Recipe | null = null;
+  if (opts.recipe) {
+    try {
+      recipe = loadRecipe(opts.recipe);
+    } catch (err) {
+      console.error(chalk.red((err as Error).message));
+      return 2;
+    }
+  }
+  const eff = {
+    prod: recipe?.prod.url ?? opts.prod,
+    cand: recipe?.cand.url ?? opts.cand,
+    prodSelector: recipe?.prod.selector ?? recipe?.selector ?? opts.selector,
+    candSelector: recipe?.cand.selector ?? recipe?.selector ?? opts.selector,
+    // shared label used for hashing filenames and the printed header
+    selector: recipe?.selector ?? recipe?.prod.selector ?? opts.selector,
+    viewportRaw: recipe?.viewport ?? opts.viewport,
+    prodSteps: (recipe?.prod.steps ?? []) as RecipeStep[],
+    candSteps: (recipe?.cand.steps ?? []) as RecipeStep[],
+  };
+  const displayOpts: SectionOptions = {
+    ...opts,
+    prod: eff.prod,
+    cand: eff.cand,
+    selector: eff.selector,
+  };
+
+  const viewport = parseViewport(eff.viewportRaw);
   if (!viewport) {
-    console.error(chalk.red(`viewport inválido: ${opts.viewport} (use mobile|desktop|tablet)`));
+    console.error(chalk.red(`viewport inválido: ${eff.viewportRaw} (use mobile|desktop|tablet)`));
     return 2;
   }
   const waitMs = Number.parseInt(opts.wait, 10);
@@ -80,12 +117,19 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
     console.error(chalk.red(`--wait inválido: ${opts.wait}`));
     return 2;
   }
-  if (!opts.selector || opts.selector.trim().length === 0) {
-    console.error(chalk.red("--selector é obrigatório"));
+  if (!eff.selector || eff.selector.trim().length === 0) {
+    console.error(chalk.red("--selector é obrigatório (ou use --recipe)"));
     return 2;
   }
-  if (!isValidUrl(opts.prod) || !isValidUrl(opts.cand)) {
-    console.error(chalk.red("--prod ou --cand inválido"));
+  if (!isValidUrl(eff.prod) || !isValidUrl(eff.cand)) {
+    console.error(chalk.red("--prod ou --cand inválido (ou use --recipe)"));
+    return 2;
+  }
+  // Convergence gate threshold: --max-pct-diff overrides recipe.maxPctDiff.
+  const maxPctDiff =
+    opts.maxPctDiff !== undefined ? Number.parseFloat(opts.maxPctDiff) : recipe?.maxPctDiff;
+  if (maxPctDiff !== undefined && (!Number.isFinite(maxPctDiff) || maxPctDiff < 0)) {
+    console.error(chalk.red(`--max-pct-diff inválido: ${opts.maxPctDiff}`));
     return 2;
   }
   // Default behaviour: if user passed NONE of the facet flags, enable all.
@@ -103,12 +147,15 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
     prompt: Boolean(opts.prompt) || Boolean(opts.llmSummary),
     llmSummary: Boolean(opts.llmSummary),
   };
+  // The convergence gate reads the heatmap %-diff, so force it (and thus the
+  // screenshots) on whenever a threshold is set.
+  if (maxPctDiff !== undefined) want.heatmap = true;
   // Screenshots are a hard prerequisite for the heatmap; force them on
   // silently so `--heatmap` alone "just works".
   if (want.heatmap) want.screenshot = true;
 
   mkdirSync(opts.outDir, { recursive: true });
-  const hash = hashSelector(opts.selector);
+  const hash = hashSelector(eff.selector);
   const filePrefix = `section-${hash}-${viewport}`;
   const screenshotPaths = {
     prod: resolve(opts.outDir, `${filePrefix}-prod.png`),
@@ -120,10 +167,11 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
   try {
     const [prodSide, candSide] = await Promise.all([
       gatherSide(browser, {
-        url: opts.prod,
+        url: eff.prod,
         viewport,
         waitMs,
-        selector: opts.selector,
+        selector: eff.prodSelector,
+        steps: eff.prodSteps,
         wantScreenshot: want.screenshot,
         wantStyles: want.styles,
         wantHtml: want.html,
@@ -131,10 +179,11 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
         screenshotPath: screenshotPaths.prod,
       }),
       gatherSide(browser, {
-        url: opts.cand,
+        url: eff.cand,
         viewport,
         waitMs,
-        selector: opts.selector,
+        selector: eff.candSelector,
+        steps: eff.candSteps,
         wantScreenshot: want.screenshot,
         wantStyles: want.styles,
         wantHtml: want.html,
@@ -149,7 +198,7 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
 
     const bundlePaths = want.prompt
       ? await buildPromptBundle({
-          opts,
+          opts: displayOpts,
           viewport,
           prodSide,
           candSide,
@@ -159,6 +208,14 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
           filePrefix,
         })
       : null;
+
+    // Convergence gate: when a threshold is set, the exit code is driven by
+    // the heatmap %-diff (the loop's stop signal), not the strict verdict.
+    const pctDiff = heatmap?.analysis ? heatmap.analysis.pctDiff * 100 : null;
+    const gate =
+      maxPctDiff !== undefined && pctDiff !== null ? (pctDiff <= maxPctDiff ? 0 : 1) : null;
+    const exitCode = gate ?? verdict(prodSide, candSide);
+    const converged = gate === 0;
 
     let llmSummary: string | null = null;
     if (want.llmSummary && bundlePaths) {
@@ -172,9 +229,10 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
     if (opts.json) {
       console.log(
         JSON.stringify({
-          prod: opts.prod,
-          cand: opts.cand,
-          selector: opts.selector,
+          prod: eff.prod,
+          cand: eff.cand,
+          prodSelector: eff.prodSelector,
+          candSelector: eff.candSelector,
           viewport,
           prodSide,
           candSide,
@@ -183,15 +241,27 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
           heatmapPath: heatmap?.wrote ? heatmapPath : null,
           bundle: bundlePaths,
           llmSummary,
+          pctDiff,
+          maxPctDiff: maxPctDiff ?? null,
+          converged,
+          exitCode,
         }),
       );
-      return verdict(prodSide, candSide);
+      return exitCode;
     }
-    await printResults({ opts, viewport, prodSide, candSide, screenshotPaths, want });
+    await printResults({
+      opts: displayOpts,
+      viewport,
+      prodSide,
+      candSide,
+      screenshotPaths,
+      want,
+    });
     if (heatmap) printHeatmap(heatmap, heatmapPath);
     if (bundlePaths) printBundlePaths(bundlePaths);
     if (llmSummary) printLlmSummary(llmSummary);
-    return verdict(prodSide, candSide);
+    if (gate !== null) printGate(pctDiff, maxPctDiff as number, converged);
+    return exitCode;
   } finally {
     await browser.close().catch(() => undefined);
   }
@@ -215,6 +285,7 @@ async function gatherSide(
     viewport: Viewport;
     waitMs: number;
     selector: string;
+    steps: RecipeStep[];
     wantHtml: boolean;
     wantScreenshot: boolean;
     wantStyles: boolean;
@@ -251,7 +322,13 @@ async function gatherSide(
     // Budget: ~37s worst-case per side (30s scroll + 5s skeleton + 2s
     // race margin). Because `gatherSide` runs prod and cand in parallel,
     // wall-clock impact on the `parity section` command is ~37s, not 74s.
-    if (opts.wantScreenshot) {
+    if (opts.steps.length > 0) {
+      // Recipe drives the page to the target interactive state (hover
+      // megamenu, click cart, inject orderForm…). When steps are present we
+      // trust them for readiness and SKIP the full-page lazy scroll, which
+      // would otherwise scroll away from / dismiss an open overlay.
+      await runRecipeSteps(page, opts.steps);
+    } else if (opts.wantScreenshot) {
       const scrollBudget = 30_000;
       await Promise.race([
         scrollFullPage(page, scrollBudget).catch(() => undefined),
@@ -652,5 +729,17 @@ function printBundlePaths(b: { jsonPath: string; markdownPath: string; summary: 
 function printLlmSummary(summary: string): void {
   console.log(chalk.bold("  What the LLM understood"));
   console.log(`    ${summary.split("\n").join("\n    ")}`);
+  console.log("");
+}
+
+function printGate(pctDiff: number | null, maxPctDiff: number, converged: boolean): void {
+  console.log(chalk.bold("  Convergence gate"));
+  const pct = pctDiff === null ? "n/a" : `${pctDiff.toFixed(2)}%`;
+  const line = `    pctDiff=${pct}  threshold=${maxPctDiff}%  →  `;
+  console.log(
+    converged
+      ? line + chalk.green("CONVERGED (exit 0)")
+      : line + chalk.red("ACIMA DO LIMITE (exit 1)"),
+  );
   console.log("");
 }

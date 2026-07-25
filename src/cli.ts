@@ -570,9 +570,17 @@ program
   .description(
     "Focused prod×cand comparison of one section: HTML diff + screenshot + computed-styles diff. No flags = all 3 facets. Designed for the 'in DOM but invisible' debug loop (issue #31).",
   )
-  .requiredOption("--prod <url>", "Production URL (base, e.g. https://www.example.com)")
-  .requiredOption("--cand <url>", "Candidate URL (base, e.g. https://example.deco-cx.workers.dev)")
-  .requiredOption("--selector <sel>", "CSS selector for the section to compare")
+  .option("--prod <url>", "Production URL (base, e.g. https://www.example.com)")
+  .option("--cand <url>", "Candidate URL (base, e.g. https://example.deco-cx.workers.dev)")
+  .option("--selector <sel>", "CSS selector for the section to compare")
+  .option(
+    "--recipe <file>",
+    "Path to a recipe JSON that drives prod+cand to an interactive state (hover megamenu, open minicart) before diffing. Supplies urls/selectors/viewport/steps; --prod/--cand/--selector become optional overrides.",
+  )
+  .option(
+    "--max-pct-diff <n>",
+    "Convergence gate: exit 0 when the heatmap %-pixels-differing ≤ this (forces --heatmap on). The loop's stop signal.",
+  )
   .option(
     "--output-html",
     "Include the HTML diff facet (default: on if no facet flag passed)",
@@ -607,6 +615,8 @@ program
   .action(async (opts) => {
     process.exit(
       await sectionCommand({
+        recipe: opts.recipe,
+        maxPctDiff: opts.maxPctDiff,
         prod: opts.prod,
         cand: opts.cand,
         selector: opts.selector,
@@ -630,9 +640,17 @@ program
   .description(
     "Pixel-perfect debug shortcut: run `parity section` with ALL signals on (HTML + screenshot + computed-styles + heatmap + CSS source) and emit an LLM-ready Markdown bundle. When ANTHROPIC_API_KEY is set, also prints a 1-paragraph summary of what Claude understood from the signals — does NOT generate a patch (you ask for that in a follow-up turn).",
   )
-  .requiredOption("--prod <url>", "Production URL (source of truth)")
-  .requiredOption("--cand <url>", "Candidate URL (migrated)")
-  .requiredOption("--selector <sel>", "CSS selector for the section to fix")
+  .option("--prod <url>", "Production URL (source of truth)")
+  .option("--cand <url>", "Candidate URL (migrated)")
+  .option("--selector <sel>", "CSS selector for the section to fix")
+  .option(
+    "--recipe <file>",
+    "Path to a recipe JSON that drives prod+cand to an interactive state before diffing. Supplies urls/selectors/viewport/steps.",
+  )
+  .option(
+    "--max-pct-diff <n>",
+    "Convergence gate: exit 0 when the heatmap %-pixels-differing ≤ this.",
+  )
   .option("--viewport <viewport>", "mobile | desktop | tablet", "mobile")
   .option("--wait <ms>", "Extra ms after networkidle so hydration settles", "2000")
   .option("--out-dir <dir>", "Where to write the bundle + screenshots", "./parity-output/sections")
@@ -649,6 +667,8 @@ program
     }
     process.exit(
       await fixCommand({
+        recipe: opts.recipe,
+        maxPctDiff: opts.maxPctDiff,
         prod: opts.prod,
         cand: opts.cand,
         selector: opts.selector,

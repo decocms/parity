@@ -1,6 +1,8 @@
 import { type SectionOptions, sectionCommand } from "./section.ts";
 
 export interface FixOptions {
+  recipe?: string;
+  maxPctDiff?: string;
   prod: string;
   cand: string;
   selector: string;
@@ -30,6 +32,8 @@ export interface FixOptions {
  */
 export async function fixCommand(opts: FixOptions): Promise<number> {
   const sectionOpts: SectionOptions = {
+    recipe: opts.recipe,
+    maxPctDiff: opts.maxPctDiff,
     prod: opts.prod,
     cand: opts.cand,
     selector: opts.selector,
