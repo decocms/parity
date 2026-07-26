@@ -18,6 +18,7 @@
 | `parity check` | Run a single check (`<name>`) — skips sitemap + LLM aggregation; sub-10s loop |
 | `parity console` | Sub-10s capture of console errors/warnings + network failures for one URL |
 | `parity html` | Dump page/selector HTML or unified diff prod×cand (prettier + jsdiff) |
+| `parity css-trace` | Inspect which CSS rules affect a DOM element; single-URL rule listing or prod×cand computed-style diff |
 | `parity section` | Focused prod×cand diff of a section: HTML + screenshot + computed styles |
 | `parity fix` | Pixel-perfect bundle: heatmap + CSS source + LLM-ready Markdown prompt |
 | `parity extract` | Single-site AI-ready component extraction (no prod×cand) — see `docs/extract.md` |
@@ -40,6 +41,29 @@ Run any command with `--help` for the full flag list.
 
 - `--X` (no `no-` prefix) → enable / opt-in (default OFF unless preset overrides)
 - `--no-X` → disable / opt-out (default ON unless preset overrides)
+
+## Other `parity run` flags
+
+| Flag | What it does |
+| --- | --- |
+| `--fail-on <severities>` | Comma-separated severities that flip the exit code to 1 (default: `critical`) |
+| `--timeout <minutes>` | Hard wall-clock budget for the whole run; writes a partial report on expiry |
+| `--llm-timeout <seconds>` | Per-call budget for the LLM aggregation pass |
+| `--llm <provider>` | Force a provider: `anthropic`, `openrouter`, `claude-code`, or `none` (offline) |
+| `--llm-model <overrides>` | Per-feature model override string (see `--help` for syntax) |
+| `--llm-tier-default <tier>` | Default model tier (`haiku`/`sonnet`/`opus`) when a feature has no explicit override |
+| `--llm-model-default <model>` | Default concrete model id, overriding the tier |
+| `--refresh-selectors` | Bypass the selector-discovery cache and re-run LLM discovery |
+| `--no-learn` | Skip learned-selectors promotion for this run |
+| `--no-cache` | Disable the visual-diff verdict cache |
+| `--clear-cache` | Wipe the visual-diff verdict cache before running |
+| `--no-visual-diff` | Skip the visual-diff capture/analysis pass entirely |
+| `--max-viewport-concurrency <n>` | How many viewports run in parallel (default 2) — lower this on resource-constrained machines if a full run stalls |
+| `--pages-file <path>` | Extra URLs (one per line) to fold into the vitals/visual sitemap crawl |
+| `--accept-prod-quirks` | Demote prod-side cart-empty journey failures (VTEX session quirk) from failed to skipped — see issue #12 |
+| `--json <path\|->` | Stream JSONL progress (one line per check/metadata) to a file or stdout (`-`) for agents/scripts |
+| `--pt` | Tell the LLM to respond in Brazilian Portuguese |
+| `--no-interactive` | Disable the interactive selector/module prompts that auto-fire in a TTY |
 
 ## Module selection: `--only`, `--skip`, `--why`
 
