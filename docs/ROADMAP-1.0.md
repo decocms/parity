@@ -20,7 +20,7 @@ com invalidação real.
 - [x] `--only/--skip` + score por módulo shipped e documentados
 - [x] Cache de seletores com invalidação (TTL + fingerprint) + validação ao vivo shipped
 - [x] E2E novo rodando: carrinho multi-item, cupom válido/inválido configurável, seller-null (VTEX, informativo), paginação interativa (page-link / load-more / infinite-scroll), persistência do carrinho
-- [ ] Flow `spa-navigation` + budget de `_serverFn`/preload (M2.5, #54) — fast-follow antes do M6
+- [x] Flow `spa-navigation` + budget de `_serverFn`/preload (M2.5, #54)
 - [ ] `parity extract` gerando bundle usável em **3 lojas reais**
 - [ ] Docs atualizadas: `cli.md`, `checks.md`, `config.md` + novos `modules.md`, `extract.md`
 - [ ] Suíte vitest verde; schema do report/JSONL documentado como estável (política additive-only)
@@ -31,7 +31,7 @@ com invalidação real.
 | --- | --- | --- | --- |
 | **M1 Estabilizar** | 0.12.x | Merge #116 (score v2) · fix #118 · invalidação do cache de seletores (TTL 7d + fingerprint estrutural + zod) · merge de TODAS as chaves descobertas (bug: 7 de ~14 eram descartadas) · dedupe da compaction HTML (`html-compact.ts`) · ciclo de vida learned-selectors (`origin: verified/llm-guess`, staleness por `lastValidated`) | ✅ concluído |
 | **M2 E2E completo** | 0.13.x | Split de `flows.ts` (3.9k linhas → `src/engine/flows/`) · robustez (waitForCartMutation, selectVariant no seed) · **multi-item no carrinho** · **cupom configurável** (`rc.coupon`, passo `apply-valid-coupon`) · **seller "null" VTEX via UI** (informativo, nunca bloqueia) · **paginação interativa** (3 modos, check híbrido com fallback fetch) · `verify-cart-persistence` · `set-qty-input` · `pdp-breadcrumbs` · `plp-sorting` | ✅ concluído |
-| **M2.5 SPA-nav (fast-follow, #54)** | 0.13.x | **Flow `spa-navigation`** (F5 vs navegação client-side `<Link>` — diff de DOM/sections + console, pega globals sumindo e hydration mismatch só-SPA) · **check de flood `_serverFn`/preload** (budget de requests por hover). Escopados na auditoria de issues mas não entraram no corpo principal do M2 — ficam como próximo passo antes do M6. | ⬜ |
+| **M2.5 SPA-nav (fast-follow, #54)** | 0.13.x | **Flow `spa-navigation`** (F5 vs navegação client-side `<Link>` real — detecção SPA/full-reload via marcador de contexto JS, sem falso-positivo — diff de section-markers + console de hidratação, pega globals sumindo e hydration mismatch só-SPA) · **check `serverfn-hover-flood`** (novo passo `hover-preload-budget` no `flowPlp`, budget/pattern configuráveis via `rc.serverFnFloodBudget`/`rc.serverFnPattern`, degrada limpo em sites não-TanStack). Debug bridge e diff pre/post-hydrate completo continuam pós-1.0 (dependem de suporte no deco-start). | ✅ concluído |
 | **M3 Seleção + score** | 0.14.x | Registry de módulos (`e2e, seo, visual, vitals, cache, console, html, network`, 28 checks) · `parity run --only/--skip/--why` · prompt de seleção no TTY (readline, sem lib de TUI nova) · presets module-aware · score v2 **por módulo** + composto ponderado por páginas analisadas (nota reflete só o que rodou) · trend só entre runs com o mesmo conjunto de módulos · `parity list modules --json` | ✅ concluído |
 | **M4 Descoberta v2** | 0.15.x | Descoberta multi-página (home+PLP+PDP, seções rotuladas no prompt) · sinal de confidence por chave (`low_confidence_keys`) · **validação ao vivo** dos seletores antes de promover a learned-selectors · seletor que falha validação é descartado do run · `parity learned validate --url` | ✅ concluído |
 | **M5 Extract** | 0.16.x | `parity extract`: evolução da máquina de `parity section`/`fix` (via `captureSectionArtifacts` extraído, sem duplicar) para extração single-site — detecção automática de componentes (heurística + dedup por containment; refino LLM opcional relabela, ainda sem merge/split), HTML + computed styles + screenshots + **assets/links/textos**, exporters plugáveis (markdown p/ agentes de migração + JSON manifest). Testado ao vivo contra wikipedia.org; validação em 3 lojas reais fica no M6. | ✅ concluído |
@@ -43,12 +43,13 @@ Varredura de todas as issues (abertas e fechadas) atrás de pistas de bugs e
 melhorias ainda não endereçadas:
 
 - **#54 (Bagaggio post-mortem)** — a fonte mais rica: 6 classes de bugs que o
-  parity não pegou. Incorporado ao M2: flow `spa-navigation` (prioridade
-  máxima segundo a própria issue) e budget de `_serverFn`/preload. Já coberto
+  parity não pegou. **M2.5 concluído**: flow `spa-navigation` (prioridade
+  máxima segundo a própria issue) e check `serverfn-hover-flood`. Já coberto
   desde então: `picture-missing-dims` (CLS de `<img>` sem dims), classificação
-  de console hydration. **Pós-1.0**: debug bridge (`window.__DECO_DEBUG__`,
-  depende de suporte no deco-start), diff pre/post-hydrate completo,
-  atribuição de CLS por elemento, cenário de pressão de memória (worker OOM).
+  de console hydration (`#418`/`#423`/`#425` inclusive). **Pós-1.0**: debug
+  bridge (`window.__DECO_DEBUG__`, depende de suporte no deco-start), diff
+  pre/post-hydrate completo, atribuição de CLS por elemento, cenário de
+  pressão de memória (worker OOM).
 - **#102** — tier de modelo importa: selector-discovery/step-recovery em Haiku
   regrediu a jornada; ficaram em Sonnet. O M4 (descoberta v2) mantém Sonnet e
   mede antes de qualquer downgrade de custo.
