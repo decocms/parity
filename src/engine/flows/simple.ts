@@ -1,5 +1,9 @@
-import type { Page } from "playwright";
+import type { Page, Request } from "playwright";
 import { hrefOverlap, urlGainedPageIndicator } from "../../checks/lib/pagination-overlap.ts";
+import {
+  DEFAULT_SERVERFN_PATTERN,
+  countServerFnRequests,
+} from "../../checks/lib/serverfn-flood.ts";
 import type { PageCapture, StepCapture } from "../../types/schema.ts";
 import { capturePage } from "../collect.ts";
 import type { FlowContext, FlowResult } from "./shared.ts";
@@ -90,6 +94,71 @@ async function detectPaginationMode(page: Page, ctx: FlowContext): Promise<Pagin
   return classifyPaginationMode({ hasNextLink, hasLoadMoreButton, countGrewOnScroll });
 }
 
+/**
+ * `hover-preload-budget` step (issue #54, 3/D). Hovers over up to 8
+ * product cards ~150ms apart and counts how many outbound requests match
+ * the configured server-fn pattern (default `_serverFn`, TanStack Start's
+ * convention) within a ~2s window after the last hover. Records the raw
+ * count in `StepCapture.detail` — the pass/fail budget check lives in
+ * `serverfn-hover-flood.ts` so this step is pure data collection and never
+ * fails on its own (prod/Fresh sites simply record 0 and the check skips).
+ */
+async function hoverPreloadBudgetStep(
+  plp: Page,
+  ctx: FlowContext,
+  stepNum: number,
+): Promise<StepCapture> {
+  const t = Date.now();
+  const patternSource = ctx.rc.serverFnPattern ?? DEFAULT_SERVERFN_PATTERN;
+  const seenUrls: string[] = [];
+  const onRequest = (req: Request) => {
+    seenUrls.push(req.url());
+  };
+  plp.on("request", onRequest);
+
+  const cardSelectors = selFor(ctx, "productCard");
+  let hoveredCount = 0;
+  for (const sel of cardSelectors) {
+    if (hoveredCount >= 8) break;
+    const count = await plp
+      .locator(sel)
+      .count()
+      .catch(() => 0);
+    for (let i = 0; i < count && hoveredCount < 8; i++) {
+      const hovered = await plp
+        .locator(sel)
+        .nth(i)
+        .hover({ timeout: 1_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (hovered) hoveredCount++;
+      await plp.waitForTimeout(150);
+    }
+  }
+  // Let any preload requests fired by the last hover land within their
+  // typical settle window before we stop listening.
+  await withCap(plp.waitForTimeout(2_000), 3_000, undefined);
+  plp.off("request", onRequest);
+
+  const serverFnCount = countServerFnRequests(seenUrls, patternSource);
+  const status: StepCapture["status"] = hoveredCount === 0 ? "skipped" : "ok";
+  return {
+    step: stepNum,
+    name: "hover-preload-budget",
+    side: ctx.side,
+    viewport: ctx.viewport,
+    status,
+    durationMs: Date.now() - t,
+    screenshotPath: "",
+    note: hoveredCount === 0 ? "nenhum product card encontrado para hover" : undefined,
+    detail: { hoveredCount, serverFnRequestCount: serverFnCount, pattern: patternSource },
+    actionDescription:
+      hoveredCount > 0
+        ? `Hover em ${hoveredCount} product card(s) — ${serverFnCount} request(s) "${patternSource}" observada(s)`
+        : "Sem product cards para hover — step pulado",
+  };
+}
+
 export async function flowPlp(ctx: FlowContext): Promise<FlowResult> {
   const steps: StepCapture[] = [];
   const home = await ctx.ctx.newPage();
@@ -153,6 +222,7 @@ export async function flowPlp(ctx: FlowContext): Promise<FlowResult> {
         note: "nothing to verify — mode=none",
         detail: { mode },
       });
+      steps.push(await hoverPreloadBudgetStep(plp, ctx, 4));
       return { pages, steps };
     }
 
@@ -237,6 +307,9 @@ export async function flowPlp(ctx: FlowContext): Promise<FlowResult> {
         ? `Paginação verificada (modo=${mode}, overlap=${overlap.toFixed(2)})`
         : `Paginação falhou na verificação (modo=${mode}, overlap=${overlap.toFixed(2)})`,
     });
+
+    // Step 4: hover-preload-budget
+    steps.push(await hoverPreloadBudgetStep(plp, ctx, 4));
 
     return { pages, steps };
   } finally {

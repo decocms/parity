@@ -5,6 +5,7 @@ import { flowPurchaseJourney } from "./purchase-journey.ts";
 import { flowSearch } from "./search.ts";
 import type { FlowContext } from "./shared.ts";
 import { flowHomepage, flowPdp, flowPlp } from "./simple.ts";
+import { flowSpaNavigation } from "./spa-navigation.ts";
 
 export { collectCandidateLinks, findElement } from "./shared.ts";
 export type { FlowContext, StepActionResult, StepProgressEvent } from "./shared.ts";
@@ -33,6 +34,7 @@ const FLOW_DEADLINE_MS: Record<FlowName, number> = {
   search: 300_000, // 6 steps (home + autocomplete + results + no-results + empty)
   "cart-interactions": 360_000, // 13 steps (seed + multi-item add/validate + persistence reload + qty +/- + qty-input + coupon + VTEX seller-null probe + remove) — one extra PLP+PDP round trip plus a page reload
   login: 180_000, // 5 steps (gated, only with credentials)
+  "spa-navigation": 120_000, // 3 steps (F5 load + click-nav + verify F5 of destination) — lighter than purchase-journey
 };
 
 /**
@@ -73,6 +75,10 @@ export async function runFlow(flow: FlowName, ctx: FlowContext): Promise<FlowCap
         }
         case "login": {
           const { pages, steps } = await flowLogin(ctx);
+          return finalize(flow, ctx, pages, steps, start);
+        }
+        case "spa-navigation": {
+          const { pages, steps } = await flowSpaNavigation(ctx);
           return finalize(flow, ctx, pages, steps, start);
         }
       }

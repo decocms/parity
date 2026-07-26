@@ -33,6 +33,8 @@ import { searchNoResults } from "./search-no-results.ts";
 import { searchPresence } from "./search-presence.ts";
 import { searchResults } from "./search-results.ts";
 import { seoDeepAudit } from "./seo-deep-audit.ts";
+import { serverFnHoverFlood } from "./serverfn-hover-flood.ts";
+import { spaNavigationFlow } from "./spa-navigation-flow.ts";
 import { visualRegressionKeyframes } from "./visual-regression.ts";
 import { webVitalsMobile } from "./web-vitals.ts";
 
@@ -94,6 +96,8 @@ export const ALL_CHECKS: Check[] = [
   plpPagination,
   pdpBreadcrumbs,
   plpSorting,
+  spaNavigationFlow,
+  serverFnHoverFlood,
 ];
 
 /**
@@ -134,6 +138,8 @@ export const ALL_CHECKS_BY_NAME: Record<string, Check> = {
   "plp-pagination": plpPagination,
   "pdp-breadcrumbs": pdpBreadcrumbs,
   "plp-sorting": plpSorting,
+  "spa-navigation-flow": spaNavigationFlow,
+  "serverfn-hover-flood": serverFnHoverFlood,
 };
 
 /**
@@ -150,6 +156,8 @@ export const FLOW_DEPENDENT_CHECKS: ReadonlySet<string> = new Set([
   "search-no-results",
   "cart-interactions-flow",
   "login-flow",
+  "spa-navigation-flow",
+  "serverfn-hover-flood",
 ]);
 
 /**

@@ -37,5 +37,7 @@ check-name side.
 | **Picture missing dims**      | Static CLS detector — `<picture>` without explicit width/height        | html |
 | **Lazy sections eager**       | Detects intentional eager rendering of "lazy" sections                 | html |
 | **Cart reveal mode**          | prod/cand cart-reveal markup intent matches                            | e2e |
+| **SPA navigation** _(M2.5, issue #54)_ | F5-load a category, click to another route (client-side, not `page.goto`), then verify the SPA-navigated render didn't drop CMS sections vs a plain F5 of the same destination; also flags hydration-classified console errors during the nav itself | e2e |
+| **Server-fn hover flood** _(M2.5, issue #54)_ | Hovering ~8 product cards shouldn't fire more than a configurable budget (default 10) of `_serverFn`/preload-shaped requests — catches TanStack `preload="intent"` flooding the worker | e2e |
 
 All results are aggregated (optionally via Claude) and ranked by severity. Each issue includes screenshots, reproduction, and a suggested fix.

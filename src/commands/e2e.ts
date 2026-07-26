@@ -49,6 +49,7 @@ const DEFAULT_E2E_FLOWS: FlowName[] = [
   "purchase-journey",
   "search",
   "cart-interactions",
+  "spa-navigation",
 ];
 
 /**
@@ -304,6 +305,7 @@ function parseFlows(raw: string | undefined): FlowName[] {
     "search",
     "cart-interactions",
     "login",
+    "spa-navigation",
   ];
   return list.filter((f) => valid.includes(f));
 }

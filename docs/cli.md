@@ -43,7 +43,7 @@ Run any command with `--help` for the full flag list.
 
 ## Module selection: `--only`, `--skip`, `--why`
 
-`parity run` groups its ~28 checks into 8 **modules** so you can scope a run
+`parity run` groups its ~30 checks into 8 **modules** so you can scope a run
 to just the part you care about — lighter and faster than a full run.
 `parity list modules` prints the current mapping (add `--json` for
 structured output); `docs/checks.md` also has a Module column for the
@@ -51,7 +51,7 @@ check-name → module direction.
 
 | Module | Covers |
 | --- | --- |
-| `e2e` | Functional flows: purchase journey, search, cart interactions, login, PDP gallery/breadcrumbs, PLP sorting |
+| `e2e` | Functional flows: purchase journey, search, cart interactions, login, PDP gallery/breadcrumbs, PLP sorting, SPA navigation, server-fn hover flood |
 | `seo` | Meta/SEO parity, deep audit, 404 handling, footer links, pagination, HTTP status |
 | `visual` | Visual regression (LLM Vision), banner aspect ratio, cookie/CEP modal CLS |
 | `vitals` | Web Vitals (mobile) |
@@ -144,7 +144,7 @@ If `ANTHROPIC_API_KEY` is set, the LLM is invoked automatically and prints a one
 
 ## `parity e2e` — single-site functional run
 
-The `audit` command runs absolute checks (vitals, console, network, images, SEO). `parity e2e` runs **all the functional flows** (homepage, plp, pdp, purchase-journey, search, cart-interactions, optionally login) against a single URL plus all parity checks in single-site mode.
+The `audit` command runs absolute checks (vitals, console, network, images, SEO). `parity e2e` runs **all the functional flows** (homepage, plp, pdp, purchase-journey, search, cart-interactions, spa-navigation, optionally login) against a single URL plus all parity checks in single-site mode.
 
 ```bash
 parity e2e --url https://www.example.com
