@@ -36,9 +36,24 @@ Selector overrides and run defaults. Placed at the project root.
   "coupon": {
     "invalidCode": "INVALIDCOUPON123-XYZ",
     "validCode": "PARITY10"
-  }
+  },
+  "serverFnFloodBudget": 10,
+  "serverFnPattern": "_serverFn"
 }
 ```
+
+> `selectors` has ~28 keys total (cart/PDP-gallery/login/pagination/search
+> included) — the block above shows the common ones. Run `parity learned
+> stats` or check `ParityRc` in `src/types/schema.ts` for the full list; any
+> key you don't set falls back to defaults → learned-selectors → LLM
+> discovery, in that order.
+
+`serverFnFloodBudget` / `serverFnPattern` configure the `serverfn-hover-flood`
+check (issue #54): hovering a handful of PLP product cards shouldn't fire
+more than `serverFnFloodBudget` (default 10) requests matching
+`serverFnPattern` (default `"_serverFn"`, TanStack Start's server-fn route
+convention — override it if your framework uses a different one). The check
+skips cleanly on sites where the pattern never matches (e.g. Fresh/non-SPA).
 
 `coupon.invalidCode` overrides the default code used by the `apply-invalid-coupon`
 step. `coupon.validCode` is opt-in: when set, the cart-interactions flow also

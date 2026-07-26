@@ -19,7 +19,8 @@ check-name side.
 | Network summary               | Request count / bytes / cache hit rate                                 | network |
 | Web Vitals                    | LCP, FCP, TTFB, INP, CLS — mobile + desktop                            | vitals |
 | Image loading health          | Missing alt text, no srcset, broken `<img>`                            | html |
-| Lazy section presence         | Deco `/deco/render` and `/_loader/*` routes responding                 | html |
+| Lazy section presence         | Deco `/deco/render` and `/_loader/*` routes responding; downgrades to low+intentional-eager when cand renders everything inline by design | html |
+| **Banner aspect ratio**       | Hero/banner images keep the same aspect ratio prod vs cand (CLS/crop regressions) | visual |
 | SEO deep audit                | robots.txt, sitemap, noindex regressions                               | seo |
 | Cache coverage                | Cache hit rate, opportunities to cache                                 | cache |
 | **Search presence**           | Search input reachable from home in both                               | e2e |
@@ -35,7 +36,6 @@ check-name side.
 | **Footer links health**       | Institutional links (privacy, contact, etc.) aren't broken in cand     | seo |
 | **Login flow** _(opt-in)_     | Valid credentials log in; invalid ones show a clear error              | e2e |
 | **Picture missing dims**      | Static CLS detector — `<picture>` without explicit width/height        | html |
-| **Lazy sections eager**       | Detects intentional eager rendering of "lazy" sections                 | html |
 | **Cart reveal mode**          | prod/cand cart-reveal markup intent matches                            | e2e |
 | **SPA navigation** _(M2.5, issue #54)_ | F5-load a category, click to another route (client-side, not `page.goto`), then verify the SPA-navigated render didn't drop CMS sections vs a plain F5 of the same destination; also flags hydration-classified console errors during the nav itself | e2e |
 | **Server-fn hover flood** _(M2.5, issue #54)_ | Hovering ~8 product cards shouldn't fire more than a configurable budget (default 10) of `_serverFn`/preload-shaped requests — catches TanStack `preload="intent"` flooding the worker | e2e |
