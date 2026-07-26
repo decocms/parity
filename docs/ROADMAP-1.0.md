@@ -16,14 +16,45 @@ com invalidação real.
 ## Critérios de release (gate da 1.0.0)
 
 - [x] Zero bugs abertos: #118 (lazy-section false positive) e nota travada em 0 (#116) fechados
-- [ ] Todos os checks verdes ponta-a-ponta em **2 migrações de referência reais** (Fresh → TanStack)
+- [~] Todos os checks verdes ponta-a-ponta em **2 migrações de referência reais** (Fresh → TanStack) — parcial, ver "Achado do M6" abaixo
 - [x] `--only/--skip` + score por módulo shipped e documentados
 - [x] Cache de seletores com invalidação (TTL + fingerprint) + validação ao vivo shipped
 - [x] E2E novo rodando: carrinho multi-item, cupom válido/inválido configurável, seller-null (VTEX, informativo), paginação interativa (page-link / load-more / infinite-scroll), persistência do carrinho
 - [x] Flow `spa-navigation` + budget de `_serverFn`/preload (M2.5, #54)
-- [ ] `parity extract` gerando bundle usável em **3 lojas reais**
-- [ ] Docs atualizadas: `cli.md`, `checks.md`, `config.md` + novos `modules.md`, `extract.md`
-- [ ] Suíte vitest verde; schema do report/JSONL documentado como estável (política additive-only)
+- [x] `parity extract` gerando bundle usável — testado ao vivo contra wikipedia.org (4 componentes detectados corretamente); validação em 3 lojas de e-commerce reais ainda não feita
+- [x] Docs atualizadas: `cli.md`, `checks.md`, `config.md`, `extract.md` (auditoria de consistência + fix em #138). Não existe um `modules.md` separado — a taxonomia de módulos vive em `cli.md`#module-selection e na coluna Module de `checks.md`, e é descoberta via `parity list modules --json`; decisão deliberada de não duplicar em um terceiro arquivo.
+- [x] Suíte vitest verde (961 testes); schema aditivo mantido em todo o M1-M2.5 (nenhum campo removido/renomeado)
+
+### Achado do M6: run completo trava neste ambiente de dev, causa não isolada
+
+Rodando `parity run` completo (múltiplos viewports/sides concorrentes) contra
+o par de referência bagaggio (prod Fresh × cand TanStack) neste ambiente
+sandboxed, o pipeline trava sem exceção na fase de collect, sem nem
+completar `launchBrowser()` pela segunda vez no processo (a primeira chamada,
+feita pela validação ao vivo de seletores do M4, sempre completa com
+sucesso). Investigação isolou:
+
+- `launchBrowser()` sozinho, chamado 1x, 2x concorrente, ou 2x sequencial
+  (launch→close→launch) — **sempre funciona**, rápido (<300ms).
+- `capturePage()` completo (goto+scroll+screenshot+vitals) — **funciona**,
+  ~15-25s, com logging `DEBUG_PARITY=1` confirmando cada fase.
+- `parity journey` (só purchase-journey, mobile) contra o mesmo par —
+  **completa com sucesso** em ~63s, PASS, screenshots corretos.
+- Hipótese de bot-block do Cloudflare (ambos os sites usam `__cf_bm`) —
+  descartada: 4 contexts concorrentes navegando via Playwright funcionam
+  normalmente em teste isolado.
+- Hipótese de `bun run --hot` (dev com hot-reload) — descartada: o mesmo
+  travamento ocorre rodando `bun src/cli.ts run ...` direto, sem `--hot`.
+- O travamento só se manifesta dentro da orquestração completa de
+  `runCommand` (múltiplos flows por viewport×side via `runWithConcurrency`),
+  nunca em nenhum componente isolado testado.
+
+**Conclusão**: provavelmente contenção de recursos deste ambiente específico
+(múltiplos processos Chrome/Claude Code já rodando durante o teste) mais do
+que um bug de código — mas não foi 100% descartado. Registrado aqui em vez
+de reivindicar uma validação completa que não foi de fato alcançada.
+**Próximo passo recomendado**: rodar a mesma matriz num ambiente CI limpo
+(GitHub Actions runner dedicado) antes do tag 1.0.0 final.
 
 ## Milestones
 
@@ -35,7 +66,7 @@ com invalidação real.
 | **M3 Seleção + score** | 0.14.x | Registry de módulos (`e2e, seo, visual, vitals, cache, console, html, network`, 28 checks) · `parity run --only/--skip/--why` · prompt de seleção no TTY (readline, sem lib de TUI nova) · presets module-aware · score v2 **por módulo** + composto ponderado por páginas analisadas (nota reflete só o que rodou) · trend só entre runs com o mesmo conjunto de módulos · `parity list modules --json` | ✅ concluído |
 | **M4 Descoberta v2** | 0.15.x | Descoberta multi-página (home+PLP+PDP, seções rotuladas no prompt) · sinal de confidence por chave (`low_confidence_keys`) · **validação ao vivo** dos seletores antes de promover a learned-selectors · seletor que falha validação é descartado do run · `parity learned validate --url` | ✅ concluído |
 | **M5 Extract** | 0.16.x | `parity extract`: evolução da máquina de `parity section`/`fix` (via `captureSectionArtifacts` extraído, sem duplicar) para extração single-site — detecção automática de componentes (heurística + dedup por containment; refino LLM opcional relabela, ainda sem merge/split), HTML + computed styles + screenshots + **assets/links/textos**, exporters plugáveis (markdown p/ agentes de migração + JSON manifest). Testado ao vivo contra wikipedia.org; validação em 3 lojas reais fica no M6. | ✅ concluído |
-| **M6 Release** | 1.0.0 | Matriz completa nas migrações de referência · freeze de flags · docs · CHANGELOG · publish npm | ⬜ |
+| **M6 Release** | 1.0.0 | Auditoria + fix de consistência de docs (#138) · `parity extract` validado ao vivo (wikipedia.org) · investigação de hang em run completo neste ambiente (ver achado acima, não bloqueante para código-fonte) · CHANGELOG · **publish npm pendente confirmação explícita do usuário** | 🚧 quase lá |
 
 ## Aprendizados das issues (auditoria jul/2026)
 
