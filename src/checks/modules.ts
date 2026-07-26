@@ -39,7 +39,7 @@ export const MODULES: Record<ModuleName, ModuleDef> = {
   e2e: {
     name: "e2e",
     description:
-      "Functional flows — purchase journey, search, cart interactions, login, PDP gallery/breadcrumbs, PLP sorting",
+      "Functional flows — purchase journey, search, cart interactions, login, PDP gallery/breadcrumbs, PLP sorting, SPA navigation, server-fn hover flood",
     checks: [
       "purchase-journey-flow",
       "cart-reveal-mode-divergence",
@@ -52,8 +52,18 @@ export const MODULES: Record<ModuleName, ModuleDef> = {
       "pdp-gallery-related",
       "pdp-breadcrumbs",
       "plp-sorting",
+      "spa-navigation-flow",
+      "serverfn-hover-flood",
     ],
-    flows: ["purchase-journey", "search", "cart-interactions", "login", "plp", "pdp"],
+    flows: [
+      "purchase-journey",
+      "search",
+      "cart-interactions",
+      "login",
+      "plp",
+      "pdp",
+      "spa-navigation",
+    ],
   },
   seo: {
     name: "seo",

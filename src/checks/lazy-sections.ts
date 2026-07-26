@@ -168,7 +168,15 @@ export function normalizeSectionId(seg: string): string {
   return seg.replace(/\.(tsx|ts|jsx|js|mjs)$/i, "").toLowerCase();
 }
 
-function extractSectionIds(entries: NetworkEntry[]): Set<string> {
+/**
+ * Infer "which CMS sections rendered" from a page's captured network
+ * entries — either an explicit `x-deco-section` response header, or the
+ * last path segment of a lazy-render/loader URL (`/deco/render/...`,
+ * `/_loader/...`). Exported so `spa-navigation.ts` can reuse the exact
+ * same heuristic to compare an F5 render vs a client-side SPA nav render
+ * of the same route (issue #54).
+ */
+export function extractSectionIds(entries: NetworkEntry[]): Set<string> {
   const out = new Set<string>();
   for (const e of entries) {
     if (e.decoSection) out.add(normalizeSectionId(e.decoSection));

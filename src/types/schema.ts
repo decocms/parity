@@ -24,6 +24,7 @@ export const FlowName = z.enum([
   "search",
   "cart-interactions",
   "login",
+  "spa-navigation",
 ]);
 export type FlowName = z.infer<typeof FlowName>;
 
@@ -607,6 +608,16 @@ export const ParityRc = z.object({
       validCode: z.string().optional(),
     })
     .optional(),
+  /**
+   * Issue #54 (3/D) — TanStack's `preload="intent"` fires a `_serverFn`
+   * request per hovered `<Link>`; a PLP with several product cards can
+   * flood the worker with concurrent requests on hover. Configurable
+   * since the exact server-fn URL convention is framework-specific and
+   * we don't want to hardcode a guess that silently never matches.
+   */
+  serverFnFloodBudget: z.number().optional(),
+  /** Regex (string form) matching server-fn request URLs. Defaults to `_serverFn` (TanStack Start's convention) when unset. */
+  serverFnPattern: z.string().optional(),
 });
 export type ParityRc = z.infer<typeof ParityRc>;
 

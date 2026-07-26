@@ -376,6 +376,7 @@ const CHECK_TO_FLOW: Record<string, string> = {
   "search-results": "search",
   "search-no-results": "search",
   "login-flow": "login",
+  "spa-navigation-flow": "spa-navigation",
 };
 
 function renderFlowStepTimeline(checkName: string, run: Run, runDir: string): string {
