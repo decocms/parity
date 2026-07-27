@@ -7,12 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.0](https://github.com/decocms/parity/compare/v0.14.0...v0.15.0) (2026-07-27)
+
+### Added
+
+* **Structural overlay interception detection + configurable overlay selectors (issues #145, #146).** A "no-signal" add-to-cart failure is often not a broken cart but a newsletter/discount modal intercepting the click — classically one that pops on the very `mousemove` Playwright's `.click()` dispatches, in a cookie-less session (e.g. a `div.fixed bg-black/50 z-9999` backdrop over the buy button). Instead of name-matching every popup shape (whack-a-mole), parity now detects interception **structurally**: before retrying, it checks whether the buy button is still the topmost element at its click point (`document.elementFromPoint`) and, if something covers it, dismisses it least-destructive-first — Escape → a named close button → an icon/geometry close control inside the overlay (catches unnamed `<button><svg/></button>` X's) → a corner backdrop click → and, guarded, hiding the confirmed interceptor as a last resort (never an ancestor of the target, and it can't fake success — the step still needs a real confirmation signal) — then retries once. What was detected/dismissed is recorded in the step's `detail.overlayDismissed` and surfaced in the action text, so a report shows *why* a click was intercepted even when dismissal succeeded. Separately, `.parityrc.json` `overlaySelectors` adds explicit site-specific overlay selectors, merged with the built-in cookie/toast/newsletter defaults (never replacing them), as a fast-path override.
+
+## [0.14.0](https://github.com/decocms/parity/compare/v0.13.0...v0.14.0) (2026-07-27)
+
+### Added
+
+* **Configurable add-to-cart confirmation deadline (issue #143).** The purchase-journey / `e2e` add-to-cart step polled a hardcoded 3000ms for a success signal (URL→cart, minicart count increase, drawer open, success toast). On sites whose success toast is short-lived, or with slow TTFB / popup overlays, that could race the deadline and report a false "no signal" failure on an add-to-cart that actually worked. Now tunable via `.parityrc.json` `addToCartConfirmMs` or `--add-to-cart-timeout <ms>` (on `parity run` and `parity e2e`); a non-positive/NaN override is ignored and falls back to the 3000ms default.
+
+## [0.13.0](https://github.com/decocms/parity/compare/v0.12.0...v0.13.0) (2026-07-27)
+
 ### Added
 
 * **`parity e2e` now automates selectors like `parity run` (issue #141).** Single-site runs previously saw only `DEFAULT_SELECTORS` + hand-written `.parityrc.json` — `e2e` never detected the platform, never ran LLM selector discovery, and never learned from its flow runs (so `learned-selectors.json`, keyed by platform, never applied). It now detects the platform, runs the same grounded LLM discovery + live-validation pass, threads the platform into every flow, and promotes selectors learned from real successful interactions. New flags mirror `run`: `--no-auto-selectors`, `--refresh-selectors`, `--no-learn`. The discovery pass is now shared code (`src/engine/selector-discovery-pass.ts`) used by both commands.
 * **Discovery covers the journey variant/quantity keys.** LLM selector discovery now infers `variantRow`, `quantityIncrement`, `quantityInput`, `sizeSwatch`, and `colorSwatch` (grounded on the real PDP and live-validated) — exactly the keys single-site users kept hand-writing in `.parityrc.json`.
-* **Configurable add-to-cart confirmation deadline (issue #143).** The purchase-journey / `e2e` add-to-cart step polled a hardcoded 3000ms for a success signal (URL→cart, minicart count increase, drawer open, success toast). On sites whose success toast is short-lived, or with slow TTFB / popup overlays, that could race the deadline and report a false "no signal" failure on an add-to-cart that actually worked. Now tunable via `.parityrc.json` `addToCartConfirmMs` or `--add-to-cart-timeout <ms>` (on `parity run` and `parity e2e`); a non-positive/NaN override is ignored and falls back to the 3000ms default.
-* **Structural overlay interception detection + configurable overlay selectors (issues #145, #146).** A "no-signal" add-to-cart failure is often not a broken cart but a newsletter/discount modal intercepting the click — classically one that pops on the very `mousemove` Playwright's `.click()` dispatches, in a cookie-less session. Instead of relying only on name-matching known overlays (whack-a-mole per popup shape), parity now detects interception **structurally**: before retrying, it checks whether the buy button is still the topmost element at its click point (`document.elementFromPoint`) and, if something covers it, dismisses it least-destructive-first (Escape → a close-like button → a backdrop click for non-full-viewport overlays) and retries once. What was detected/dismissed is recorded in the step's `detail.overlayDismissed`, so a report shows *why* a click was intercepted even when dismissal succeeded. Separately, `.parityrc.json` `overlaySelectors` lets a project add explicit site-specific overlay selectors (merged with the built-in cookie/toast/newsletter defaults, never replacing them) as a fast-path override.
 
 ### Fixed
 
