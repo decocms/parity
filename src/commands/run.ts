@@ -90,6 +90,8 @@ export interface RunOptions {
   refreshSelectors?: boolean;
   /** When false, don't write to learned-selectors.json (read-only mode) */
   learn?: boolean;
+  /** Add-to-cart confirmation deadline in ms (overrides rc.addToCartConfirmMs). Issue #143. */
+  addToCartTimeout?: number;
   /** Extra pages (beyond flows) to crawl just for Web Vitals coverage. Default 10. */
   vitalsPages?: number;
   /**
@@ -486,6 +488,10 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
 
   const rc = loadParityRc();
   rc.cep = opts.cep || rc.cep;
+  // --add-to-cart-timeout overrides .parityrc.json addToCartConfirmMs (#143).
+  if (typeof opts.addToCartTimeout === "number" && Number.isFinite(opts.addToCartTimeout)) {
+    rc.addToCartConfirmMs = opts.addToCartTimeout;
+  }
   const ignore = loadParityIgnore();
 
   if (opts.clearCache) {

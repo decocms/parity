@@ -33,6 +33,8 @@ export interface E2eCommandOptions {
   flows: string;
   viewports: string;
   cep: string;
+  /** Add-to-cart confirmation deadline in ms (overrides rc.addToCartConfirmMs). Issue #143. */
+  addToCartTimeout?: number;
   searchTerms?: string;
   loginEmail?: string;
   loginPassword?: string;
@@ -98,6 +100,10 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
 
   const rc = loadParityRc();
   rc.cep = opts.cep || rc.cep;
+  // --add-to-cart-timeout overrides .parityrc.json addToCartConfirmMs (#143).
+  if (typeof opts.addToCartTimeout === "number" && Number.isFinite(opts.addToCartTimeout)) {
+    rc.addToCartConfirmMs = opts.addToCartTimeout;
+  }
   if (opts.searchTerms) {
     rc.search = {
       ...(rc.search ?? {}),

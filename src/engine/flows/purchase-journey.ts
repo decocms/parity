@@ -36,6 +36,26 @@ import { scrollPageInChunks } from "./simple.ts";
 
 const PURCHASE_JOURNEY_TOTAL_STEPS = 9;
 
+/**
+ * Default confirmation window for the add-to-cart step (issue #143).
+ * Overridable per-project via `.parityrc.json` `addToCartConfirmMs` or the
+ * `--add-to-cart-timeout <ms>` CLI flag.
+ */
+export const DEFAULT_ADD_TO_CART_CONFIRM_MS = 3_000;
+
+/**
+ * Resolve the add-to-cart confirmation window (ms) from the run config,
+ * falling back to {@link DEFAULT_ADD_TO_CART_CONFIRM_MS}. A non-positive or
+ * non-finite override (e.g. `--add-to-cart-timeout abc` → NaN) is ignored so
+ * a fat-fingered value can never make the poll loop exit immediately. #143.
+ */
+export function resolveAddToCartConfirmMs(rc: { addToCartConfirmMs?: number }): number {
+  const v = rc.addToCartConfirmMs;
+  return typeof v === "number" && Number.isFinite(v) && v > 0
+    ? v
+    : DEFAULT_ADD_TO_CART_CONFIRM_MS;
+}
+
 interface PurchaseJourneyResult {
   pages: PageCapture[];
   steps: StepCapture[];
@@ -1109,7 +1129,12 @@ async function validateAddToCart(
   cartCountBefore: number,
   beforeUrl: string,
 ): Promise<AddToCartValidation> {
-  const deadline = Date.now() + 3_000;
+  // The confirmation window is configurable (issue #143): a site whose
+  // success toast is short-lived, or one with slow TTFB / popup overlays,
+  // can race the fixed 3s deadline and report a false "no signal" failure
+  // even when the add-to-cart actually worked. `.parityrc.json`
+  // `addToCartConfirmMs` (or `--add-to-cart-timeout <ms>`) tunes it.
+  const deadline = Date.now() + resolveAddToCartConfirmMs(ctx.rc);
   let lastErrorText: string | undefined;
 
   while (Date.now() < deadline) {
