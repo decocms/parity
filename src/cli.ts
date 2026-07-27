@@ -63,6 +63,11 @@ program
   )
   .option("--viewports <list>", "Comma-separated viewports: mobile,desktop", "mobile,desktop")
   .option("--cep <cep>", "CEP for shipping calculation", "01310-100")
+  .option(
+    "--add-to-cart-timeout <ms>",
+    "How long (ms) the add-to-cart step polls for a success signal before failing. Default 3000. Raise/lower to match your site's success-toast lifetime (issue #143).",
+    (v) => Number(v),
+  )
   .option("--runs <n>", "Repeat each measurement N times (median)", "1")
   .option("--baseline <name>", "Compare against a saved baseline")
   .option("--output <dir>", "Output directory", "./parity-output")
@@ -226,6 +231,11 @@ program
   )
   .option("--viewports <list>", "Comma-separated viewports", "mobile,desktop")
   .option("--cep <cep>", "CEP for shipping calculation", "01310-100")
+  .option(
+    "--add-to-cart-timeout <ms>",
+    "How long (ms) the add-to-cart step polls for a success signal before failing. Default 3000. Raise/lower to match your site's success-toast lifetime (issue #143).",
+    (v) => Number(v),
+  )
   .option(
     "--search-terms <list>",
     "Comma-separated search terms to use (override LLM auto-discovery)",

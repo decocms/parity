@@ -187,6 +187,8 @@ PARITY_LOGIN_EMAIL=test@example.com PARITY_LOGIN_PASSWORD=*** \
 
 Selector automation flags (mirror `parity run`): `--no-auto-selectors`, `--refresh-selectors`, `--no-learn`.
 
+Tune the add-to-cart confirmation window with `--add-to-cart-timeout <ms>` (default 3000) when the journey reports a false "add-to-cart sem confirmação" on a site that actually works — e.g. a short-lived success toast or slow TTFB. Persist it per-project as `addToCartConfirmMs` in `.parityrc.json` (issue #143). Applies to `parity run` too.
+
 **Use `parity e2e` when** you want to validate "does this site actually work end-to-end?" — pre-launch, post-deploy, partner sites, or an agent-in-loop validating a migrated build in CI/PR where there's no prod baseline to compare against (issue #141). **Use `parity run` when** you need to detect *regressions* between two versions.
 
 > `parity run` requires both `--prod` and `--cand` (it's a prod↔cand diff). Running it with a single site (`--prod X --cand X`) is wasteful and produces a degenerate self-comparison — omit `--prod` and the CLI will point you at `parity e2e` instead.

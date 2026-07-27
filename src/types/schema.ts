@@ -618,6 +618,15 @@ export const ParityRc = z.object({
   serverFnFloodBudget: z.number().optional(),
   /** Regex (string form) matching server-fn request URLs. Defaults to `_serverFn` (TanStack Start's convention) when unset. */
   serverFnPattern: z.string().optional(),
+  /**
+   * Issue #143 — how long (ms) the purchase-journey/e2e add-to-cart step
+   * polls for a success signal (URL→cart, minicart count increase, drawer
+   * open, success toast) before giving up. Defaults to 3000ms. Tune it to a
+   * site whose success toast is short-lived or whose TTFB/popup overlays
+   * narrow the confirmation window, to avoid a false "no signal" failure on
+   * an add-to-cart that actually worked. Also settable via `--add-to-cart-timeout <ms>`.
+   */
+  addToCartConfirmMs: z.number().optional(),
 });
 export type ParityRc = z.infer<typeof ParityRc>;
 

@@ -38,7 +38,8 @@ Selector overrides and run defaults. Placed at the project root.
     "validCode": "PARITY10"
   },
   "serverFnFloodBudget": 10,
-  "serverFnPattern": "_serverFn"
+  "serverFnPattern": "_serverFn",
+  "addToCartConfirmMs": 2000
 }
 ```
 
@@ -60,6 +61,15 @@ step. `coupon.validCode` is opt-in: when set, the cart-interactions flow also
 runs `apply-valid-coupon` (asserts the total drops or a discount indicator
 appears); when absent, that step is skipped — parity has no way to know a real
 discount code on its own.
+
+`addToCartConfirmMs` (issue #143) sets how long — in milliseconds — the
+purchase-journey / `e2e` add-to-cart step polls for a success signal (URL→cart,
+minicart count increase, drawer open, or a success toast) before it gives up
+and reports a failure. Default `3000`. Tune it when your site's success toast
+is short-lived, or when slow TTFB / popup overlays narrow the window, to avoid
+a false "no signal" failure on an add-to-cart that actually worked. Also
+settable per-run with `--add-to-cart-timeout <ms>` (on `parity run` and
+`parity e2e`), which overrides the rc value.
 
 `paginationNext` / `loadMoreButton` override the selectors the `plp` flow
 uses to detect how a PLP paginates (next-page link, "load more" button, or —
