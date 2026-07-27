@@ -170,13 +170,23 @@ If `ANTHROPIC_API_KEY` is set, the LLM is invoked automatically and prints a one
 
 The `audit` command runs absolute checks (vitals, console, network, images, SEO). `parity e2e` runs **all the functional flows** (homepage, plp, pdp, purchase-journey, search, cart-interactions, spa-navigation, optionally login) against a single URL plus all parity checks in single-site mode.
 
+Like `parity run`, `e2e` **detects the platform and auto-discovers selectors via the LLM** (grounded on a real PLP/PDP crawled off the home), live-validates them, and **learns** from each run — so you usually don't need to hand-write `.parityrc.json` selectors. The purchase-journey and cart flows are evaluated on their own terms (a failed or skipped-critical step fails the run) instead of being diffed against a prod baseline.
+
 ```bash
 parity e2e --url https://www.example.com
+parity e2e --url http://localhost:5173/ --flows=purchase-journey   # migrated-build health check
 parity e2e --url https://www.example.com --flows=search,cart-interactions
 parity e2e --url https://www.example.com --search-terms="camisa,promocao"
+parity e2e --url https://www.example.com --refresh-selectors        # re-run discovery, ignore cache
+parity e2e --url https://www.example.com --no-auto-selectors        # defaults + .parityrc.json only
+parity e2e --url https://www.example.com --no-learn                 # don't write learned-selectors.json
 
 PARITY_LOGIN_EMAIL=test@example.com PARITY_LOGIN_PASSWORD=*** \
   parity e2e --url https://www.example.com --flows=login
 ```
 
-**Use `parity e2e` when** you want to validate "does this site actually work end-to-end?" — pre-launch, post-deploy, partner sites. **Use `parity run` when** you need to detect *regressions* between two versions.
+Selector automation flags (mirror `parity run`): `--no-auto-selectors`, `--refresh-selectors`, `--no-learn`.
+
+**Use `parity e2e` when** you want to validate "does this site actually work end-to-end?" — pre-launch, post-deploy, partner sites, or an agent-in-loop validating a migrated build in CI/PR where there's no prod baseline to compare against (issue #141). **Use `parity run` when** you need to detect *regressions* between two versions.
+
+> `parity run` requires both `--prod` and `--cand` (it's a prod↔cand diff). Running it with a single site (`--prod X --cand X`) is wasteful and produces a degenerate self-comparison — omit `--prod` and the CLI will point you at `parity e2e` instead.

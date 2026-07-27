@@ -47,7 +47,10 @@ program
       "  warmup=OFF, bypass-cache=OFF, ci=OFF.",
     ].join("\n"),
   )
-  .requiredOption("--prod <url>", "Production URL (source of truth, e.g. Fresh site)")
+  .option(
+    "--prod <url>",
+    "Production URL (source of truth, e.g. Fresh site). Omit for a single site — the run will point you to `parity e2e` (issue #141).",
+  )
   .requiredOption("--cand <url>", "Candidate URL (migrated site, e.g. TanStack)")
   .option(
     "--preset <name>",
@@ -232,6 +235,9 @@ program
   .option("--output <dir>", "Output directory", "./parity-output")
   .option("--open", "Open the HTML report after the run completes", false)
   .option("--json", "Emit one-line JSON instead of pretty text", false)
+  .option("--no-auto-selectors", "Disable LLM-based selector discovery (uses defaults instead)")
+  .option("--refresh-selectors", "Bypass selector cache and re-run discovery", false)
+  .option("--no-learn", "Don't write to learned-selectors.json (read-only mode)")
   .option(
     "--fail-on <severities>",
     "Comma-separated severities that cause exit 1 (default: critical,high)",

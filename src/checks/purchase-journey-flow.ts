@@ -31,10 +31,63 @@ export function purchaseJourneyFlow(ctx: CheckContext): CheckResult {
     };
   }
 
+  // Single-site mode (`parity e2e`): there's no prod baseline to diff against,
+  // so evaluate the journey on its own terms — a failed step, or a skipped
+  // CRITICAL step (the flow couldn't get past checkout/add-to-cart/etc), is a
+  // real problem regardless of any other site.
+  //
+  // We key this on prod being EMPTY, not the OR-based isSingleSite(): `e2e`
+  // always populates the cand slot (side="cand"), so a prod-only capture
+  // (prod present, cand empty) never means single-site — it means cand
+  // crashed during a comparison run, which must stay a critical
+  // "checkout indisponível" signal in the comparative path below.
+  const single = ctx.prodFlows.length === 0 && ctx.candFlows.length > 0;
+
   // Pair flows by viewport
   for (const viewport of ctx.viewports) {
     const prodFlow = findFlow(ctx.prodFlows, viewport);
     const candFlow = findFlow(ctx.candFlows, viewport);
+
+    if (single) {
+      const flow = prodFlow ?? candFlow;
+      if (!flow) continue;
+      for (const step of flow.steps ?? []) {
+        totalSteps++;
+        const label = STEP_LABELS[step.name] ?? step.name;
+        const isCritical = CRITICAL_STEPS.has(step.name);
+        if (step.status === "failed") {
+          failedSteps++;
+          issues.push({
+            id: `pj:${viewport}:${step.name}:failed`,
+            severity: isCritical ? "critical" : "high",
+            category: "functional",
+            check: "purchase-journey-flow",
+            summary: `[${viewport}] Step "${label}" falhou: ${step.note ?? "elemento não encontrado ou ação sem efeito"}`,
+            evidence: step.screenshotPath
+              ? [{ kind: "screenshot", path: step.screenshotPath }]
+              : [],
+          });
+        } else if (step.status === "skipped" && isCritical) {
+          // A skipped CRITICAL step means the journey couldn't proceed past a
+          // must-work point (e.g. no PDP reachable → add-to-cart never ran).
+          // Non-critical skips (single-SKU variant, no CEP calculator) are
+          // legitimate and stay silent.
+          asymmetricSkips++;
+          issues.push({
+            id: `pj:${viewport}:${step.name}:skipped`,
+            severity: "critical",
+            category: "functional",
+            check: "purchase-journey-flow",
+            summary: `[${viewport}] Step crítico "${label}" pulou (motivo: ${step.note ?? "elemento não encontrado"}) — jornada não completou`,
+            evidence: step.screenshotPath
+              ? [{ kind: "screenshot", path: step.screenshotPath }]
+              : [],
+          });
+        }
+      }
+      continue;
+    }
+
     if (!prodFlow || !candFlow) {
       // The flow was requested for the run (we just confirmed above), so a
       // missing side here is itself a critical signal — either prod never

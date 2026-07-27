@@ -8,8 +8,15 @@ import { ALL_CHECKS, type CheckContext } from "../checks/index.ts";
 import { launchBrowser, newContext } from "../engine/browser.ts";
 import { installVitalsCollector } from "../engine/collect.ts";
 import { runFlow } from "../engine/flows.ts";
+import {
+  fetchHomeHtml,
+  runSelectorDiscoveryPass,
+} from "../engine/selector-discovery-pass.ts";
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
-import { loadLearned } from "../learned/repo.ts";
+import { type Platform, detectPlatform } from "../learned/platform.ts";
+import { promoteStepsFromFlow } from "../learned/promote.ts";
+import { loadLearned, saveLearned } from "../learned/repo.ts";
+import { isLlmAvailable } from "../llm/client.ts";
 import { renderAuditHtmlReport } from "../report/audit-render.ts";
 import { createRunDir, newRunId } from "../storage/fs.ts";
 import type {
@@ -33,6 +40,12 @@ export interface E2eCommandOptions {
   open?: boolean;
   json?: boolean;
   failOn: string;
+  /** When false, skip LLM-based selector discovery (default: on if API key set). */
+  autoSelectors?: boolean;
+  /** Force discovery to re-run even if a cached entry exists. */
+  refreshSelectors?: boolean;
+  /** When false, don't write to learned-selectors.json (read-only mode). */
+  learn?: boolean;
 }
 
 const SEVERITY_RANK: Record<Issue["severity"], number> = {
@@ -101,6 +114,9 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
   }
   const ignore = loadParityIgnore();
   const learned = loadLearned();
+  const learnedBefore = JSON.stringify(learned);
+  const host = hostOf(opts.url);
+  const primaryViewport = viewports[0] ?? "mobile";
 
   const failOn = (opts.failOn || "critical,high")
     .split(",")
@@ -117,6 +133,34 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
     console.log(chalk.dim(`  flows:     ${flows.join(", ")}`));
     console.log(chalk.dim(`  viewports: ${viewports.join(", ")}`));
     console.log(chalk.dim(`  cep:       ${rc.cep}\n`));
+  }
+
+  // Detect platform + run LLM selector discovery, exactly like `parity run`.
+  // Without this, single-site runs only ever see DEFAULT_SELECTORS + hand-
+  // written .parityrc.json (learned entries are keyed by platform, so an
+  // undefined platform means they never apply). This is the core of #141:
+  // give `e2e` the same selector automation the comparison mode has.
+  let platform: Platform = "custom";
+  const homeHtml = await fetchHomeHtml(opts.url, primaryViewport);
+  if (homeHtml) {
+    platform = detectPlatform({ url: opts.url, html: homeHtml });
+    if (platform !== "custom" && !opts.json) {
+      console.log(chalk.dim(`  Detected platform: ${platform}`));
+    }
+  }
+  const wantsAutoSelectors = opts.autoSelectors !== false && isLlmAvailable();
+  if (wantsAutoSelectors) {
+    await runSelectorDiscoveryPass({
+      url: opts.url,
+      viewport: primaryViewport,
+      rc,
+      learned,
+      platform,
+      host,
+      refreshSelectors: opts.refreshSelectors === true,
+      homeHtml,
+      quiet: opts.json === true,
+    });
   }
 
   const spinner = opts.json ? null : ora("Lançando browser…").start();
@@ -141,10 +185,18 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
             outDir: paths.screenshotsDir,
             runId,
             learned,
+            platform,
             recoveryBudget: 2,
           });
           allFlows.push(cap);
           for (const p of cap.pages) allPages.push(p);
+          // Learn from this real single-site run: successful steps promote
+          // their selectors (verified), failures deprecate them. This is how
+          // cart-only keys (cartItemRow, minicartCount, …) — which static
+          // discovery can't confirm — get learned across repeated runs.
+          if (opts.learn !== false) {
+            promoteStepsFromFlow(learned, platform, host, cap);
+          }
         } catch (err) {
           if (spinner) spinner.warn(`flow ${flow} (${viewport}) erro: ${(err as Error).message}`);
         }
@@ -155,6 +207,11 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
       spinner.succeed(`${allFlows.length} flow capture(s), ${allPages.length} página(s)`);
   } finally {
     await browser?.close().catch(() => undefined);
+  }
+
+  // Persist learned-selectors if this run changed anything (mirrors run.ts).
+  if (opts.learn !== false && JSON.stringify(learned) !== learnedBefore) {
+    saveLearned(learned);
   }
 
   if (allPages.length === 0) {
@@ -281,6 +338,14 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
   if (opts.open) await openReport(paths.reportHtml);
   if (worstSev && failOn.includes(worstSev as Issue["severity"])) return 1;
   return 0;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
 }
 
 function parseViewports(raw: string): Viewport[] {

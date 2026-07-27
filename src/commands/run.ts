@@ -7,15 +7,17 @@ import { runAllChecks } from "../checks/index.ts";
 import type { CheckContext } from "../checks/index.ts";
 import { pairCaptures } from "../checks/lib/pairing.ts";
 import { MODULES, type ModuleName, resolveSelection } from "../checks/modules.ts";
-import { discoverPlpFromHome } from "../checks/plp-pagination.ts";
 import { resolveSitemapUrls } from "../diff/sitemap.ts";
 import { launchBrowser, newContext, stopTracing, userAgentFor } from "../engine/browser.ts";
 import { capturePage, installVitalsCollector } from "../engine/collect.ts";
 import { runFlow } from "../engine/flows.ts";
 import { promptForModuleSelection } from "../engine/interactive-module-prompt.ts";
 import { disableInteractive, isInteractiveMode } from "../engine/interactive-selector-prompt.ts";
+import {
+  fetchHomeHtml,
+  runSelectorDiscoveryPass,
+} from "../engine/selector-discovery-pass.ts";
 import { discoverPagesFromSitemap } from "../engine/sitemap-discover.ts";
-import { validateSelectors } from "../engine/validate-selectors.ts";
 import {
   SCORE_VERSION,
   computeCompositeVerdict,
@@ -25,13 +27,7 @@ import {
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
 import { type Platform, detectPlatform } from "../learned/platform.ts";
 import { promoteStepsFromFlow } from "../learned/promote.ts";
-import {
-  type LearnedSelectors,
-  SelectorKey,
-  loadLearned,
-  promoteFromLlm,
-  saveLearned,
-} from "../learned/repo.ts";
+import { type LearnedSelectors, loadLearned, saveLearned } from "../learned/repo.ts";
 import { aggregateIssues } from "../llm/aggregate-issues.ts";
 import {
   disableLlm,
@@ -40,12 +36,6 @@ import {
   setForcedProvider,
   setLlmLanguage,
 } from "../llm/client.ts";
-import {
-  type DiscoveredSelectors,
-  discoverSelectors,
-  mergeDiscoveredSelectors,
-  persistSelectorValidation,
-} from "../llm/discover-selectors.ts";
 import { fingerprintPdp, matchPdps } from "../llm/match-pdp.ts";
 import {
   type ModelTier,
@@ -370,6 +360,17 @@ function applyLlmOptions(opts: RunOptions): string | null {
 }
 
 export async function runCommand(rawOpts: RunOptions): Promise<number> {
+  // Issue #141: `run` is a prod↔cand comparison and needs both URLs. When
+  // only a single site is given, steer the user to `parity e2e` (which runs
+  // the flows + all checks in single-site mode) instead of forcing a
+  // degenerate `--prod X --cand X` self-comparison.
+  if (!rawOpts.prod) {
+    const target = rawOpts.cand ?? "<url>";
+    console.error(
+      `${chalk.yellow("Single-site run?")} \`parity run\` compares two URLs (prod↔cand).\n  For one site, use: ${chalk.cyan(`parity e2e --url ${target}`)}\n  (runs the functional flows + all checks in single-site mode — no prod baseline needed).`,
+    );
+    return 2;
+  }
   let opts = applyPreset(rawOpts);
   if (rawOpts.preset) {
     console.log(chalk.dim(`  preset: ${rawOpts.preset}`));
@@ -552,113 +553,22 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   let promotedCount = 0;
   let deprecatedCount = 0;
 
-  // LLM-based selector discovery (auto, but user .parityrc.json overrides always win)
+  // LLM-based selector discovery (auto, but user .parityrc.json overrides
+  // always win). Shared with `parity e2e` via runSelectorDiscoveryPass —
+  // grounds PDP/PLP-only keys in real markup, live-validates, merges into
+  // rc.selectors, and seeds learned-selectors. Mutates rc + learned in place.
   const wantsAutoSelectors = opts.autoSelectors !== false && isLlmAvailable();
   if (wantsAutoSelectors) {
-    const discoverSpinner = ora(
-      "Descobrindo seletores via LLM (analisando home/PLP/PDP prod)…",
-    ).start();
-    try {
-      const html = prodHomeHtml ?? (await fetchHomeHtml(opts.prod, primaryViewport));
-      if (html) {
-        // M4: ground PDP/PLP-only selector keys (buyButton, pdpGallery*,
-        // productCard, ...) in REAL markup instead of asking the LLM to
-        // infer PDP/PLP convention from the home page alone. All of this
-        // stays pre-browser — cheap plain `fetch()` calls, same heuristic
-        // `discoverPlpFromHome` already uses for the plp-pagination check.
-        // The PLP→PDP hop is inherently sequential (need the PLP HTML to
-        // find a product href), so there's nothing meaningful to run in
-        // Promise.all here beyond what's already parallel via the spinner.
-        let plpUrl: string | undefined;
-        let plpHtml: string | undefined;
-        let pdpUrl: string | undefined;
-        let pdpHtml: string | undefined;
-        try {
-          const foundPlpUrl = await discoverPlpFromHome(opts.prod);
-          if (foundPlpUrl) {
-            plpUrl = foundPlpUrl;
-            plpHtml = (await fetchHomeHtml(foundPlpUrl, primaryViewport)) ?? undefined;
-            if (plpHtml) {
-              const foundPdpUrl = firstProductHrefFromPlpHtml(plpHtml, foundPlpUrl);
-              if (foundPdpUrl) {
-                pdpUrl = foundPdpUrl;
-                pdpHtml = (await fetchHomeHtml(foundPdpUrl, primaryViewport)) ?? undefined;
-              }
-            }
-          }
-        } catch (err) {
-          console.warn(
-            `[discover-selectors] PLP/PDP pre-fetch falhou (não-fatal): ${(err as Error).message}`,
-          );
-        }
-
-        const discovered = await discoverSelectors(
-          { home: opts.prod, plp: plpUrl, pdp: pdpUrl },
-          { home: html, plp: plpHtml, pdp: pdpHtml },
-          { noCache: opts.refreshSelectors === true },
-        );
-        if (discovered) {
-          const added = Object.entries(discovered).filter(
-            ([k, v]) => k !== "lowConfidenceKeys" && v,
-          ).length;
-          discoverSpinner.text = `${added} seletor(es) inferido(s) pelo LLM — validando ao vivo…`;
-
-          // Live-validation pass (M4): a short-lived, throwaway browser
-          // context — closed right after — confirms each selector matches
-          // ≥1 element on the page it's supposed to live on before it's
-          // trusted enough to (a) survive into rc.selectors and (b) seed
-          // learned-selectors at `verified` confidence.
-          const validation = await runLiveSelectorValidation(discovered, {
-            homeUrl: opts.prod,
-            plpUrl,
-            pdpUrl,
-            viewport: primaryViewport,
-          });
-
-          if (validation) {
-            persistSelectorValidation(opts.prod, validation.validated);
-            for (const key of validation.failed) {
-              console.warn(
-                `[selectors] descartando "${key}" — falhou na validação ao vivo (0 elementos na página onde deveria estar)`,
-              );
-              discovered[key] = undefined;
-            }
-          }
-
-          mergeDiscoveredSelectors(rc.selectors, discovered);
-
-          // Seed learned-selectors immediately from this discovery, ahead
-          // of any flow running: verified confidence ONLY when the
-          // selector both live-validated AND the model itself wasn't
-          // flagged as unsure about it (`low_confidence_keys`) — a
-          // selector can validate as "found 1 element" and still be
-          // semantically wrong.
-          const lowConfidence = new Set(discovered.lowConfidenceKeys ?? []);
-          for (const key of Object.keys(discovered) as (keyof DiscoveredSelectors)[]) {
-            if (key === "lowConfidenceKeys") continue;
-            const selector = discovered[key];
-            if (!selector) continue;
-            const parsedKey = SelectorKey.safeParse(key);
-            if (!parsedKey.success) continue;
-            const isVerified = validation?.validated[key] === true && !lowConfidence.has(key);
-            promoteFromLlm(learned, platform, parsedKey.data, selector, prodHost, isVerified);
-          }
-
-          const validatedCount = validation
-            ? Object.values(validation.validated).filter(Boolean).length
-            : 0;
-          discoverSpinner.succeed(
-            `${added} seletor(es) inferido(s) pelo LLM (${validatedCount} validado(s) ao vivo)`,
-          );
-        } else {
-          discoverSpinner.warn("LLM não retornou seletores; usando defaults");
-        }
-      } else {
-        discoverSpinner.warn("Falha ao baixar HTML da home prod; usando defaults");
-      }
-    } catch (err) {
-      discoverSpinner.warn(`Discovery falhou: ${(err as Error).message}`);
-    }
+    await runSelectorDiscoveryPass({
+      url: opts.prod,
+      viewport: primaryViewport,
+      rc,
+      learned,
+      platform,
+      host: prodHost,
+      refreshSelectors: opts.refreshSelectors === true,
+      homeHtml: prodHomeHtml,
+    });
   }
 
   const runId = newRunId();
@@ -1738,133 +1648,6 @@ async function warmupTargets(opts: {
     .filter((r): r is Extract<Outcome, { ok: false }> => !r.ok)
     .map(({ url, viewport, reason }) => ({ url, viewport, reason }));
   return { attempted: results.length, succeeded, failed };
-}
-
-async function fetchHomeHtml(url: string, viewport: Viewport = "desktop"): Promise<string | null> {
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": userAgentFor(viewport),
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-      },
-      redirect: "follow",
-    });
-    if (!res.ok) return null;
-    return await res.text();
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Find the first product-detail href in an already-fetched PLP HTML.
- *
- * Same two regex heuristics as `plp-pagination.ts`'s (unexported)
- * `fetchPlpProducts` — but that function ALSO does its own `fetch()` of
- * the PLP, which we don't want here (we already have the HTML in hand from
- * the discovery pre-fetch, and re-fetching would double the request for no
- * benefit). Duplicating ~10 lines of regex locally is cheaper and cleaner
- * than exporting a fetch-coupled helper across an unrelated module boundary
- * just to reuse it.
- */
-export function firstProductHrefFromPlpHtml(html: string, baseUrl: string): string | null {
-  const patterns = [/href="([^"]+\/p(?:\?[^"]*|\/[^"]+|))"/i, /href="([^"]+\/products\/[^"]+)"/i];
-  for (const re of patterns) {
-    const match = re.exec(html);
-    const href = match?.[1];
-    if (href) {
-      try {
-        return new URL(href, baseUrl).toString();
-      } catch {
-        /* try next pattern */
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * Live-validation pass for freshly-discovered selectors (M4). Launches a
- * throwaway headless browser context, navigates to whichever of home/PLP/PDP
- * were fetched, and probes the keys relevant to each page. Returns `null`
- * (never throws) when the throwaway browser itself fails to launch — a
- * validation failure should never take down the whole run.
- */
-type SelectorStringKey = Exclude<keyof DiscoveredSelectors, "lowConfidenceKeys">;
-const HOME_VALIDATION_KEYS = [
-  "categoryLink",
-  "minicartTrigger",
-  "searchTrigger",
-  "searchInput",
-  "loginTrigger",
-  "accountMenuTrigger",
-] as const satisfies readonly SelectorStringKey[];
-const PLP_VALIDATION_KEYS = ["productCard"] as const satisfies readonly SelectorStringKey[];
-const PDP_VALIDATION_KEYS = [
-  "buyButton",
-  "cepInputPdp",
-  "pdpGalleryThumbnail",
-  "pdpGalleryMain",
-  "pdpRelatedShelf",
-] as const satisfies readonly SelectorStringKey[];
-
-function pickSelectorSubset(
-  selectors: DiscoveredSelectors,
-  keys: readonly SelectorStringKey[],
-): DiscoveredSelectors {
-  const subset: DiscoveredSelectors = {};
-  for (const key of keys) {
-    const value = selectors[key];
-    if (typeof value === "string") subset[key] = value;
-  }
-  return subset;
-}
-
-async function runLiveSelectorValidation(
-  discovered: DiscoveredSelectors,
-  ctx: { homeUrl: string; plpUrl?: string; pdpUrl?: string; viewport: Viewport },
-): Promise<{
-  validated: Partial<Record<keyof DiscoveredSelectors, boolean>>;
-  failed: (keyof DiscoveredSelectors)[];
-} | null> {
-  let browser: Browser | null = null;
-  try {
-    browser = await launchBrowser({ headless: true });
-    const context = await newContext(browser, { viewport: ctx.viewport });
-    const page = await context.newPage();
-
-    const validated: Partial<Record<keyof DiscoveredSelectors, boolean>> = {};
-    const failed = new Set<keyof DiscoveredSelectors>();
-
-    const runOn = async (url: string, keys: readonly SelectorStringKey[]) => {
-      const subset = pickSelectorSubset(discovered, keys);
-      if (Object.keys(subset).length === 0) return;
-      try {
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20_000 });
-      } catch {
-        // Navigation failed — nothing to validate against; leave these keys
-        // unvalidated (neither true nor false) rather than force a false
-        // negative for a page-load problem unrelated to the selector.
-        return;
-      }
-      const result = await validateSelectors(page, subset);
-      Object.assign(validated, result.validated);
-      for (const key of result.failed) failed.add(key);
-    };
-
-    await runOn(ctx.homeUrl, HOME_VALIDATION_KEYS);
-    if (ctx.plpUrl) await runOn(ctx.plpUrl, PLP_VALIDATION_KEYS);
-    if (ctx.pdpUrl) await runOn(ctx.pdpUrl, PDP_VALIDATION_KEYS);
-
-    await context.close();
-    return { validated, failed: Array.from(failed) };
-  } catch (err) {
-    console.warn(`[selectors] live-validation falhou (não-fatal): ${(err as Error).message}`);
-    return null;
-  } finally {
-    if (browser) await browser.close().catch(() => {});
-  }
 }
 
 function findPdpCapture(flows: FlowCapture[], side: Side): PageCapture | undefined {

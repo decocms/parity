@@ -38,7 +38,9 @@ Do **not** run parity for:
 - Have ONE URL and want to validate it works end-to-end? → `parity e2e` (functional validation)
 - Have ONE URL and only need absolute checks (vitals/console/SEO)? → `parity audit` (lighter, no flows)
 
-`parity e2e` reuses the same flows + checks as `parity run`, just in single-site mode (checks adapt with absolute criteria when one side is empty).
+`parity e2e` reuses the same flows + checks as `parity run`, just in single-site mode (checks adapt with absolute criteria when one side is empty). It also does the same **selector automation** as `run` — platform detection, grounded LLM discovery + live-validation, and learning from each run — so you rarely need to hand-write `.parityrc.json` selectors (`--no-auto-selectors`/`--refresh-selectors`/`--no-learn` mirror `run`).
+
+Do **not** fake single-site with `parity run --prod X --cand X` — it runs everything twice and reports a degenerate self-diff. `run` now rejects a missing `--prod` and points you at `parity e2e` (issue #141).
 
 ## Reading the JSON output
 

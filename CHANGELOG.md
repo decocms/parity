@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+* **`parity e2e` now automates selectors like `parity run` (issue #141).** Single-site runs previously saw only `DEFAULT_SELECTORS` + hand-written `.parityrc.json` — `e2e` never detected the platform, never ran LLM selector discovery, and never learned from its flow runs (so `learned-selectors.json`, keyed by platform, never applied). It now detects the platform, runs the same grounded LLM discovery + live-validation pass, threads the platform into every flow, and promotes selectors learned from real successful interactions. New flags mirror `run`: `--no-auto-selectors`, `--refresh-selectors`, `--no-learn`. The discovery pass is now shared code (`src/engine/selector-discovery-pass.ts`) used by both commands.
+* **Discovery covers the journey variant/quantity keys.** LLM selector discovery now infers `variantRow`, `quantityIncrement`, `quantityInput`, `sizeSwatch`, and `colorSwatch` (grounded on the real PDP and live-validated) — exactly the keys single-site users kept hand-writing in `.parityrc.json`.
+
+### Fixed
+
+* **`purchase-journey-flow` now works in single-site mode.** The check was comparison-only: with no prod baseline it emitted a spurious "prod não produziu captura" issue per viewport instead of evaluating the journey. It now has a single-site branch (prod slot empty) that fails on a failed step or a skipped *critical* step, evaluating the checkout journey on its own terms — while still keeping the "cand crashed" critical signal for real prod↔cand comparisons.
+
+### Changed
+
+* **`parity run` without `--prod` now points you at `parity e2e`.** `--prod` is no longer a hard `requiredOption`; omitting it exits with code 2 and a hint to use `parity e2e --url <cand>` for single-site validation, instead of forcing a wasteful `--prod X --cand X` self-comparison (issue #141).
+
 ## [0.12.0](https://github.com/decocms/parity/compare/v0.11.17...v0.12.0) (2026-07-27)
 
 ### Known issues

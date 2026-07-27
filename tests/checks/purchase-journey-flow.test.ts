@@ -118,13 +118,42 @@ describe("purchaseJourneyFlow check", () => {
     expect(r.issues.some((i) => i.severity === "critical" && /missing-cand/.test(i.id))).toBe(true);
   });
 
-  it("alerta com high quando prod não produziu captura mas cand sim", () => {
-    // Selectors quebrados contra prod (ex.: prod mudou markup) — não é crítico
-    // pra cand mas é regressão do harness; high é o severity certo.
-    const cand = [step("visit-home", "ok")];
+  // ---------- Single-site mode (`parity e2e`, issue #141) ----------
+
+  it("single-site: prod vazio + cand ok → pass, sem issue de missing-prod", () => {
+    // `parity e2e` só popula o slot cand. Sem baseline prod, a jornada é
+    // avaliada por si só — não deve emitir o antigo "missing-prod" comparativo.
+    const cand = [step("visit-home", "ok"), step("add-to-cart", "ok"), step("go-checkout", "ok")];
     const r = purchaseJourneyFlow(ctx([], [flow("cand", cand)]));
-    expect(r.status).toBe("warn");
-    expect(r.issues.some((i) => /missing-prod/.test(i.id))).toBe(true);
+    expect(r.status).toBe("pass");
+    expect(r.issues).toHaveLength(0);
+    expect(r.issues.some((i) => /missing-prod/.test(i.id))).toBe(false);
+  });
+
+  it("single-site: step crítico que falha → fail critical", () => {
+    const cand = [step("visit-home", "ok"), step("add-to-cart", "failed", "buy button não encontrado")];
+    const r = purchaseJourneyFlow(ctx([], [flow("cand", cand)]));
+    expect(r.status).toBe("fail");
+    expect(
+      r.issues.some((i) => i.severity === "critical" && /add-to-cart:failed/.test(i.id)),
+    ).toBe(true);
+  });
+
+  it("single-site: step crítico pulado → fail (jornada não completou)", () => {
+    const cand = [step("visit-home", "ok"), step("go-checkout", "skipped", "checkout button não encontrado")];
+    const r = purchaseJourneyFlow(ctx([], [flow("cand", cand)]));
+    expect(r.status).toBe("fail");
+    expect(r.issues.some((i) => i.severity === "critical" && /go-checkout:skipped/.test(i.id))).toBe(
+      true,
+    );
+  });
+
+  it("single-site: skip de step NÃO crítico não reporta", () => {
+    // shipping-calc-pdp é opcional (single-SKU / sem calculadora de frete).
+    const cand = [step("visit-home", "ok"), step("shipping-calc-pdp", "skipped", "no CEP input")];
+    const r = purchaseJourneyFlow(ctx([], [flow("cand", cand)]));
+    expect(r.status).toBe("pass");
+    expect(r.issues).toHaveLength(0);
   });
 
   it("falha com critical quando flow requisitada mas com 0 steps em ambos os lados", () => {
