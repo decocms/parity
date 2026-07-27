@@ -619,6 +619,15 @@ export const ParityRc = z.object({
   /** Regex (string form) matching server-fn request URLs. Defaults to `_serverFn` (TanStack Start's convention) when unset. */
   serverFnPattern: z.string().optional(),
   /**
+   * Issue #145 — extra CSS selectors for site-specific blocking overlays
+   * (newsletter/discount modals, region pickers, app-install nags) that
+   * `dismissOverlays` should close before/while interacting. Merged with the
+   * built-in defaults (cookie banners, toasts, alertdialogs), never replacing
+   * them. Structural detection (issue #146) handles unnamed overlays that
+   * actually intercept a click; this list is the explicit fast-path override.
+   */
+  overlaySelectors: z.array(z.string()).optional(),
+  /**
    * Issue #143 — how long (ms) the purchase-journey/e2e add-to-cart step
    * polls for a success signal (URL→cart, minicart count increase, drawer
    * open, success toast) before giving up. Defaults to 3000ms. Tune it to a
