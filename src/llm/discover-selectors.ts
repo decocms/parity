@@ -18,6 +18,14 @@ export const DiscoveredSelectorsSchema = z.object({
   cepInputPdp: z.string().optional(),
   cepInputCart: z.string().optional(),
   checkoutButton: z.string().optional(),
+  // PDP variant + quantity (grounded on real PDP HTML; live-validatable). These
+  // are exactly the journey-critical keys single-site users kept hand-writing
+  // in .parityrc.json because discovery never inferred them (issue #141).
+  variantRow: z.string().optional(),
+  quantityIncrement: z.string().optional(),
+  quantityInput: z.string().optional(),
+  sizeSwatch: z.string().optional(),
+  colorSwatch: z.string().optional(),
   // Search flow
   searchTrigger: z.string().optional(),
   searchInput: z.string().optional(),
@@ -106,6 +114,31 @@ const DISCOVER_SELECTORS_TOOL = {
         type: "string",
         description:
           "CSS selector for the FINAL 'Go to checkout' / 'Finalizar compra' / 'Finalizar' button INSIDE the mini-cart drawer or cart page — the one user clicks AFTER reviewing cart items to proceed to checkout/payment. **IMPORTANT**: this is DIFFERENT from `minicart_trigger` (which is the cart ICON in the header). The checkout button is typically a big colored button at the bottom of the cart drawer or cart page. If you cannot see it on the home page (which is common — it's only rendered after add-to-cart), return EMPTY STRING. NEVER return the same selector as `minicart_trigger`.",
+      },
+      variant_row: {
+        type: "string",
+        description:
+          "CSS selector for a VARIANT/SKU option row or its clickable option on a PDP — e.g. a size/voltage/flavor row where the user picks a required variant before buying (e.g. '[data-sku-selector] button', \"[aria-label*='Tamanho']\"). Only meaningful on a PDP with a variant picker. EMPTY STRING for single-SKU products or when you only have the home HTML.",
+      },
+      quantity_increment: {
+        type: "string",
+        description:
+          "CSS selector for the '+' / increment button that raises the quantity of an item on the PDP or in the cart (e.g. \"button[aria-label*='aumentar' i]\", '[data-quantity-increment]'). EMPTY STRING if quantity is a plain number input with no +/- buttons.",
+      },
+      quantity_input: {
+        type: "string",
+        description:
+          "CSS selector for the quantity <input> (a number field) on the PDP or cart, when quantity is typed rather than stepped with +/- buttons (e.g. \"input[name='quantity']\", \"input[type='number']\"). EMPTY STRING if the site uses +/- buttons instead.",
+      },
+      size_swatch: {
+        type: "string",
+        description:
+          "CSS selector for a SIZE swatch/option on a PDP (e.g. \"[aria-label*='Tamanho'] button\", '.size-selector button'). EMPTY STRING if the product has no size options or you only have the home HTML.",
+      },
+      color_swatch: {
+        type: "string",
+        description:
+          "CSS selector for a COLOR swatch/option on a PDP (e.g. \"[aria-label*='Cor'] button\", '.color-selector button'). EMPTY STRING if the product has no color options or you only have the home HTML.",
       },
       search_trigger: {
         type: "string",
@@ -254,6 +287,17 @@ REGRAS:
     ex: \`"pdp_gallery_main"\`) na lista \`low_confidence_keys\`. Isso NÃO faz o valor ser descartado
     — só sinaliza que ele não deve ser promovido como "verificado" antes de validação ao vivo.
 
+12. **Variante + quantidade na PDP** (\`variant_row\`, \`size_swatch\`, \`color_swatch\`,
+    \`quantity_increment\`, \`quantity_input\`): procure DIRETAMENTE na seção \`### PDP\` quando ela
+    estiver presente — é a única fonte confiável pra esses campos. \`variant_row\`/\`size_swatch\`/
+    \`color_swatch\` são a opção que o cliente PRECISA escolher antes de comprar (tamanho, cor,
+    voltagem); em Deco TanStack costumam ser \`[aria-label*='Tamanho '][aria-label*='Disponível']\`
+    ou botões dentro de um seletor de SKU. \`quantity_increment\` é o botão "+" e \`quantity_input\`
+    é o campo numérico de quantidade — retorne apenas UM dos dois conforme a UI (stepper com +/-
+    OU input numérico). Se \`### PDP\` NÃO estiver presente, ou o produto for single-SKU / sem
+    esses controles, retorne STRING VAZIA — defaults e a heurística de variante cuidam do resto.
+    NUNCA chute a partir da home.
+
 Responda SEMPRE via tool_use report_selectors. Não escreva texto livre fora da tool call.
 `.trim();
 
@@ -282,6 +326,11 @@ const SNAKE_TO_CAMEL: Record<string, SelectorStringKey> = {
   cep_input_pdp: "cepInputPdp",
   cep_input_cart: "cepInputCart",
   checkout_button: "checkoutButton",
+  variant_row: "variantRow",
+  quantity_increment: "quantityIncrement",
+  quantity_input: "quantityInput",
+  size_swatch: "sizeSwatch",
+  color_swatch: "colorSwatch",
   search_trigger: "searchTrigger",
   search_input: "searchInput",
   search_suggestions: "searchSuggestions",

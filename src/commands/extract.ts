@@ -11,8 +11,8 @@ import { markdownExporter } from "../extract/exporters/markdown.ts";
 import { extractComponent } from "../extract/extract-component.ts";
 import { componentDirName } from "../extract/naming.ts";
 import type { ExtractBundle, ExtractedComponent, ExtractedPage } from "../types/extract.ts";
+import { firstProductHrefFromPlpHtml } from "../engine/selector-discovery-pass.ts";
 import type { Viewport } from "../types/schema.ts";
-import { firstProductHrefFromPlpHtml } from "./run.ts";
 import { parseViewport } from "./section.ts";
 
 /**

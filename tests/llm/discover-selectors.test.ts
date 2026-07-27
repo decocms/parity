@@ -248,6 +248,30 @@ describe("discoverSelectors multi-page", () => {
     expect(out?.lowConfidenceKeys).toEqual(["pdpGalleryMain"]);
   });
 
+  it("maps the journey variant/quantity keys snake→camel (issue #141)", async () => {
+    llmReturns({
+      category_link: "nav a",
+      product_card: ".card a",
+      buy_button: "#buy",
+      minicart_trigger: "#cart",
+      variant_row: "[data-sku-selector] button",
+      quantity_increment: "[data-quantity-increment]",
+      quantity_input: "input[name='quantity']",
+      size_swatch: "[aria-label*='Tamanho'] button",
+      color_swatch: "[aria-label*='Cor'] button",
+    });
+    const out = await discoverSelectors(
+      { home: "https://z6.com/" },
+      { home: HOME_HTML },
+      { cacheDir: dir },
+    );
+    expect(out?.variantRow).toBe("[data-sku-selector] button");
+    expect(out?.quantityIncrement).toBe("[data-quantity-increment]");
+    expect(out?.quantityInput).toBe("input[name='quantity']");
+    expect(out?.sizeSwatch).toBe("[aria-label*='Tamanho'] button");
+    expect(out?.colorSwatch).toBe("[aria-label*='Cor'] button");
+  });
+
   it("omits lowConfidenceKeys entirely when the tool doesn't report any", async () => {
     llmReturns({
       category_link: "nav a",
