@@ -709,53 +709,323 @@ export async function extractProductTitle(page: Page): Promise<string | null> {
   return null;
 }
 
-export async function dismissOverlays(page: Page, ctx: FlowContext): Promise<void> {
-  const overlaySelectors = [
-    "[class*='cookie' i][class*='banner' i]",
-    "[class*='cookie' i][class*='consent' i]",
-    "[id*='cookie' i][class*='banner' i]",
-    "[role='alertdialog']:visible",
-    "[class*='toast' i]:visible",
-    "[class*='snackbar' i]:visible",
-    "[class*='added-to-cart' i]:visible",
-    "[class*='product-added' i]:visible",
-  ];
-  let dismissedAny = false;
-  for (const sel of overlaySelectors) {
+/**
+ * Built-in overlay patterns closed by {@link dismissOverlays}. Deliberately
+ * narrow (cookie/consent/toast/alertdialog) — NOT generic `[role='dialog']`
+ * or `[class*='modal']`, because this runs after opening the cart and those
+ * would match the cart drawer itself. Site-specific popups (newsletter,
+ * discount) go in `.parityrc.json` `overlaySelectors` (#145); unnamed popups
+ * that actually intercept a click are handled structurally (#146,
+ * {@link dismissBlockingOverlay}).
+ */
+const DEFAULT_OVERLAY_SELECTORS = [
+  "[class*='cookie' i][class*='banner' i]",
+  "[class*='cookie' i][class*='consent' i]",
+  "[id*='cookie' i][class*='banner' i]",
+  "[role='alertdialog']:visible",
+  "[class*='toast' i]:visible",
+  "[class*='snackbar' i]:visible",
+  "[class*='added-to-cart' i]:visible",
+  "[class*='product-added' i]:visible",
+  // Generic signup/discount modals (issue #145) — matched by intent-naming
+  // that a cart drawer never uses.
+  "[id*='newsletter' i]:visible",
+  "[class*='newsletter' i]:visible",
+  "[id*='signup-popup' i]:visible",
+  "[class*='signup' i][class*='popup' i]:visible",
+];
+
+/** Close-button affordances tried when dismissing an overlay (broadened per #146). */
+const CLOSE_BUTTON_SELECTOR =
+  "button[aria-label*='close' i], [aria-label*='close' i], button[aria-label*='fechar' i], [aria-label*='fechar' i], [data-close], [data-dismiss], [data-qa-dismiss], button[class*='close' i], button:has-text('×'), button:has-text('✕')";
+
+/**
+ * Effective overlay-selector list: built-in defaults + user
+ * `.parityrc.json` `overlaySelectors`, deduped, defaults first (#145).
+ */
+export function overlaySelectorsFor(rc: FlowContext["rc"]): string[] {
+  const extra = rc?.overlaySelectors ?? [];
+  return [...new Set([...DEFAULT_OVERLAY_SELECTORS, ...extra])];
+}
+
+/**
+ * Structured record of an overlay dismissal, logged into the step's
+ * `flowCapture` detail so a report always shows WHY a click was intercepted —
+ * even when dismissal succeeded (a silent successful dismiss would otherwise
+ * be invisible, and a failed one just reads as "no-signal"). Issue #146.
+ */
+export interface OverlayDismissal {
+  /** Why we acted: the intended click point was covered, or a named overlay matched. */
+  reason: "click-point-intercepted" | "selector-match";
+  /** Topmost/overlay element descriptor for the report. */
+  tag: string;
+  id?: string;
+  className?: string;
+  /** Whether the overlay covers >60% of the viewport (backdrop dismiss won't help). */
+  fullViewport?: boolean;
+  /** How we tried to close it (last attempt if `dismissed` is false). */
+  method: "escape" | "close-button" | "backdrop-click" | "neutralized";
+  /** Did the intercepting overlay actually clear? */
+  dismissed: boolean;
+}
+
+interface BlockerInfo {
+  tag: string;
+  id?: string;
+  className?: string;
+  fullViewport: boolean;
+}
+
+/**
+ * Structural interception check (#146): is something other than `target`
+ * (or a descendant of it) the topmost element at `target`'s click point?
+ * Shape-agnostic — no class/id name matching. Returns the covering overlay's
+ * outermost positioned ancestor, or `null` when the target is clickable.
+ */
+async function blockerAtTarget(target: Locator): Promise<BlockerInfo | null> {
+  return await withCap(
+    target
+      .evaluate((el) => {
+        const node = el as HTMLElement;
+        const rect = node.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return null;
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const top = document.elementFromPoint(cx, cy) as HTMLElement | null;
+        // Clickable: topmost is the target itself or a descendant of it.
+        if (!top || top === node || node.contains(top)) return null;
+        // Walk up from the intercepting element to the outermost
+        // fixed/sticky/absolute ancestor — the overlay/backdrop root.
+        let cur: HTMLElement | null = top;
+        let overlay: HTMLElement = top;
+        while (cur && cur !== document.body) {
+          const pos = getComputedStyle(cur).position;
+          if (pos === "fixed" || pos === "sticky" || pos === "absolute") overlay = cur;
+          cur = cur.parentElement;
+        }
+        const r = overlay.getBoundingClientRect();
+        const coverage = (r.width * r.height) / (window.innerWidth * window.innerHeight);
+        const cls = typeof overlay.className === "string" ? overlay.className : "";
+        return {
+          tag: overlay.tagName.toLowerCase(),
+          id: overlay.id || undefined,
+          className: cls ? cls.slice(0, 120) : undefined,
+          fullViewport: coverage > 0.6,
+        } as BlockerInfo;
+      })
+      .catch(() => null),
+    2_000,
+    null,
+  );
+}
+
+/**
+ * Find an icon/close control inside the overlay intercepting `target` — a
+ * SMALL clickable (≤72px) near a corner, prioritising ones whose
+ * label/class/text looks close-like, then the one nearest the top-right (the
+ * conventional close position). Catches unnamed close buttons (e.g. a bare
+ * `<button><svg/></button>` with no aria-label) that name-based selectors
+ * miss — the montecarlo DaisyUI drawer case. Returns viewport coords to click,
+ * or `null`. Issue #146.
+ */
+async function findOverlayCloseControl(target: Locator): Promise<{ x: number; y: number } | null> {
+  return await withCap(
+    target
+      .evaluate((el) => {
+        const node = el as HTMLElement;
+        const rect = node.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return null;
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const top = document.elementFromPoint(cx, cy) as HTMLElement | null;
+        if (!top || top === node || node.contains(top)) return null;
+        let cur: HTMLElement | null = top;
+        let overlay: HTMLElement = top;
+        while (cur && cur !== document.body) {
+          const pos = getComputedStyle(cur).position;
+          if (pos === "fixed" || pos === "sticky" || pos === "absolute") overlay = cur;
+          cur = cur.parentElement;
+        }
+        const orect = overlay.getBoundingClientRect();
+        const clickables = Array.from(
+          overlay.querySelectorAll("button, a, [role='button']"),
+        ) as HTMLElement[];
+        let best: { x: number; y: number; score: number } | null = null;
+        for (const c of clickables) {
+          const r = c.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0 || r.width > 72 || r.height > 72) continue;
+          const label = `${c.getAttribute("aria-label") ?? ""} ${
+            typeof c.className === "string" ? c.className : ""
+          } ${c.textContent ?? ""}`.toLowerCase();
+          const named = /close|fechar|dismiss|×|✕/.test(label);
+          // Distance to the overlay's top-right corner (smaller = better).
+          const distTopRight = Math.hypot(orect.right - r.right, r.top - orect.top);
+          const score = (named ? 0 : 100_000) + distTopRight;
+          if (!best || score < best.score) {
+            best = { x: r.left + r.width / 2, y: r.top + r.height / 2, score };
+          }
+        }
+        return best ? { x: best.x, y: best.y } : null;
+      })
+      .catch(() => null),
+    2_000,
+    null,
+  );
+}
+
+/**
+ * Last resort (#146): when every polite dismissal has failed, hide the
+ * overlay that is actually covering `target`'s click point. Guarded — it
+ * NEVER hides an ancestor of the target (that would hide the target too), so
+ * it only removes a genuinely separate interceptor (a modal backdrop, a promo
+ * drawer). Can't manufacture a false success: the add-to-cart step still
+ * requires a real confirmation signal afterward. Returns whether it hid
+ * something.
+ */
+async function neutralizeBlockerAtTarget(target: Locator): Promise<boolean> {
+  return await withCap(
+    target
+      .evaluate((el) => {
+        const node = el as HTMLElement;
+        const rect = node.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const top = document.elementFromPoint(cx, cy) as HTMLElement | null;
+        if (!top || top === node || node.contains(top)) return false;
+        let cur: HTMLElement | null = top;
+        let overlay: HTMLElement = top;
+        while (cur && cur !== document.body) {
+          const pos = getComputedStyle(cur).position;
+          if (pos === "fixed" || pos === "sticky" || pos === "absolute") overlay = cur;
+          cur = cur.parentElement;
+        }
+        // Never hide an ancestor of the target (would hide the target too).
+        if (overlay.contains(node)) return false;
+        overlay.style.setProperty("display", "none", "important");
+        return true;
+      })
+      .catch(() => false),
+    2_000,
+    false,
+  );
+}
+
+/**
+ * When a click at `target` is being intercepted by an overlay (detected
+ * structurally, not by name), try to clear it least-destructive-first —
+ * Escape, a named close button, an icon/geometry close control inside the
+ * overlay, a backdrop click, and finally (guarded) hiding the interceptor
+ * outright — re-checking interception after each. Returns
+ * an {@link OverlayDismissal} describing what was found and whether it
+ * cleared, or `null` when nothing was blocking the target. Issue #146.
+ */
+export async function dismissBlockingOverlay(
+  page: Page,
+  ctx: FlowContext,
+  target: Locator,
+): Promise<OverlayDismissal | null> {
+  const blocker = await blockerAtTarget(target);
+  if (!blocker) return null;
+  const base = {
+    reason: "click-point-intercepted" as const,
+    tag: blocker.tag,
+    id: blocker.id,
+    className: blocker.className,
+    fullViewport: blocker.fullViewport,
+  };
+  const cleared = async () => (await blockerAtTarget(target)) === null;
+
+  // 1. Escape — closes most modal implementations without hunting for a button.
+  await page.keyboard.press("Escape").catch(() => undefined);
+  await page.waitForTimeout(300);
+  if (await cleared()) {
+    dlog(ctx, `  overlay: dismissed via Escape (${describe(blocker)})`);
+    return { ...base, method: "escape", dismissed: true };
+  }
+
+  // 2. Close-like button anywhere on the page (fallback, broadened selectors).
+  const closer = page.locator(CLOSE_BUTTON_SELECTOR).first();
+  if (await withCap(closer.isVisible({ timeout: 300 }).catch(() => false), 500, false)) {
+    await closer.click({ timeout: 1_500 }).catch(() => undefined);
+    await page.waitForTimeout(300);
+    if (await cleared()) {
+      dlog(ctx, `  overlay: dismissed via close button (${describe(blocker)})`);
+      return { ...base, method: "close-button", dismissed: true };
+    }
+  }
+
+  // 2b. Icon/geometry close control inside the overlay (unnamed X buttons that
+  //     name-based selectors miss — e.g. a bare `<button><svg/></button>`).
+  const closeXY = await findOverlayCloseControl(target);
+  if (closeXY) {
+    await page.mouse.click(closeXY.x, closeXY.y).catch(() => undefined);
+    await page.waitForTimeout(300);
+    if (await cleared()) {
+      dlog(ctx, `  overlay: dismissed via icon close control (${describe(blocker)})`);
+      return { ...base, method: "close-button", dismissed: true };
+    }
+  }
+
+  // 3. Backdrop click at a top-left corner. Even a full-viewport overlay is
+  //    often a click-to-dismiss backdrop (e.g. a DaisyUI `drawer-overlay`
+  //    label that closes the drawer on any click) with the modal panel in the
+  //    centre/side — so a corner click lands on the backdrop, not the content.
+  await page.mouse.click(5, 5).catch(() => undefined);
+  await page.waitForTimeout(300);
+  if (await cleared()) {
+    dlog(ctx, `  overlay: dismissed via backdrop click (${describe(blocker)})`);
+    return { ...base, method: "backdrop-click", dismissed: true };
+  }
+
+  // 4. Last resort — hide the confirmed interceptor (guarded: never an
+  //    ancestor of the target). This is the "deal with it regardless of what
+  //    it's named" path (#146); it's always logged so a genuinely
+  //    checkout-blocking modal still shows up as `method: "neutralized"`.
+  if (await neutralizeBlockerAtTarget(target)) {
+    await page.waitForTimeout(150);
+    if (await cleared()) {
+      dlog(ctx, `  overlay: neutralized (hidden) as last resort (${describe(blocker)})`);
+      return { ...base, method: "neutralized", dismissed: true };
+    }
+  }
+
+  dlog(ctx, `  overlay: detected but NOT dismissed (${describe(blocker)})`);
+  return { ...base, method: "backdrop-click", dismissed: false };
+}
+
+function describe(b: BlockerInfo): string {
+  return `${b.tag}${b.id ? `#${b.id}` : ""}${b.className ? `.${b.className.split(/\s+/)[0]}` : ""}`;
+}
+
+/**
+ * Generic pre-interaction sweep: close any currently-visible overlay matching
+ * the effective selector list (#145). Structural per-click interception is
+ * handled separately by {@link dismissBlockingOverlay} (#146). Returns the
+ * dismissals performed (empty when nothing matched).
+ */
+export async function dismissOverlays(page: Page, ctx: FlowContext): Promise<OverlayDismissal[]> {
+  const dismissals: OverlayDismissal[] = [];
+  for (const sel of overlaySelectorsFor(ctx.rc)) {
     try {
       const overlay = page.locator(sel).first();
-      if (
-        !(await withCap(
-          overlay.isVisible({ timeout: 200 }).catch(() => false),
-          400,
-          false,
-        ))
-      )
+      if (!(await withCap(overlay.isVisible({ timeout: 200 }).catch(() => false), 400, false)))
         continue;
-      const closer = overlay
-        .locator(
-          "button[aria-label*='close' i], button[aria-label*='fechar' i], button[class*='close' i], [data-close], [aria-label='Close']",
-        )
-        .first();
-      if (
-        await withCap(
-          closer.isVisible({ timeout: 200 }).catch(() => false),
-          400,
-          false,
-        )
-      ) {
+      const closer = overlay.locator(CLOSE_BUTTON_SELECTOR).first();
+      if (await withCap(closer.isVisible({ timeout: 200 }).catch(() => false), 400, false)) {
         await closer.click({ timeout: 1_500 }).catch(() => undefined);
-        dismissedAny = true;
+        dismissals.push({ reason: "selector-match", tag: sel, method: "close-button", dismissed: true });
         continue;
       }
       await page.keyboard.press("Escape").catch(() => undefined);
-      dismissedAny = true;
+      dismissals.push({ reason: "selector-match", tag: sel, method: "escape", dismissed: true });
     } catch {
       /* try next */
     }
   }
-  if (dismissedAny) {
-    dlog(ctx, "  openMinicart: dismissed overlay(s) before interacting");
+  if (dismissals.length > 0) {
+    dlog(ctx, `  dismissed ${dismissals.length} overlay(s) before interacting`);
     await page.waitForTimeout(500);
   }
+  return dismissals;
 }

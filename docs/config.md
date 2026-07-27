@@ -39,7 +39,8 @@ Selector overrides and run defaults. Placed at the project root.
   },
   "serverFnFloodBudget": 10,
   "serverFnPattern": "_serverFn",
-  "addToCartConfirmMs": 2000
+  "addToCartConfirmMs": 2000,
+  "overlaySelectors": ["#NewsletterPopup", "[data-newsletter-popup]"]
 }
 ```
 
@@ -70,6 +71,20 @@ is short-lived, or when slow TTFB / popup overlays narrow the window, to avoid
 a false "no signal" failure on an add-to-cart that actually worked. Also
 settable per-run with `--add-to-cart-timeout <ms>` (on `parity run` and
 `parity e2e`), which overrides the rc value.
+
+`overlaySelectors` (issue #145) lists extra CSS selectors for site-specific
+blocking overlays — newsletter/discount modals, region pickers, app-install
+nags — that the flow runner should close before/while interacting. It's
+**merged with** the built-in defaults (cookie banners, toasts, alertdialogs),
+never replacing them. You usually won't need it: unnamed overlays that
+actually intercept a click are handled **structurally** (issue #146) — before
+retrying a failed add-to-cart, parity checks whether the buy button is still
+the topmost element at its click point (`document.elementFromPoint`) and, if
+something is covering it, dismisses it least-destructive-first (Escape → a
+close-like button → a backdrop click) and retries once. What was detected and
+how it was dismissed is recorded in the step's `detail.overlayDismissed`, so a
+report shows *why* a click was intercepted even when dismissal succeeded.
+`overlaySelectors` is the explicit fast-path override for a known modal.
 
 `paginationNext` / `loadMoreButton` override the selectors the `plp` flow
 uses to detect how a PLP paginates (next-page link, "load more" button, or —

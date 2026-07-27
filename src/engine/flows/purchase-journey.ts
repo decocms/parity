@@ -11,7 +11,7 @@ import {
   validateCartContainsTitle,
   waitForCartHydration,
 } from "./cart-helpers.ts";
-import type { FlowContext, StepActionResult } from "./shared.ts";
+import type { FlowContext, OverlayDismissal, StepActionResult } from "./shared.ts";
 import {
   ADD_TO_CART_ERROR_PATTERNS,
   ADD_TO_CART_SUCCESS_PATTERNS,
@@ -20,6 +20,7 @@ import {
   attemptStepAction,
   clickAndMaybeWait,
   detectLandingPage,
+  dismissBlockingOverlay,
   dlog,
   extractProductTitle,
   fillCep,
@@ -448,12 +449,33 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
       }
     }
 
+    // Issue #145/#146: a "no-signal" failure is often not a broken cart but an
+    // overlay intercepting the click — classically a newsletter/discount modal
+    // that pops on the very `mousemove` Playwright's `.click()` dispatches, in
+    // a cookie-less session. Detect it structurally (is the buy button still
+    // the topmost element at its click point?), dismiss it, and retry once.
+    let overlayDismissed: OverlayDismissal | undefined;
+    if (validation.status === "failed" && validation.signal === "no-signal") {
+      const od = await dismissBlockingOverlay(page, ctx, buyHit.locator);
+      if (od) {
+        overlayDismissed = od;
+        if (od.dismissed) {
+          await page.waitForTimeout(300);
+          await buyHit.locator.click({ timeout: 5_000 }).catch(() => undefined);
+          validation = await validateAddToCart(page, ctx, cartCountBefore, beforeUrl6);
+        }
+      }
+    }
+
     const sp6 = screenshotPath(ctx, "pj-6-add-cart");
     await screenshotStable(page, { path: sp6, fullPage: false });
     const buyActionDesc = `Clicou no botão${buyText ? ` '${buyText.slice(0, 40).trim()}'` : ""} (\`${buyHit.selector}\`)${buyRecovered ? " — selector veio de recovery LLM" : ""}`;
+    const overlayNote = overlayDismissed
+      ? ` — overlay ${overlayDismissed.tag}${overlayDismissed.id ? `#${overlayDismissed.id}` : ""} ${overlayDismissed.dismissed ? `dismissed (${overlayDismissed.method}), click retried` : "detected but NOT dismissed"}`
+      : "";
     const fullActionDesc = variantRetryNote
-      ? `${buyActionDesc} — ${variantRetryNote} — ${validation.note}`
-      : `${buyActionDesc} — ${validation.note}`;
+      ? `${buyActionDesc} — ${variantRetryNote}${overlayNote} — ${validation.note}`
+      : `${buyActionDesc}${overlayNote} — ${validation.note}`;
     steps.push({
       step: 6,
       name: "add-to-cart",
@@ -474,6 +496,7 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
         signal: validation.signal,
         errorText: validation.errorText,
         variantRetry: variantRetryNote,
+        overlayDismissed,
       },
     });
     reportEnd(
