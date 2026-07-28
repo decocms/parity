@@ -83,30 +83,52 @@ export interface LaunchOptions {
 
 export async function launchBrowser(opts: LaunchOptions = {}): Promise<Browser> {
   const doLaunch = () =>
-    chromium.launch({
-      headless: opts.headless ?? true,
-      slowMo: opts.slowMo ?? 0,
-      // 30 s hard ceiling on the launch handshake. Playwright implements this
-      // at the subprocess/pipe level, so it fires even when libuv is blocked
-      // (unlike JS timers). Without this, headless-shell on macOS can hang
-      // indefinitely if the browser stalls before writing to its startup pipe.
-      timeout: 30_000,
-      args: [
-        "--disable-blink-features=AutomationControlled",
-        // Prevents macOS sandbox_init stalls that headless-shell triggers when
-        // no GUI session is present. Safe for CLI testing tools.
-        "--no-sandbox",
-        // Avoids GPU-init hangs in headless mode on macOS and Linux CI.
-        "--disable-gpu",
-      ],
-    });
+    // JS-level race as a 35 s backstop: Playwright's own pipe-level timeout
+    // (30 s) sometimes doesn't fire on macOS when the Chromium subprocess
+    // stalls inside the zygote/sandbox init before writing anything to the
+    // pipe, leaving the Node event loop blocked with no pending microtasks.
+    // The extra 5 s gap lets Playwright's timeout win first in normal cases.
+    Promise.race([
+      chromium.launch({
+        headless: opts.headless ?? true,
+        slowMo: opts.slowMo ?? 0,
+        // 30 s hard ceiling on the launch handshake at the subprocess/pipe
+        // level — fires even when libuv is blocked (unlike JS timers).
+        timeout: 30_000,
+        args: [
+          "--disable-blink-features=AutomationControlled",
+          // Prevents macOS sandbox_init stalls that headless-shell triggers
+          // when no GUI session is present. Safe for CLI testing tools.
+          "--no-sandbox",
+          // Belt-and-suspenders: removes the inner setuid sandbox that
+          // --no-sandbox doesn't cover and that can also deadlock on macOS.
+          "--disable-setuid-sandbox",
+          // Avoids GPU-init hangs in headless mode on macOS and Linux CI.
+          "--disable-gpu",
+          // Disables the zygote launcher process. The zygote inherits open
+          // file descriptors from the parent and on macOS headless it can
+          // deadlock waiting for a socket that never connects (issue #163).
+          "--no-zygote",
+        ],
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("Chromium launch timeout (35 s)")),
+          35_000,
+        ),
+      ),
+    ]);
   try {
     return await doLaunch();
   } catch (err) {
     const msg = (err as Error).message ?? "";
-    // Playwright TimeoutError: browser process failed to start within 30 s.
+    // Playwright TimeoutError or JS-level race timeout.
     // Common on macOS with headless-shell against localhost (issue #163).
-    if (msg.includes("Timeout") || msg.includes("timed out")) {
+    if (
+      msg.includes("Timeout") ||
+      msg.includes("timed out") ||
+      msg.includes("Chromium launch timeout")
+    ) {
       throw new Error(
         [
           "Chromium timed out while launching (30 s).",
