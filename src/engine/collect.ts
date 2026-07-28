@@ -499,6 +499,25 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
   let vitals: WebVitals | null = null;
   let html = "";
 
+  // Resolve immediately when the browser process dies or the page crashes so
+  // the outer race returns a partial capture instead of hanging until the
+  // 10s-safety-margin timeout (or indefinitely when the event loop stalls).
+  let _resolveDisconnect!: () => void;
+  const disconnectPromise = new Promise<void>((r) => {
+    _resolveDisconnect = r;
+  });
+  const browser = page.context().browser();
+  const handleBrowserDisconnect = (): void => {
+    dlog(opts.side, opts.viewport, "    capturePage: browser disconnected — aborting capture");
+    _resolveDisconnect();
+  };
+  const handlePageCrash = (): void => {
+    dlog(opts.side, opts.viewport, "    capturePage: page crashed — aborting capture");
+    _resolveDisconnect();
+  };
+  browser?.on("disconnected", handleBrowserDisconnect);
+  page.on("crash", handlePageCrash);
+
   const inner = async (): Promise<PageCapture> => {
     try {
       dlog(opts.side, opts.viewport, `    capturePage: goto(${opts.url}) start`);
@@ -717,9 +736,14 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
   // Outer hard deadline = budget + 10s safety. If anything still hangs past
   // its declared internal timeout, fall back to a partial capture rather
   // than blocking the whole crawl.
+  //
+  // disconnectPromise is an additional leg: if the browser process dies
+  // mid-capture (crash / OOM kill), the race resolves immediately instead of
+  // waiting for the safety-margin timeout or — worse — hanging indefinitely
+  // when a wedged CDP socket prevents the event loop from advancing.
   const SAFETY_MARGIN_MS = 10_000;
   const outerDeadlineMs = overallBudgetMs + SAFETY_MARGIN_MS;
-  return Promise.race([
+  const result = await Promise.race([
     inner(),
     new Promise<PageCapture>((resolve) =>
       setTimeout(() => {
@@ -730,5 +754,15 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
         resolve(buildPartial());
       }, outerDeadlineMs),
     ),
+    disconnectPromise.then((): PageCapture => {
+      state.console.push({
+        type: "error",
+        text: "[browser-disconnected] browser/page crashed — returning partial capture",
+      });
+      return buildPartial();
+    }),
   ]);
+  browser?.off("disconnected", handleBrowserDisconnect);
+  page.off("crash", handlePageCrash);
+  return result;
 }
