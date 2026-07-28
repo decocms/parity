@@ -22,6 +22,7 @@ import {
   clickAndMaybeWait,
   detectLandingPage,
   dismissBlockingOverlay,
+  dismissOverlays,
   dlog,
   extractProductTitle,
   fillCep,
@@ -857,6 +858,13 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
     }
     const spBefore9 = screenshotPath(ctx, "pj-9-checkout-before");
     await screenshotStable(page, { path: spBefore9, fullPage: false });
+    // A popup can appear between step 7 (minicart opens) and step 9 — e.g.
+    // a newsletter modal triggered by exit-intent during mouse movement.
+    // Dismiss it before attempting the checkout click (issue #165).
+    await Promise.race([
+      dismissOverlays(page, ctx),
+      new Promise<void>((resolve) => setTimeout(resolve, 4_000)),
+    ]);
     // Click + URL race, with up to 2 LLM-recovery retries when the click
     // misses (selector matched a wrong button — common when discovery
     // confused the cart icon for the checkout button).
@@ -874,6 +882,21 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
       await page.waitForTimeout(1_500);
       reachedCheckout = /\/(checkout|carrinho)(\/|$|\?)/i.test(page.url());
       if (reachedCheckout) break;
+      // If a blocking overlay intercepted the click, dismiss it structurally
+      // and retry once before falling back to LLM selector recovery (issue #165).
+      if (checkoutHit) {
+        const blocker = await dismissBlockingOverlay(page, ctx, checkoutHit.locator);
+        if (blocker?.dismissed) {
+          dlog(ctx, `step 9 go-checkout: cleared blocking overlay (${blocker.method}) — retrying click`);
+          await Promise.all([
+            page.waitForURL(/\/(checkout|carrinho)/i, { timeout: 10_000 }).catch(() => undefined),
+            checkoutHit.locator.click({ timeout: 5_000 }).catch(() => undefined),
+          ]);
+          await page.waitForTimeout(1_500);
+          reachedCheckout = /\/(checkout|carrinho)(\/|$|\?)/i.test(page.url());
+          if (reachedCheckout) break;
+        }
+      }
       // Click landed but didn't navigate — try LLM recovery for a different
       // selector before giving up. Some sites have a non-checkout button that
       // happens to match generic text selectors.
