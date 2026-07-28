@@ -539,6 +539,8 @@ export const ParityRc = z.object({
       quantityInput: z.string().optional(),
       minicartCount: z.string().optional(),
       cartOpenedIndicator: z.string().optional(),
+      /** Issue #149 — the minicart drawer/panel root when open, for reveal detection. */
+      minicartPanel: z.string().optional(),
       // Search flow
       searchTrigger: z.string().optional(),
       searchInput: z.string().optional(),

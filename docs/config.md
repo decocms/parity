@@ -40,7 +40,8 @@ Selector overrides and run defaults. Placed at the project root.
   "serverFnFloodBudget": 10,
   "serverFnPattern": "_serverFn",
   "addToCartConfirmMs": 2000,
-  "overlaySelectors": ["#NewsletterPopup", "[data-newsletter-popup]"]
+  "overlaySelectors": ["#NewsletterPopup", "[data-newsletter-popup]"],
+  "minicartPanel": "[data-qa-minicart]"
 }
 ```
 
@@ -85,6 +86,16 @@ close-like button → a backdrop click) and retries once. What was detected and
 how it was dismissed is recorded in the step's `detail.overlayDismissed`, so a
 report shows *why* a click was intercepted even when dismissal succeeded.
 `overlaySelectors` is the explicit fast-path override for a known modal.
+
+`minicartPanel` (issue #149) identifies the minicart drawer/panel root element
+when open. It is used by `isCartUiVisible` (the fallback for reveal detection
+when no product title can be found) and by `validateCartContainsTitleQuick`
+(the title-scope sweep after add-to-cart). The built-in defaults cover common
+`data-minicart*`, `data-testid`, and name-based class patterns — but a
+`data-qa-*` or pure-Tailwind site has none of those, so the detection is
+permanently blind. Override with a single selector that targets the drawer
+root, e.g. `"[data-qa-minicart]"` for a DaisyUI drawer whose root carries that
+test attribute. The override is tried before all hardcoded patterns.
 
 `paginationNext` / `loadMoreButton` override the selectors the `plp` flow
 uses to detect how a PLP paginates (next-page link, "load more" button, or —

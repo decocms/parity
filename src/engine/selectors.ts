@@ -239,6 +239,22 @@ export const DEFAULT_SELECTORS = {
     "[role='dialog']:has-text('adicionado')",
     "[role='dialog']:has-text('added')",
   ],
+  // The minicart drawer/panel ROOT when open — used to confirm the cart was
+  // revealed (issue #149). Name-based patterns false-negative on utility-CSS
+  // (Tailwind) + `data-qa-*` markup, so the data-attribute forms come first
+  // and are the ones a project overrides in `.parityrc.json` (e.g. the
+  // montecarlo drawer is `<div data-qa-minicart class="flex flex-col …">`).
+  minicartPanel: [
+    "[data-qa-minicart]",
+    "[data-minicart]",
+    "[data-minicart-drawer]",
+    "[data-drawer='minicart']",
+    "[data-testid='minicart']",
+    "[data-testid='cart-drawer']",
+    "[class*='minicart' i]",
+    "[class*='cart-drawer' i]",
+    "[class*='drawer-cart' i]",
+  ],
   cartItemRow: [
     "[data-cart-item]",
     "[data-testid='cart-item']",
