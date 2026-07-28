@@ -603,6 +603,23 @@ export async function validateCartContainsTitle(
     await page.waitForTimeout(2_000);
     observed = await sweepTitles();
   }
+  if (observed.length === 0) {
+    // Issue #157: panel may be visible but empty because an on-demand cart
+    // (react-query, lazy hydration) hasn't fired its fetch yet — e.g. when the
+    // drawer opened as a side-effect of a toast rather than via cart-icon click.
+    // Wait up to 5s for any child element to appear inside the panel before
+    // declaring the cart empty; if one appears, sweep titles one final time.
+    const panelSelectors = selFor(ctx, "minicartPanel");
+    if (panelSelectors.length > 0) {
+      dlog(ctx, "  validateCartContainsTitle: panel empty — waiting up to 5s for hydration");
+      await Promise.race(
+        panelSelectors.map((p) =>
+          page.waitForSelector(`${p} *`, { timeout: 5_000 }).catch(() => undefined),
+        ),
+      );
+      observed = await sweepTitles();
+    }
+  }
   dlog(ctx, `  validateCartContainsTitle: observed ${observed.length} titles`);
   if (observed.length === 0) {
     return { found: false, observedTitles: [], method: "none" };
