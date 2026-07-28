@@ -84,6 +84,14 @@ export interface RecoverInput {
   html: string;
   /** Optional: hint of what selectors were already tried */
   alreadyTried?: string[];
+  /**
+   * Optional: concrete evidence about WHY the step failed, e.g.
+   * "waited 4000ms/4000ms — present-but-hidden: [data-qa-minicart]". When set,
+   * this is more informative than a bare "not found" — it tells the LLM
+   * whether the right element exists but stayed hidden (an animation/timing
+   * problem, not a selector problem) vs never appeared at all.
+   */
+  diagnostics?: string;
 }
 
 /**
@@ -142,6 +150,8 @@ REGRAS CRÍTICAS:
 
 9. **Quando incerto, retorne selector="" (string vazia).** É preferível que o flow declare a falha honestamente a chutar um seletor errado que apenas clica em coisa aleatória. Em especial: se a página parece ser uma LANDING PAGE (sem buy form, sem schema:Product, sem preço) e o step pede um buy/variant/cep selector, retorne string vazia — não force uma sugestão.
 
+10. **Se receber "Diagnóstico" com "present-but-hidden: &lt;seletor&gt;"**, isso significa que ESSE seletor específico já casa o elemento certo no DOM, mas ele ficou invisível pelo tempo orçado — é um problema de timing/animação/dados assíncronos, NÃO um seletor errado. NÃO sugira esse mesmo seletor de novo. Considere: (a) um seletor de TRIGGER diferente que realmente dispara a revelação (ex: o clique caiu num elemento errado), ou (b) se nada mais plausível existe, retorne selector="" — não invente um seletor alternativo só para dar uma resposta.
+
 Responda SEMPRE via tool_use suggest_recovery.
 `.trim();
 
@@ -155,7 +165,7 @@ export async function suggestRecovery(input: RecoverInput): Promise<RecoverySugg
   }>({
     feature: "step-recovery",
     systemPrompt: RECOVERY_SYSTEM_PROMPT,
-    userText: `Step: ${input.stepName}\nAção desejada: ${input.intendedAction}\n${input.alreadyTried?.length ? `Já tentei (não repita estes): ${input.alreadyTried.join(", ")}\n` : ""}\nHTML compactado da página NESTE momento:\n\`\`\`html\n${compacted}\n\`\`\``,
+    userText: `Step: ${input.stepName}\nAção desejada: ${input.intendedAction}\n${input.alreadyTried?.length ? `Já tentei (não repita estes): ${input.alreadyTried.join(", ")}\n` : ""}${input.diagnostics ? `Diagnóstico: ${input.diagnostics}\n` : ""}\nHTML compactado da página NESTE momento:\n\`\`\`html\n${compacted}\n\`\`\``,
     maxTokens: 400,
     tool: {
       name: "suggest_recovery",

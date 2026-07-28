@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.0](https://github.com/decocms/parity/compare/v0.16.0...v0.17.0) (2026-07-28)
+
+### Added
+
+* **`open-minicart`/`add-to-cart` reveal-failure diagnostics fed to LLM recovery.** A poll-based step (waiting for the minicart drawer or an add-to-cart confirmation to appear) previously reported a bare "not found"/"no signal" on timeout, with no evidence of *why*. Failed polls now attach a structured `diagnostics` object to the step (`timedOut`, `budgetMs`, `elapsedMs`, `pollCount`, and a per-selector `probes` snapshot distinguishing "present in the DOM but stayed hidden" from "never matched at all") — surfaced in `report.json` and rendered in the HTML report's step cell. When `open-minicart` fails with this evidence available, parity now spends one LLM recovery attempt passing the diagnostics as concrete context (`RecoverInput.diagnostics`) instead of a bare failure, and the recovery prompt is told not to re-suggest a selector already confirmed present-but-hidden.
+* New `cartRevealTimeoutMs` (issue #149 follow-up) tunes how long `waitForCartReveal` polls for the drawer before giving up. Defaults to 4000ms (8000ms on localhost dev servers, which are slower).
+
+### Fixed
+
+* **`waitForCartReveal` polls instead of snapshotting once.** `openMinicart`'s reveal check (via `isCartRevealed`/Playwright `isVisible()`) was a one-shot read of the drawer's *current* state right after a fixed wait, not an actual wait. Drawers that reveal asynchronously — a CSS `allow-discrete` visibility/opacity transition, a data-gated render (react-query cart), or a slow click handler — can stay `visibility:hidden` (often positioned off-screen) for well over a second after the click, so the single snapshot landed inside the hidden window and wrongly reported the cart never opened, even with the correct selector, no overlay, and no console error. `openMinicart` now polls every 200ms up to an adaptive budget instead.
+* **`open-minicart` re-checks for a blocking overlay before giving up.** `dismissOverlays` only ran once at the very top of `openMinicart`, before the trigger was clicked. Confirmed live against a production deploy: a newsletter popup can appear *after* the add-to-cart click and silently intercept the minicart-trigger click (`force: true` clicks whatever is topmost at the coordinates, not necessarily the intended target), so the drawer never opens even though the selector and reveal-polling logic are both correct. `openMinicart` now detects this structurally (mirroring `dismissBlockingOverlay`, issues #145/#146) and retries the click once after clearing it.
+
 ## [0.16.0](https://github.com/decocms/parity/compare/v0.15.1...v0.16.0) (2026-07-28)
 
 ### Added

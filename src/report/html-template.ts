@@ -1195,6 +1195,14 @@ export const REPORT_CSS = `
     color: var(--state-warn);
     font-style: italic;
   }
+  .step-diagnostics {
+    margin-top: 4px;
+    font-size: 10px;
+    color: var(--text-muted);
+    border-left: 2px solid var(--state-warn);
+    padding-left: 6px;
+  }
+  .step-diagnostics code { background: var(--surface-base); padding: 1px 4px; border-radius: 3px; }
 
   /* Network waterfall — per-page SVG bar chart. Issue #78. */
   .wf-page {

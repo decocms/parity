@@ -109,6 +109,24 @@ describe("suggestRecovery", () => {
     expect(userText).toMatch(/#failed-1/);
   });
 
+  it("includes diagnostics evidence in the prompt when provided", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    mockCreate.mockResolvedValue({
+      content: [
+        { type: "tool_use", name: "suggest_recovery", input: { selector: "x", action: "click" } },
+      ],
+    });
+    await suggestRecovery({
+      stepName: "open-minicart",
+      intendedAction: "open the cart drawer",
+      html: "<div data-qa-minicart></div>",
+      diagnostics: "waited 4000ms/4000ms (20 poll(s)) — present-but-hidden: [data-qa-minicart]",
+    });
+    const userText = mockCreate.mock.calls[0]?.[0]?.messages?.[0]?.content?.[0]?.text;
+    expect(userText).toMatch(/Diagnóstico/);
+    expect(userText).toMatch(/present-but-hidden: \[data-qa-minicart\]/);
+  });
+
   it("propagates fill action with value", async () => {
     process.env.ANTHROPIC_API_KEY = "sk-test";
     mockCreate.mockResolvedValue({

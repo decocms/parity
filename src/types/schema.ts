@@ -197,6 +197,33 @@ export const StepCapture = z.object({
       errorMessage: z.string().optional(),
     })
     .optional(),
+  /**
+   * Structured "why" data for steps that poll for an async UI change (cart
+   * reveal, add-to-cart confirmation) instead of failing on the first check.
+   * Surfaced in the report AND fed to LLM recovery as concrete evidence —
+   * e.g. "selector X is present but stayed hidden for 4000ms" points at a
+   * slow animation/data-gated render, not a wrong/missing selector, which a
+   * human or LLM debugging a false failure needs to know.
+   */
+  diagnostics: z
+    .object({
+      timedOut: z.boolean().optional(),
+      budgetMs: z.number().optional(),
+      elapsedMs: z.number().optional(),
+      pollCount: z.number().optional(),
+      /** Per-selector snapshot taken when the wait gave up: exists in the DOM vs actually visible. */
+      probes: z
+        .array(
+          z.object({
+            selector: z.string(),
+            present: z.boolean(),
+            visible: z.boolean(),
+          }),
+        )
+        .optional(),
+      toastText: z.string().optional(),
+    })
+    .optional(),
 });
 export type StepCapture = z.infer<typeof StepCapture>;
 
@@ -638,6 +665,15 @@ export const ParityRc = z.object({
    * an add-to-cart that actually worked. Also settable via `--add-to-cart-timeout <ms>`.
    */
   addToCartConfirmMs: z.number().optional(),
+  /**
+   * How long (ms) the open-minicart step polls for the drawer to become
+   * visible before giving up. Drawers often reveal asynchronously (CSS
+   * `allow-discrete` transition, data-gated render, slow dev-mode click
+   * handler), so parity polls rather than snapshotting once. Defaults to
+   * 4000ms (8000ms on localhost dev servers). Raise it for a site whose
+   * minicart animates in slowly or waits on a cart API before rendering.
+   */
+  cartRevealTimeoutMs: z.number().optional(),
 });
 export type ParityRc = z.infer<typeof ParityRc>;
 

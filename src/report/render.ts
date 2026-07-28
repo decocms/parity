@@ -487,11 +487,33 @@ function renderStepCell(s: StepType | undefined, runDir: string): string {
     ? `<div class="step-selector"><code>${esc(s.usedSelector)}</code></div>`
     : "";
   const note = s.note ? `<div class="step-note">${esc(s.note)}</div>` : "";
+  const diagnostics = renderStepDiagnostics(s.diagnostics);
   return `<td class="step-cell ${statusClass}">
     <div class="step-cell-head"><span class="step-status">${s.status}</span>${screenshot}<span class="dim">${s.durationMs}ms</span></div>
     ${selector}
     ${note}
+    ${diagnostics}
   </td>`;
+}
+
+/**
+ * Renders the "why" evidence attached to a poll-based step (cart reveal,
+ * add-to-cart confirmation): elapsed vs budget, and — the most actionable
+ * bit — which candidate selectors were PRESENT but stayed HIDDEN vs never
+ * matched at all. Only rendered when the wait actually timed out.
+ */
+function renderStepDiagnostics(d: StepType["diagnostics"]): string {
+  if (!d?.timedOut) return "";
+  const hidden = d.probes?.filter((p) => p.present && !p.visible) ?? [];
+  const missing = d.probes?.filter((p) => !p.present) ?? [];
+  const rows = [
+    `<div>esperou ${d.elapsedMs}ms / orçamento ${d.budgetMs}ms (${d.pollCount} poll(s))</div>`,
+    ...hidden.map(
+      (p) => `<div>⚠️ presente porém oculto: <code>${esc(p.selector)}</code></div>`,
+    ),
+    ...missing.map((p) => `<div>não encontrado no DOM: <code>${esc(p.selector)}</code></div>`),
+  ];
+  return `<div class="step-diagnostics">${rows.join("")}</div>`;
 }
 
 function renderChecksTable(run: Run): string {
