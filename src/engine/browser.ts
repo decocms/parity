@@ -86,12 +86,36 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Browser> 
     chromium.launch({
       headless: opts.headless ?? true,
       slowMo: opts.slowMo ?? 0,
-      args: ["--disable-blink-features=AutomationControlled"],
+      // 30 s hard ceiling on the launch handshake. Playwright implements this
+      // at the subprocess/pipe level, so it fires even when libuv is blocked
+      // (unlike JS timers). Without this, headless-shell on macOS can hang
+      // indefinitely if the browser stalls before writing to its startup pipe.
+      timeout: 30_000,
+      args: [
+        "--disable-blink-features=AutomationControlled",
+        // Prevents macOS sandbox_init stalls that headless-shell triggers when
+        // no GUI session is present. Safe for CLI testing tools.
+        "--no-sandbox",
+        // Avoids GPU-init hangs in headless mode on macOS and Linux CI.
+        "--disable-gpu",
+      ],
     });
   try {
     return await doLaunch();
   } catch (err) {
     const msg = (err as Error).message ?? "";
+    // Playwright TimeoutError: browser process failed to start within 30 s.
+    // Common on macOS with headless-shell against localhost (issue #163).
+    if (msg.includes("Timeout") || msg.includes("timed out")) {
+      throw new Error(
+        [
+          "Chromium timed out while launching (30 s).",
+          "On macOS, try reinstalling the browser binaries:",
+          "  npx playwright install chromium chromium-headless-shell",
+          "Or set PARITY_SKIP_PLAYWRIGHT_INSTALL=1 and install manually.",
+        ].join("\n"),
+      );
+    }
     if (!msg.includes("Executable doesn't exist")) throw err;
     // First-run after `npm install -g @decocms/parity`: the postinstall
     // hook didn't run (npm `ignore-scripts=true`, or npm 11+ default for
