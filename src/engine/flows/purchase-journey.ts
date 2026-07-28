@@ -8,6 +8,7 @@ import {
   isCartRevealed,
   openMinicart,
   readCartCount,
+  summarizeCartRevealDiagnostics,
   validateCartContainsTitle,
   waitForCartHydration,
 } from "./cart-helpers.ts";
@@ -492,6 +493,7 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
       usedSelector: buyHit.selector,
       recoveredByLlm: buyRecovered || undefined,
       note: validation.status === "ok" ? undefined : validation.note,
+      diagnostics: validation.diagnostics,
       detail: {
         signal: validation.signal,
         errorText: validation.errorText,
@@ -539,6 +541,7 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
     let cartOpenMethod: NonNullable<StepCapture["cartOpenMethod"]> = "failed";
     let miniText = "";
     let cartRevealMode: NonNullable<StepCapture["cartRevealMode"]> = "unknown";
+    let revealDiagnostics: StepCapture["diagnostics"];
     // Probe whether the drawer was ALREADY opened by add-to-cart (e.g. miess
     // prod opens an inline notification on add-to-cart with no further
     // trigger click needed). Used by detectCartRevealMode below as the
@@ -555,8 +558,32 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
         ctx.viewport,
       ).catch(() => "unknown" as const);
       dlog(ctx, `step 7 open-minicart: cartRevealMode=${cartRevealMode}`);
-      const openResult = await openMinicart(page, miniHit, ctx, expectedProductTitle);
+      let openResult = await openMinicart(page, miniHit, ctx, expectedProductTitle);
       cartOpenMethod = openResult.method;
+      revealDiagnostics = openResult.diagnostics;
+      // Issue #(reveal-diagnostics): a "present-but-hidden" diagnostic means
+      // the trigger DID something but the wrong element (or none) actually
+      // revealed — hand the LLM concrete evidence (which selector is stuck
+      // hidden, how long we waited) instead of a bare "not found", and give
+      // it ONE shot at a different trigger before giving up.
+      if (cartOpenMethod === "failed" && revealDiagnostics && budget.remaining > 0) {
+        const recovery = await attemptRecovery(
+          page,
+          ctx,
+          "open-minicart",
+          "Abrir o minicart/drawer do carrinho — o trigger foi clicado mas o drawer não revelou",
+          [miniHit.selector],
+          summarizeCartRevealDiagnostics(revealDiagnostics),
+        );
+        if (recovery) {
+          budget.remaining--;
+          miniHit = recovery;
+          miniRecovered = true;
+          openResult = await openMinicart(page, miniHit, ctx, expectedProductTitle);
+          cartOpenMethod = openResult.method;
+          revealDiagnostics = openResult.diagnostics;
+        }
+      }
     } else {
       // No trigger needed — drawer may already be open from add-to-cart.
       if (drawerAlreadyOpen) {
@@ -619,6 +646,10 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
     const step7QuirkNote = isProdCartEmptyQuirk
       ? "cart-empty-prod-quirk: aceito via --accept-prod-quirks (cartRevealMode validated by separate check)"
       : undefined;
+    const step7RevealFailureNote =
+      cartOpenMethod === "failed" && revealDiagnostics
+        ? `minicart não revelou — ${summarizeCartRevealDiagnostics(revealDiagnostics)}`
+        : undefined;
     steps.push({
       step: 7,
       name: "open-minicart",
@@ -633,7 +664,8 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
       cartOpenMethod,
       cartRevealMode,
       cartValidation: step7Validation,
-      note: step7QuirkNote,
+      diagnostics: revealDiagnostics,
+      note: step7QuirkNote ?? step7RevealFailureNote,
       actionDescription: miniHit
         ? `Abriu minicart via ${cartOpenMethod}${miniText ? ` em '${miniText.slice(0, 30).trim()}'` : ""} (\`${miniHit.selector}\`)${miniRecovered ? " — selector via recovery LLM" : ""}${
             step7Validation
@@ -649,7 +681,7 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
       usedSelector: miniHit?.selector,
       recoveredByLlm: miniRecovered || undefined,
     });
-    reportEnd(7, "open-minicart", step7Status, Date.now() - t7, step7QuirkNote);
+    reportEnd(7, "open-minicart", step7Status, Date.now() - t7, step7QuirkNote ?? step7RevealFailureNote);
 
     // #12 — when prod hit the cart-empty quirk and we accepted it,
     // steps 8 and 9 can't be exercised on prod. Skip them with a matching
@@ -1137,6 +1169,8 @@ interface AddToCartValidation {
     | "error-text";
   note: string;
   errorText?: string;
+  /** Timing + selector evidence — only populated on "no-signal"/"error-text". */
+  diagnostics?: StepCapture["diagnostics"];
 }
 
 /**
@@ -1157,10 +1191,28 @@ async function validateAddToCart(
   // can race the fixed 3s deadline and report a false "no signal" failure
   // even when the add-to-cart actually worked. `.parityrc.json`
   // `addToCartConfirmMs` (or `--add-to-cart-timeout <ms>`) tunes it.
-  const deadline = Date.now() + resolveAddToCartConfirmMs(ctx.rc);
+  const startedAt = Date.now();
+  const budgetMs = resolveAddToCartConfirmMs(ctx.rc);
+  const deadline = startedAt + budgetMs;
   let lastErrorText: string | undefined;
+  let pollCount = 0;
+  // A dialog/drawer/notification that wasn't visible before became visible.
+  // Combines the legacy hardcoded list with the new `cartOpenedIndicator`
+  // selector key (Issue #102 follow-up) so users can override per-site via
+  // `.parityrc.json` and the Deco TanStack `[aria-label='Fechar notificação']`
+  // / `[aria-label='Fechar carrinho']` patterns are tried automatically.
+  const drawerSelectors = [
+    ...selFor(ctx, "cartOpenedIndicator"),
+    "[role='dialog']",
+    "[data-minicart][aria-expanded='true']",
+    "[data-cart-drawer].open",
+    "[data-minicart-drawer]:not([hidden])",
+    ".minicart--open",
+    ".cart-drawer--open",
+  ];
 
   while (Date.now() < deadline) {
+    pollCount++;
     // URL change to cart/checkout is a strong positive.
     const currentUrl = page.url();
     if (currentUrl !== beforeUrl && /\/(cart|carrinho|checkout)(\/|$|\?)/i.test(currentUrl)) {
@@ -1181,21 +1233,6 @@ async function validateAddToCart(
       };
     }
 
-    // A dialog/drawer/notification that wasn't visible before became
-    // visible. Combines the legacy hardcoded list with the new
-    // `cartOpenedIndicator` selector key (Issue #102 follow-up) so users
-    // can override per-site via `.parityrc.json` and the Deco TanStack
-    // `[aria-label='Fechar notificação']` / `[aria-label='Fechar carrinho']`
-    // patterns are tried automatically.
-    const drawerSelectors = [
-      ...selFor(ctx, "cartOpenedIndicator"),
-      "[role='dialog']",
-      "[data-minicart][aria-expanded='true']",
-      "[data-cart-drawer].open",
-      "[data-minicart-drawer]:not([hidden])",
-      ".minicart--open",
-      ".cart-drawer--open",
-    ];
     for (const sel of drawerSelectors) {
       const el = page.locator(sel).first();
       if (await el.isVisible({ timeout: 200 }).catch(() => false)) {
@@ -1241,17 +1278,33 @@ async function validateAddToCart(
     await page.waitForTimeout(250);
   }
 
+  const diagnostics: StepCapture["diagnostics"] = {
+    timedOut: true,
+    budgetMs,
+    elapsedMs: Date.now() - startedAt,
+    pollCount,
+    probes: await Promise.all(
+      drawerSelectors.map(async (selector) => {
+        const loc = page.locator(selector).first();
+        const present = (await loc.count().catch(() => 0)) > 0;
+        const visible = present ? await loc.isVisible({ timeout: 200 }).catch(() => false) : false;
+        return { selector, present, visible };
+      }),
+    ),
+  };
   if (lastErrorText) {
     return {
       status: "failed",
       signal: "error-text",
       note: `add-to-cart silenciosamente falhou: '${lastErrorText}' visível na página`,
       errorText: lastErrorText,
+      diagnostics,
     };
   }
   return {
     status: "failed",
     signal: "no-signal",
     note: "add-to-cart sem confirmação visível (minicart não atualizou, sem drawer, sem mudança de URL)",
+    diagnostics,
   };
 }

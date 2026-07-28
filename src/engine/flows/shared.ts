@@ -456,6 +456,7 @@ export async function attemptRecovery(
   stepName: string,
   intendedAction: string,
   alreadyTried: string[],
+  diagnostics?: string,
 ): Promise<{ locator: Locator; selector: string } | null> {
   let html = "";
   try {
@@ -463,7 +464,7 @@ export async function attemptRecovery(
   } catch {
     return null;
   }
-  const suggestion = await suggestRecovery({ stepName, intendedAction, html, alreadyTried });
+  const suggestion = await suggestRecovery({ stepName, intendedAction, html, alreadyTried, diagnostics });
   if (!suggestion) return null;
   try {
     const el = page.locator(suggestion.selector).first();

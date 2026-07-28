@@ -1,7 +1,8 @@
 import type { Locator, Page } from "playwright";
 import type { StepCapture, Viewport } from "../../types/schema.ts";
+import { isLocalhost } from "../../util/localhost.ts";
 import type { FlowContext } from "./shared.ts";
-import { dismissOverlays, dlog, firstVisible, selFor, withCap } from "./shared.ts";
+import { dismissBlockingOverlay, dismissOverlays, dlog, firstVisible, selFor, withCap } from "./shared.ts";
 
 export async function readCartCount(page: Page, ctx: FlowContext): Promise<number> {
   const selectors = selFor(ctx, "minicartCount");
@@ -177,6 +178,106 @@ export async function isCartRevealed(
   return isCartUiVisible(page, ctx);
 }
 
+/** Default reveal budgets: prod drawers animate fast; dev servers are slow. */
+const CART_REVEAL_BUDGET_MS = 4_000;
+const CART_REVEAL_BUDGET_LOCALHOST_MS = 8_000;
+const CART_REVEAL_POLL_INTERVAL_MS = 200;
+/** Speculative desktop hover-open probe — short so click owns the full budget. */
+const CART_REVEAL_HOVER_PROBE_MS = 1_500;
+
+export type CartRevealDiagnostics = NonNullable<StepCapture["diagnostics"]>;
+type CartRevealProbe = NonNullable<CartRevealDiagnostics["probes"]>[number];
+
+/**
+ * Snapshot, per candidate cart selector, whether it EXISTS in the DOM vs
+ * whether it's actually VISIBLE right now. Run once when a reveal wait times
+ * out — the distinction is the single most useful diagnostic for "why didn't
+ * the cart open": `present && !visible` means the correct selector matched a
+ * node that's still hidden (slow transition / data-gated render), which is a
+ * completely different fix than "selector is wrong" (`!present`).
+ */
+async function probeCartSelectors(page: Page, ctx: FlowContext): Promise<CartRevealProbe[]> {
+  const selectors = [...new Set([...selFor(ctx, "minicartPanel"), ...selFor(ctx, "cartOpenedIndicator")])];
+  const probes: CartRevealProbe[] = [];
+  for (const sel of selectors) {
+    try {
+      const loc = page.locator(sel);
+      const present = (await withCap(loc.count(), 300, 0)) > 0;
+      const visible = present
+        ? await withCap(loc.first().isVisible().catch(() => false), 300, false)
+        : false;
+      probes.push({ selector: sel, present, visible });
+    } catch {
+      probes.push({ selector: sel, present: false, visible: false });
+    }
+  }
+  return probes;
+}
+
+/** Render diagnostics into a compact, LLM/human-readable line. */
+export function summarizeCartRevealDiagnostics(d: CartRevealDiagnostics): string {
+  const parts = [`waited ${d.elapsedMs}ms/${d.budgetMs}ms (${d.pollCount} poll(s))`];
+  const hidden = d.probes?.filter((p) => p.present && !p.visible) ?? [];
+  const missing = d.probes?.filter((p) => !p.present) ?? [];
+  if (hidden.length) {
+    parts.push(`present-but-hidden: ${hidden.map((p) => p.selector).join(", ")}`);
+  }
+  if (missing.length) {
+    parts.push(`not-in-dom: ${missing.map((p) => p.selector).join(", ")}`);
+  }
+  return parts.join(" — ");
+}
+
+/**
+ * Poll `isCartRevealed` until it returns a marker or the budget expires.
+ *
+ * `isCartRevealed` (via Playwright's `isVisible()`) is a one-shot snapshot: it
+ * reports the drawer's *current* state and does not wait. Many drawers reveal
+ * asynchronously — a CSS `allow-discrete` visibility/opacity transition, a
+ * data-gated render (react-query cart), or a slow dev-mode click handler — so a
+ * single snapshot taken right after clicking lands inside the hidden window and
+ * wrongly concludes the cart never opened. Polling absorbs that latency
+ * generically, regardless of how a given site animates its minicart.
+ *
+ * On timeout, also probes the candidate selectors (present vs visible) so the
+ * caller has concrete evidence to report and to hand an LLM recovery attempt,
+ * instead of a bare "not found".
+ */
+export async function waitForCartReveal(
+  page: Page,
+  expectedProductTitle: string | null,
+  ctx: FlowContext,
+  timeoutMs: number,
+): Promise<{ marker: string | null; diagnostics: CartRevealDiagnostics }> {
+  const start = Date.now();
+  const deadline = start + timeoutMs;
+  let pollCount = 0;
+  for (;;) {
+    pollCount++;
+    const marker = await isCartRevealed(page, expectedProductTitle, ctx);
+    if (marker) {
+      dlog(ctx, `    waitForCartReveal: revealed after ${pollCount} poll(s) (${marker})`);
+      return {
+        marker,
+        diagnostics: { timedOut: false, budgetMs: timeoutMs, elapsedMs: Date.now() - start, pollCount },
+      };
+    }
+    if (Date.now() >= deadline) {
+      const probes = await probeCartSelectors(page, ctx);
+      const diagnostics: CartRevealDiagnostics = {
+        timedOut: true,
+        budgetMs: timeoutMs,
+        elapsedMs: Date.now() - start,
+        pollCount,
+        probes,
+      };
+      dlog(ctx, `    waitForCartReveal: ${summarizeCartRevealDiagnostics(diagnostics)}`);
+      return { marker: null, diagnostics };
+    }
+    await page.waitForTimeout(CART_REVEAL_POLL_INTERVAL_MS);
+  }
+}
+
 async function validateCartContainsTitleQuick(
   page: Page,
   expectedTitle: string,
@@ -239,9 +340,18 @@ export async function openMinicart(
   method: NonNullable<StepCapture["cartOpenMethod"]>;
   url: string;
   visibleMarker: string | null;
+  /** Diagnostics from the LAST reveal attempt — most informative on failure. */
+  diagnostics?: CartRevealDiagnostics;
 }> {
   const beforeUrl = page.url();
-  dlog(ctx, `  openMinicart: starting — trigger=${trigger.selector} title=${expectedProductTitle?.slice(0, 40) ?? "none"}`);
+  let lastDiagnostics: CartRevealDiagnostics | undefined;
+  // Reveal is often asynchronous (CSS transition / data-gated render / slow dev
+  // click handler), so poll rather than snapshot once. Dev servers get a larger
+  // budget for the same reason networkidle is disabled on them (issue #55).
+  const revealBudget =
+    ctx.rc.cartRevealTimeoutMs ??
+    (isLocalhost(beforeUrl) ? CART_REVEAL_BUDGET_LOCALHOST_MS : CART_REVEAL_BUDGET_MS);
+  dlog(ctx, `  openMinicart: starting — trigger=${trigger.selector} title=${expectedProductTitle?.slice(0, 40) ?? "none"} revealBudget=${revealBudget}ms`);
   // Hard cap on dismissOverlays (issue #151): the sweep runs at most 4s so a
   // pathological page/selector list can't silently stall the whole step.
   await Promise.race([
@@ -259,17 +369,20 @@ export async function openMinicart(
   const hrefHasCartTarget = !!triggerHref && /\/(checkout|cart|carrinho)/i.test(triggerHref);
 
   // Strategy 1: hover FIRST on desktop (Miess prod opens drawer on hover).
+  // Speculative — a hover-driven drawer opens quickly or not at all, so cap the
+  // probe short and let the real click path (below) own the full reveal budget.
   if (ctx.viewport === "desktop") {
     dlog(
       ctx,
       `  openMinicart: trying hover first on ${trigger.selector}${triggerHref ? ` (href=${triggerHref})` : ""}`,
     );
     await trigger.locator.hover({ timeout: 3_000 }).catch(() => undefined);
-    await page.waitForTimeout(1_500);
-    const hoverOpened = await isCartRevealed(page, expectedProductTitle, ctx);
-    if (hoverOpened) {
-      dlog(ctx, `  openMinicart: hover opened drawer (${hoverOpened})`);
-      return { method: "hover", url: page.url(), visibleMarker: hoverOpened };
+    const hoverProbeBudget = Math.min(CART_REVEAL_HOVER_PROBE_MS, revealBudget);
+    const hover1 = await waitForCartReveal(page, expectedProductTitle, ctx, hoverProbeBudget);
+    lastDiagnostics = hover1.diagnostics;
+    if (hover1.marker) {
+      dlog(ctx, `  openMinicart: hover opened drawer (${hover1.marker})`);
+      return { method: "hover", url: page.url(), visibleMarker: hover1.marker, diagnostics: hover1.diagnostics };
     }
   }
 
@@ -288,11 +401,11 @@ export async function openMinicart(
       dlog(ctx, `  openMinicart: tap navigated → ${page.url()} (settled)`);
       return { method: "click-navigate", url: page.url(), visibleMarker: null };
     }
-    await page.waitForTimeout(800);
-    const tapOpened = await isCartRevealed(page, expectedProductTitle, ctx);
-    if (tapOpened) {
-      dlog(ctx, `  openMinicart: tap opened drawer (${tapOpened})`);
-      return { method: "click", url: page.url(), visibleMarker: tapOpened };
+    const tap = await waitForCartReveal(page, expectedProductTitle, ctx, revealBudget);
+    lastDiagnostics = tap.diagnostics;
+    if (tap.marker) {
+      dlog(ctx, `  openMinicart: tap opened drawer (${tap.marker})`);
+      return { method: "click", url: page.url(), visibleMarker: tap.marker, diagnostics: tap.diagnostics };
     }
   }
 
@@ -314,21 +427,38 @@ export async function openMinicart(
     dlog(ctx, `  openMinicart: click navigated → ${page.url()} (settled)`);
     return { method: "click-navigate", url: page.url(), visibleMarker: null };
   }
-  await page.waitForTimeout(1_500);
-  const clickOpened = await isCartRevealed(page, expectedProductTitle, ctx);
-  if (clickOpened) {
-    dlog(ctx, `  openMinicart: click opened drawer (${clickOpened})`);
-    return { method: "click", url: afterClickUrl, visibleMarker: clickOpened };
+  const click = await waitForCartReveal(page, expectedProductTitle, ctx, revealBudget);
+  lastDiagnostics = click.diagnostics;
+  if (click.marker) {
+    dlog(ctx, `  openMinicart: click opened drawer (${click.marker})`);
+    return { method: "click", url: afterClickUrl, visibleMarker: click.marker, diagnostics: click.diagnostics };
+  }
+  // A popup can appear mid-flow (e.g. right after add-to-cart) and intercept
+  // the trigger click even though `dismissOverlays` already ran once at the
+  // top of this function — confirmed live against a production deploy, where
+  // a newsletter modal silently absorbed the click and the drawer never
+  // opened. Detect it structurally and retry once, mirroring add-to-cart's
+  // #145/#146 handling.
+  const blockingOverlay = await dismissBlockingOverlay(page, ctx, trigger.locator);
+  if (blockingOverlay?.dismissed) {
+    dlog(ctx, `  openMinicart: cleared blocking overlay (${blockingOverlay.method}) — retrying click`);
+    await trigger.locator.click({ force: true, timeout: 4_000 }).catch(() => undefined);
+    const retry = await waitForCartReveal(page, expectedProductTitle, ctx, revealBudget);
+    lastDiagnostics = retry.diagnostics;
+    if (retry.marker) {
+      dlog(ctx, `  openMinicart: click opened drawer after overlay dismissal (${retry.marker})`);
+      return { method: "click", url: page.url(), visibleMarker: retry.marker, diagnostics: retry.diagnostics };
+    }
   }
   // Strategy 3 (mobile only): hover as fallback.
   if (ctx.viewport !== "desktop") {
     dlog(ctx, `  openMinicart: click didn't reveal cart, trying hover (mobile)`);
     await trigger.locator.hover({ timeout: 3_000 }).catch(() => undefined);
-    await page.waitForTimeout(1_500);
-    const hoverOpened = await isCartRevealed(page, expectedProductTitle, ctx);
-    if (hoverOpened) {
-      dlog(ctx, `  openMinicart: hover opened drawer (${hoverOpened})`);
-      return { method: "hover", url: page.url(), visibleMarker: hoverOpened };
+    const hover2 = await waitForCartReveal(page, expectedProductTitle, ctx, revealBudget);
+    lastDiagnostics = hover2.diagnostics;
+    if (hover2.marker) {
+      dlog(ctx, `  openMinicart: hover opened drawer (${hover2.marker})`);
+      return { method: "hover", url: page.url(), visibleMarker: hover2.marker, diagnostics: hover2.diagnostics };
     }
   }
   // Strategy 4: direct goto fallback when trigger has cart href.
@@ -353,8 +483,11 @@ export async function openMinicart(
       }
     }
   }
-  dlog(ctx, "  openMinicart: failed — no cart revealed by hover/click/goto");
-  return { method: "failed", url: page.url(), visibleMarker: null };
+  dlog(
+    ctx,
+    `  openMinicart: failed — no cart revealed by hover/click/goto${lastDiagnostics ? ` (${summarizeCartRevealDiagnostics(lastDiagnostics)})` : ""}`,
+  );
+  return { method: "failed", url: page.url(), visibleMarker: null, diagnostics: lastDiagnostics };
 }
 
 function normalizeTitle(s: string): string {

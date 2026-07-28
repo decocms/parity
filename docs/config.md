@@ -97,6 +97,25 @@ permanently blind. Override with a single selector that targets the drawer
 root, e.g. `"[data-qa-minicart]"` for a DaisyUI drawer whose root carries that
 test attribute. The override is tried before all hardcoded patterns.
 
+`cartRevealTimeoutMs` sets how long — in milliseconds — the open-minicart step
+polls for the drawer to become visible before giving up. Reveal is frequently
+asynchronous: a CSS `allow-discrete` visibility/opacity transition, a
+data-gated render (react-query cart), or a slow dev-mode click handler can keep
+the panel `visibility:hidden` (often positioned off-screen) for a second or
+more after the click. parity therefore **polls** `isCartRevealed` rather than
+taking a single snapshot right after interacting. Default `4000` (raised to
+`8000` on localhost dev servers, which are slower). Raise it for a site whose
+minicart animates in slowly or waits on a cart API before rendering.
+
+When a poll-based step (open-minicart, add-to-cart) still times out, the
+failure carries **diagnostics**: elapsed time vs budget, poll count, and — the
+most actionable part — a per-selector probe distinguishing "present in the DOM
+but stayed hidden" from "never matched at all". `report.json`'s `diagnostics`
+field on the step and the HTML report's step cell both show this, and it's
+handed to the LLM recovery attempt as concrete evidence (`RecoverInput.diagnostics`)
+instead of a bare "not found" — the LLM is told explicitly not to re-suggest a
+selector that's already confirmed present-but-hidden.
+
 `paginationNext` / `loadMoreButton` override the selectors the `plp` flow
 uses to detect how a PLP paginates (next-page link, "load more" button, or —
 when neither matches — a scroll probe for infinite scroll). The PLP
