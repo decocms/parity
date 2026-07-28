@@ -522,74 +522,75 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
     const beforeUrl7 = page.url();
     const spBefore7 = screenshotPath(ctx, "pj-7-minicart-before");
     await screenshotStable(page, { path: spBefore7, fullPage: false });
-    let miniHit = await firstVisibleLocator(page, selFor(ctx, "minicartTrigger"));
-    let miniRecovered = false;
-    if (!miniHit && budget.remaining > 0) {
-      const recovery = await attemptRecovery(
-        page,
-        ctx,
-        "open-minicart",
-        "Abrir o minicart/drawer do carrinho",
-        selFor(ctx, "minicartTrigger"),
-      );
-      if (recovery) {
-        miniHit = recovery;
-        miniRecovered = true;
-        budget.remaining--;
-      }
-    }
     let cartOpenMethod: NonNullable<StepCapture["cartOpenMethod"]> = "failed";
     let miniText = "";
     let cartRevealMode: NonNullable<StepCapture["cartRevealMode"]> = "unknown";
     let revealDiagnostics: StepCapture["diagnostics"];
-    // Probe whether the drawer was ALREADY opened by add-to-cart (e.g. miess
-    // prod opens an inline notification on add-to-cart with no further
-    // trigger click needed). Used by detectCartRevealMode below as the
-    // first signal in its classification ladder.
+    // Issue #157: check whether the drawer is ALREADY open BEFORE probing for
+    // the trigger. When add-to-cart opens the drawer as a side-effect (toast →
+    // autoOpen), the cart icon can be inside a collapsed daisyUI drawer-content
+    // wrapper (bounding box 0×0). Playwright may still report it visible, so
+    // firstVisibleLocator would return a stale/collapsed hit. Checking
+    // isCartRevealed first lets us skip the trigger lookup entirely.
     const drawerAlreadyOpen = (await isCartRevealed(page, expectedProductTitle, ctx)) !== null;
-    if (miniHit) {
-      miniText = await miniHit.locator.innerText().catch(() => "");
-      // Classify markup intent BEFORE we interact. Safe to run even when
-      // drawer is already open (returns "inline-notification" first).
-      cartRevealMode = await detectCartRevealMode(
-        page,
-        miniHit.locator,
-        drawerAlreadyOpen,
-        ctx.viewport,
-      ).catch(() => "unknown" as const);
-      dlog(ctx, `step 7 open-minicart: cartRevealMode=${cartRevealMode}`);
-      let openResult = await openMinicart(page, miniHit, ctx, expectedProductTitle);
-      cartOpenMethod = openResult.method;
-      revealDiagnostics = openResult.diagnostics;
-      // Issue #(reveal-diagnostics): a "present-but-hidden" diagnostic means
-      // the trigger DID something but the wrong element (or none) actually
-      // revealed — hand the LLM concrete evidence (which selector is stuck
-      // hidden, how long we waited) instead of a bare "not found", and give
-      // it ONE shot at a different trigger before giving up.
-      if (cartOpenMethod === "failed" && revealDiagnostics && budget.remaining > 0) {
+    let miniHit: Awaited<ReturnType<typeof firstVisibleLocator>> = null;
+    let miniRecovered = false;
+    if (drawerAlreadyOpen) {
+      cartOpenMethod = "already-open";
+      cartRevealMode = "inline-notification";
+      dlog(ctx, "step 7 open-minicart: drawer already visible — skipping trigger lookup");
+    } else {
+      miniHit = await firstVisibleLocator(page, selFor(ctx, "minicartTrigger"));
+      if (!miniHit && budget.remaining > 0) {
         const recovery = await attemptRecovery(
           page,
           ctx,
           "open-minicart",
-          "Abrir o minicart/drawer do carrinho — o trigger foi clicado mas o drawer não revelou",
-          [miniHit.selector],
-          summarizeCartRevealDiagnostics(revealDiagnostics),
+          "Abrir o minicart/drawer do carrinho",
+          selFor(ctx, "minicartTrigger"),
         );
         if (recovery) {
-          budget.remaining--;
           miniHit = recovery;
           miniRecovered = true;
-          openResult = await openMinicart(page, miniHit, ctx, expectedProductTitle);
-          cartOpenMethod = openResult.method;
-          revealDiagnostics = openResult.diagnostics;
+          budget.remaining--;
         }
       }
-    } else {
-      // No trigger needed — drawer may already be open from add-to-cart.
-      if (drawerAlreadyOpen) {
-        cartOpenMethod = "already-open";
-        cartRevealMode = "inline-notification";
-        dlog(ctx, "step 7 open-minicart: no trigger, drawer already visible");
+      if (miniHit) {
+        miniText = await miniHit.locator.innerText().catch(() => "");
+        // Classify markup intent BEFORE we interact.
+        cartRevealMode = await detectCartRevealMode(
+          page,
+          miniHit.locator,
+          false,
+          ctx.viewport,
+        ).catch(() => "unknown" as const);
+        dlog(ctx, `step 7 open-minicart: cartRevealMode=${cartRevealMode}`);
+        let openResult = await openMinicart(page, miniHit, ctx, expectedProductTitle);
+        cartOpenMethod = openResult.method;
+        revealDiagnostics = openResult.diagnostics;
+        // Issue #(reveal-diagnostics): a "present-but-hidden" diagnostic means
+        // the trigger DID something but the wrong element (or none) actually
+        // revealed — hand the LLM concrete evidence (which selector is stuck
+        // hidden, how long we waited) instead of a bare "not found", and give
+        // it ONE shot at a different trigger before giving up.
+        if (cartOpenMethod === "failed" && revealDiagnostics && budget.remaining > 0) {
+          const recovery = await attemptRecovery(
+            page,
+            ctx,
+            "open-minicart",
+            "Abrir o minicart/drawer do carrinho — o trigger foi clicado mas o drawer não revelou",
+            [miniHit.selector],
+            summarizeCartRevealDiagnostics(revealDiagnostics),
+          );
+          if (recovery) {
+            budget.remaining--;
+            miniHit = recovery;
+            miniRecovered = true;
+            openResult = await openMinicart(page, miniHit, ctx, expectedProductTitle);
+            cartOpenMethod = openResult.method;
+            revealDiagnostics = openResult.diagnostics;
+          }
+        }
       }
     }
     // Validate the product from step 3 is now visible in the cart UI.
