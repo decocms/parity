@@ -19,8 +19,18 @@ export async function readCartCount(page: Page, ctx: FlowContext): Promise<numbe
   return 0;
 }
 
-export async function isCartUiVisible(page: Page): Promise<string | null> {
+export async function isCartUiVisible(page: Page, ctx?: FlowContext): Promise<string | null> {
+  // Configurable `minicartPanel` (+ the existing `cartOpenedIndicator`) come
+  // FIRST — the hardcoded name-based patterns below false-negative on
+  // utility-CSS (Tailwind) + `data-qa-*` markup where the drawer root has no
+  // "cart"/"minicart"/"open" in its class or a `data-minicart` attribute
+  // (issue #149). `selFor` already folds in `.parityrc.json` overrides,
+  // learned selectors, and the baked-in defaults.
+  const configured = ctx
+    ? [...selFor(ctx, "minicartPanel"), ...selFor(ctx, "cartOpenedIndicator")]
+    : [];
   return firstVisible(page, [
+    ...configured,
     "[role='dialog']:visible",
     "[aria-modal='true']:visible",
     "[data-minicart][aria-hidden='false']",
@@ -158,19 +168,24 @@ export async function detectCartRevealMode(
 export async function isCartRevealed(
   page: Page,
   expectedProductTitle: string | null,
+  ctx?: FlowContext,
 ): Promise<string | null> {
   if (expectedProductTitle) {
-    const v = await validateCartContainsTitleQuick(page, expectedProductTitle);
+    const v = await validateCartContainsTitleQuick(page, expectedProductTitle, ctx);
     if (v) return `title-found:${v}`;
   }
-  return isCartUiVisible(page);
+  return isCartUiVisible(page, ctx);
 }
 
 async function validateCartContainsTitleQuick(
   page: Page,
   expectedTitle: string,
+  ctx?: FlowContext,
 ): Promise<string | null> {
   const quickSelectors = [
+    // Configurable panel first (issue #149) — a `data-qa-*`/utility-class
+    // drawer has no name-based class the hardcoded scopes below can match.
+    ...(ctx ? selFor(ctx, "minicartPanel") : []),
     "[role='dialog']",
     "[class*='minicart' i]",
     "[class*='cart' i]",
@@ -228,7 +243,7 @@ export async function openMinicart(
   const beforeUrl = page.url();
   await dismissOverlays(page, ctx);
   await page.waitForTimeout(800);
-  const alreadyOpen = await isCartRevealed(page, expectedProductTitle);
+  const alreadyOpen = await isCartRevealed(page, expectedProductTitle, ctx);
   if (alreadyOpen) {
     dlog(ctx, `  openMinicart: already-open (matched ${alreadyOpen})`);
     return { method: "already-open", url: beforeUrl, visibleMarker: alreadyOpen };
@@ -244,7 +259,7 @@ export async function openMinicart(
     );
     await trigger.locator.hover({ timeout: 3_000 }).catch(() => undefined);
     await page.waitForTimeout(1_500);
-    const hoverOpened = await isCartRevealed(page, expectedProductTitle);
+    const hoverOpened = await isCartRevealed(page, expectedProductTitle, ctx);
     if (hoverOpened) {
       dlog(ctx, `  openMinicart: hover opened drawer (${hoverOpened})`);
       return { method: "hover", url: page.url(), visibleMarker: hoverOpened };
@@ -267,7 +282,7 @@ export async function openMinicart(
       return { method: "click-navigate", url: page.url(), visibleMarker: null };
     }
     await page.waitForTimeout(800);
-    const tapOpened = await isCartRevealed(page, expectedProductTitle);
+    const tapOpened = await isCartRevealed(page, expectedProductTitle, ctx);
     if (tapOpened) {
       dlog(ctx, `  openMinicart: tap opened drawer (${tapOpened})`);
       return { method: "click", url: page.url(), visibleMarker: tapOpened };
@@ -293,7 +308,7 @@ export async function openMinicart(
     return { method: "click-navigate", url: page.url(), visibleMarker: null };
   }
   await page.waitForTimeout(1_500);
-  const clickOpened = await isCartRevealed(page, expectedProductTitle);
+  const clickOpened = await isCartRevealed(page, expectedProductTitle, ctx);
   if (clickOpened) {
     dlog(ctx, `  openMinicart: click opened drawer (${clickOpened})`);
     return { method: "click", url: afterClickUrl, visibleMarker: clickOpened };
@@ -303,7 +318,7 @@ export async function openMinicart(
     dlog(ctx, `  openMinicart: click didn't reveal cart, trying hover (mobile)`);
     await trigger.locator.hover({ timeout: 3_000 }).catch(() => undefined);
     await page.waitForTimeout(1_500);
-    const hoverOpened = await isCartRevealed(page, expectedProductTitle);
+    const hoverOpened = await isCartRevealed(page, expectedProductTitle, ctx);
     if (hoverOpened) {
       dlog(ctx, `  openMinicart: hover opened drawer (${hoverOpened})`);
       return { method: "hover", url: page.url(), visibleMarker: hoverOpened };
@@ -359,7 +374,20 @@ export async function validateCartContainsTitle(
   expectedTitle: string,
   ctx: FlowContext,
 ): Promise<{ found: boolean; observedTitles: string[]; method: "selector" | "none" }> {
+  // Scope title selectors to the configurable minicart panel first (issue
+  // #149) — a `data-qa-*`/utility-class drawer has no name-based class the
+  // hardcoded scopes below can reach into, so its line-item titles were
+  // invisible to the sweep even when the drawer was open.
+  const panelScopedTitleSelectors = selFor(ctx, "minicartPanel").flatMap((p) => [
+    `${p} a[href*='/p']`,
+    `${p} [class*='name' i]`,
+    `${p} [class*='title' i]`,
+    `${p} [class*='product' i]`,
+    `${p} [data-cart-item-name]`,
+    `${p} [data-qa-product-name]`,
+  ]);
   const titleSelectors = [
+    ...panelScopedTitleSelectors,
     "[data-cart-item-name]",
     "[data-cart-item] [class*='title' i]",
     "[data-cart-item] [class*='name' i]",

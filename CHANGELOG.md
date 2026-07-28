@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+* **Configurable `minicartPanel` selector for open-minicart reveal detection (issue #149).** `isCartUiVisible` and the title-scope sweep in `validateCartContainsTitleQuick` used a hardcoded list of name-based patterns (`[role='dialog']`, `[class*='minicart']`, etc.) to detect that the cart drawer was open. Any site built with utility-CSS (Tailwind) and `data-qa-*` testing attributes — a common modern stack — has no class/attribute those patterns can match, so detection always returns `null` and the step reports "failed" even when the drawer is genuinely open. The new `minicartPanel` selector key (`.parityrc.json`) is tried first, ahead of all hardcoded patterns. Built-in defaults cover `[data-qa-minicart]`, `[data-minicart]`, `[data-minicart-drawer]`, `[data-testid='minicart']` and common class patterns — so the `data-qa-*` case is handled out-of-the-box. Override with a single selector that matches the drawer root for your specific site.
+
 ## [0.15.0](https://github.com/decocms/parity/compare/v0.14.0...v0.15.0) (2026-07-27)
 
 ### Added

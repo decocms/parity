@@ -543,7 +543,7 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
     // prod opens an inline notification on add-to-cart with no further
     // trigger click needed). Used by detectCartRevealMode below as the
     // first signal in its classification ladder.
-    const drawerAlreadyOpen = (await isCartRevealed(page, expectedProductTitle)) !== null;
+    const drawerAlreadyOpen = (await isCartRevealed(page, expectedProductTitle, ctx)) !== null;
     if (miniHit) {
       miniText = await miniHit.locator.innerText().catch(() => "");
       // Classify markup intent BEFORE we interact. Safe to run even when

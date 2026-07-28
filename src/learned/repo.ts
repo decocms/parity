@@ -18,6 +18,7 @@ export const SelectorKey = z.enum([
   "quantityInput",
   "minicartCount",
   "cartOpenedIndicator",
+  "minicartPanel",
   // Search flow
   "searchTrigger",
   "searchInput",
