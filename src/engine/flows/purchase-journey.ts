@@ -602,16 +602,24 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
       // minicartTrigger explicitly to activate the query — mirrors what the
       // user does to see their items after add-to-cart.
       if (cartOpenMethod === "already-open" && !v.found) {
-        const triggerHit = await firstVisibleLocator(page, selFor(ctx, "minicartTrigger"));
-        if (triggerHit) {
-          dlog(
-            ctx,
-            "step 7: already-open drawer empty — clicking minicartTrigger to activate on-demand query",
-          );
-          miniHit = triggerHit;
-          await triggerHit.locator.click({ timeout: 3_000 }).catch(() => undefined);
-          await waitForCartHydration(page);
-          v = await validateCartContainsTitle(page, expectedProductTitle, ctx);
+        // Issue #161: the trigger lives inside .drawer-content which daisyUI
+        // collapses to {w:0,h:0} while the drawer panel is open, so isVisible()
+        // returns false. Use count() to detect DOM presence and force:true to
+        // bypass the visibility check.
+        const triggerSels = selFor(ctx, "minicartTrigger");
+        for (const sel of triggerSels) {
+          const el = page.locator(sel).first();
+          if (await el.count()) {
+            dlog(
+              ctx,
+              "step 7: already-open drawer empty — force-clicking minicartTrigger (collapsed inside daisyUI drawer-content)",
+            );
+            miniHit = { locator: el, selector: sel };
+            await el.click({ force: true, timeout: 3_000 }).catch(() => undefined);
+            await waitForCartHydration(page);
+            v = await validateCartContainsTitle(page, expectedProductTitle, ctx);
+            break;
+          }
         }
       }
       let reasonText: string | undefined;
