@@ -241,7 +241,14 @@ export async function openMinicart(
   visibleMarker: string | null;
 }> {
   const beforeUrl = page.url();
-  await dismissOverlays(page, ctx);
+  dlog(ctx, `  openMinicart: starting — trigger=${trigger.selector} title=${expectedProductTitle?.slice(0, 40) ?? "none"}`);
+  // Hard cap on dismissOverlays (issue #151): the sweep runs at most 4s so a
+  // pathological page/selector list can't silently stall the whole step.
+  await Promise.race([
+    dismissOverlays(page, ctx),
+    new Promise<void>((resolve) => setTimeout(resolve, 4_000)),
+  ]);
+  dlog(ctx, "  openMinicart: dismissOverlays done — checking alreadyOpen…");
   await page.waitForTimeout(800);
   const alreadyOpen = await isCartRevealed(page, expectedProductTitle, ctx);
   if (alreadyOpen) {

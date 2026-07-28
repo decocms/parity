@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 * **Configurable `minicartPanel` selector for open-minicart reveal detection (issue #149).** `isCartUiVisible` and the title-scope sweep in `validateCartContainsTitleQuick` used a hardcoded list of name-based patterns (`[role='dialog']`, `[class*='minicart']`, etc.) to detect that the cart drawer was open. Any site built with utility-CSS (Tailwind) and `data-qa-*` testing attributes — a common modern stack — has no class/attribute those patterns can match, so detection always returns `null` and the step reports "failed" even when the drawer is genuinely open. The new `minicartPanel` selector key (`.parityrc.json`) is tried first, ahead of all hardcoded patterns. Built-in defaults cover `[data-qa-minicart]`, `[data-minicart]`, `[data-minicart-drawer]`, `[data-testid='minicart']` and common class patterns — so the `data-qa-*` case is handled out-of-the-box. Override with a single selector that matches the drawer root for your specific site.
 
+### Fixed
+
+* **`dismissOverlays` stall in `openMinicart` (issue #151).** The named-selector sweep inside `dismissOverlays` used a 400ms per-selector cap; with 12+ selectors none of which match, that's ~5s minimum before `openMinicart` could proceed — and on heavy pages the CDP calls could stall much longer, causing 50-100s gaps with zero debug output. Fixed by: (1) tightening the per-selector probe to 80ms (fast-failing `count()=0` before any `isVisible` call), (2) adding `dlog` at the entry of `dismissOverlays` and `openMinicart` so slow sweeps show up in `DEBUG_PARITY=1` output, and (3) wrapping the `dismissOverlays` call inside `openMinicart` with a 4s hard cap so it degrades gracefully instead of silently consuming the step budget.
+
 ## [0.15.0](https://github.com/decocms/parity/compare/v0.14.0...v0.15.0) (2026-07-27)
 
 ### Added
