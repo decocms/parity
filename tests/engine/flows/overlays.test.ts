@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   type FlowContext,
   dismissBlockingOverlay,
+  dismissOverlays,
   overlaySelectorsFor,
 } from "../../../src/engine/flows/shared.ts";
 import { ParityRc } from "../../../src/types/schema.ts";
@@ -178,4 +179,29 @@ describe("dismissBlockingOverlay — structural detection (#146)", () => {
     );
     expect(result).toMatchObject({ dismissed: false });
   });
+});
+
+describe("dismissOverlays performance (#151)", () => {
+  it("completes in well under 2s when no overlays match (no-stall guarantee)", async () => {
+    // With the old 400ms cap per selector, 12+ selectors × 400ms = ~5s in the
+    // no-match case. The tightened cap (80ms) should complete in <960ms total
+    // for the default 12-selector list, even with the fake-page overhead.
+    // We use a generous budget (2s) to keep this robust in slow CI.
+    const page = {
+      locator: () => ({
+        first: () => ({
+          isVisible: () => new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error("timeout")), 5)),
+          count: () => Promise.resolve(0), // fast no-match path
+        }),
+        count: () => Promise.resolve(0),
+      }),
+      keyboard: { press: () => Promise.resolve() },
+      waitForTimeout: () => Promise.resolve(),
+      mouse: { click: () => Promise.resolve() },
+    } as unknown as Page;
+    const start = Date.now();
+    const result = await dismissOverlays(page, CTX);
+    expect(Date.now() - start).toBeLessThan(2_000);
+    expect(result).toHaveLength(0);
+  }, 5_000);
 });

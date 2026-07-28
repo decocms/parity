@@ -1004,15 +1004,38 @@ function describe(b: BlockerInfo): string {
  * handled separately by {@link dismissBlockingOverlay} (#146). Returns the
  * dismissals performed (empty when nothing matched).
  */
+// Per-selector probe cap for dismissOverlays: how long we wait for each
+// selector to report "visible" before skipping it. Kept tight (80ms) so the
+// no-overlay case (all 12+ selectors absent) finishes in <1s instead of
+// the old 400ms-per-selector ceiling that caused 50-100s stalls (issue #151).
+const OVERLAY_PROBE_CAP_MS = 80;
+
+/**
+ * Generic pre-interaction sweep: close any currently-visible overlay matching
+ * the effective selector list (#145). Structural per-click interception is
+ * handled separately by {@link dismissBlockingOverlay} (#146). Returns the
+ * dismissals performed (empty when nothing matched).
+ *
+ * Performance contract (issue #151): each probe is capped at
+ * {@link OVERLAY_PROBE_CAP_MS} so the full sweep over N selectors completes in
+ * O(N × 80ms) in the no-match case — ~1s for the current 12-selector default
+ * list, vs. the old 400ms cap that could stall the step for 50-100s.
+ */
 export async function dismissOverlays(page: Page, ctx: FlowContext): Promise<OverlayDismissal[]> {
+  const sels = overlaySelectorsFor(ctx.rc);
+  dlog(ctx, `  dismissOverlays: checking ${sels.length} selector(s)…`);
   const dismissals: OverlayDismissal[] = [];
-  for (const sel of overlaySelectorsFor(ctx.rc)) {
+  for (const sel of sels) {
     try {
       const overlay = page.locator(sel).first();
-      if (!(await withCap(overlay.isVisible({ timeout: 200 }).catch(() => false), 400, false)))
+      // Fast pre-check: count() is cheaper and rarely hangs vs. isVisible().
+      // Skip the isVisible probe entirely when count is 0.
+      const cnt = await withCap(overlay.count(), OVERLAY_PROBE_CAP_MS, 0);
+      if (cnt === 0) continue;
+      if (!(await withCap(overlay.isVisible({ timeout: OVERLAY_PROBE_CAP_MS }).catch(() => false), OVERLAY_PROBE_CAP_MS, false)))
         continue;
       const closer = overlay.locator(CLOSE_BUTTON_SELECTOR).first();
-      if (await withCap(closer.isVisible({ timeout: 200 }).catch(() => false), 400, false)) {
+      if (await withCap(closer.isVisible({ timeout: OVERLAY_PROBE_CAP_MS }).catch(() => false), OVERLAY_PROBE_CAP_MS, false)) {
         await closer.click({ timeout: 1_500 }).catch(() => undefined);
         dismissals.push({ reason: "selector-match", tag: sel, method: "close-button", dismissed: true });
         continue;
