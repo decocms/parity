@@ -596,7 +596,24 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
     // Validate the product from step 3 is now visible in the cart UI.
     let step7Validation: StepCapture["cartValidation"];
     if (expectedProductTitle && cartOpenMethod !== "failed") {
-      const v = await validateCartContainsTitle(page, expectedProductTitle, ctx);
+      let v = await validateCartContainsTitle(page, expectedProductTitle, ctx);
+      // Issue #159: if the drawer opened via toast (already-open) but the
+      // on-demand cart query never fired, the panel will be empty. Click the
+      // minicartTrigger explicitly to activate the query — mirrors what the
+      // user does to see their items after add-to-cart.
+      if (cartOpenMethod === "already-open" && !v.found) {
+        const triggerHit = await firstVisibleLocator(page, selFor(ctx, "minicartTrigger"));
+        if (triggerHit) {
+          dlog(
+            ctx,
+            "step 7: already-open drawer empty — clicking minicartTrigger to activate on-demand query",
+          );
+          miniHit = triggerHit;
+          await triggerHit.locator.click({ timeout: 3_000 }).catch(() => undefined);
+          await waitForCartHydration(page);
+          v = await validateCartContainsTitle(page, expectedProductTitle, ctx);
+        }
+      }
       let reasonText: string | undefined;
       if (!v.found) {
         if (v.observedTitles.length === 0) {
