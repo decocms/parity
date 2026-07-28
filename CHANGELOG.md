@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.3](https://github.com/decocms/parity/compare/v0.17.2...v0.17.3) (2026-07-28)
+
+### Fixed
+
+* **`open-minicart` fallback click when already-open drawer is empty (issue #159).** Sites that use a react-query on-demand cart (query `enabled` only when a cart-intent signal is `true`) never hydrate the drawer when it opens via an add-to-cart toast side-effect — the intent signal is only set on an explicit cart-icon click, so the panel renders empty and `validateCartContainsTitle` finds 0 items. When `cartOpenMethod === "already-open"` and validation returns `found=false`, parity now looks up the `minicartTrigger` and clicks it explicitly (mirroring what the user does), waits for cart hydration, then re-validates. The fallback is skipped entirely when the drawer hydrates normally via the initial validation.
+
 ## [0.17.0](https://github.com/decocms/parity/compare/v0.16.0...v0.17.0) (2026-07-28)
 
 ### Added
