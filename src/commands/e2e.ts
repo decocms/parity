@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
 import chalk from "chalk";
 import ora from "ora";
 import type { Browser } from "playwright";
@@ -169,6 +170,26 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
     });
   }
 
+  // Hard ceiling so a wedged browser (e.g. crashed mid-capture with the
+  // Playwright/Bun event loop blocked on native I/O) can't hang a CI pipeline
+  // indefinitely. A pure setTimeout is unreliable here because page.screenshot()
+  // against a dead Chromium can block libuv, preventing timer callbacks from
+  // running. Instead we fork a tiny watchdog subprocess with its own event
+  // loop; it sends SIGKILL to this process via the OS, bypassing any JS freeze.
+  const E2E_TIMEOUT_MS = 3 * 60 * 1_000; // 3 minutes
+  const watchdogScript = `setTimeout(()=>{try{process.kill(${process.pid},9)}catch(_){}},${E2E_TIMEOUT_MS})`;
+  const watchdog = spawn(process.execPath, ["-e", watchdogScript], {
+    stdio: "ignore",
+    detached: false,
+  });
+  watchdog.unref();
+  const onSignal = (): void => {
+    watchdog.kill();
+    process.exit(1);
+  };
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+
   const spinner = opts.json ? null : ora("Lançando browser…").start();
   let browser: Browser | null = null;
   const allFlows: FlowCapture[] = [];
@@ -212,6 +233,9 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
     if (spinner)
       spinner.succeed(`${allFlows.length} flow capture(s), ${allPages.length} página(s)`);
   } finally {
+    watchdog.kill();
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
     await browser?.close().catch(() => undefined);
   }
 
