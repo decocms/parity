@@ -229,7 +229,7 @@ export async function runSelectorDiscoveryPass(
     const html = opts.homeHtml ?? (await fetchHomeHtml(url, viewport));
     if (!html) {
       warn("Falha ao baixar HTML da home; usando defaults");
-      return;
+      return null;
     }
 
     // M4: ground PDP/PLP-only selector keys (buyButton, pdpGallery*,
