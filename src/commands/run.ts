@@ -749,17 +749,26 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     // outer accumulators directly; the caller merges after Promise.all
     // resolves so `learned`, `allFlowCaptures`, etc. never see partial
     // writes from the racing side.
+    // Playwright tracing with screenshots+snapshots accumulates a large
+    // per-context buffer in the Chromium process for the whole flow sequence
+    // (up to 420s), across up to 4 concurrent contexts — a real memory cost.
+    // Nothing in the report or checks reads the trace; it's a human debugging
+    // artifact only. Gate it behind PARITY_TRACE=1 so the default run doesn't
+    // pay for it.
+    const traceEnabled = process.env.PARITY_TRACE === "1";
     const runOneSide = async (
       viewport: Viewport,
       side: Side,
     ): Promise<{ captures: FlowCapture[]; pages: PageCapture[] }> => {
       const baseUrl = side === "prod" ? opts.prod : opts.cand;
       const harPath = join(paths.harDir, `${viewport}-${side}.har`);
-      const tracePath = join(paths.tracesDir, `${viewport}-${side}.zip`);
+      const tracePath = traceEnabled
+        ? join(paths.tracesDir, `${viewport}-${side}.zip`)
+        : null;
       const ctx = await newContext(browser!, {
         viewport,
         harPath,
-        tracesDir: paths.tracesDir,
+        tracesDir: traceEnabled ? paths.tracesDir : undefined,
         cohortCookieValue: "control",
         noCache: opts.bypassCache,
       });
@@ -827,7 +836,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
           for (const p of cap.pages) pages.push(p);
         }
       } finally {
-        await stopTracing(ctx, tracePath).catch(() => undefined);
+        if (tracePath) await stopTracing(ctx, tracePath).catch(() => undefined);
         await ctx.close();
       }
       return { captures, pages };
