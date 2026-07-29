@@ -649,7 +649,21 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   let currentPhase = "launch";
   let shuttingDown = false;
   const partialChecks: CheckResult[] = [];
-  const shutdown = (reason: string) => {
+  // Close the browser but never let a wedged Chromium block process exit:
+  // race the graceful close against a short cap. Previously `shutdown` fired
+  // `browser.close()` fire-and-forget and immediately called
+  // `process.exit(130)`, which killed Node before the close completed and
+  // orphaned the Chromium process on every Ctrl-C / timeout (issue #167).
+  // `browser.close()` terminates the Chromium subprocess; awaiting it (capped)
+  // ensures that actually happens before we exit.
+  const forceCloseBrowser = async (b: Browser | null, capMs: number): Promise<void> => {
+    if (!b) return;
+    await Promise.race([
+      b.close().catch(() => undefined),
+      new Promise<void>((resolve) => setTimeout(resolve, capMs)),
+    ]);
+  };
+  const shutdown = async (reason: string) => {
     if (shuttingDown) {
       // 2nd signal: hard exit. The 1st already kicked off cleanup.
       process.stderr.write("\n  segunda interrupção — forçando saída.\n");
@@ -693,21 +707,20 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     } catch (err) {
       process.stderr.write(`  falha escrevendo report parcial: ${(err as Error).message}\n`);
     }
-    // Best-effort browser close.
-    if (browser) {
-      browser.close().catch(() => undefined);
-    }
+    // Best-effort browser close, capped so a wedged Chromium can't block the
+    // exit — then SIGKILL the subprocess so we never orphan it.
+    await forceCloseBrowser(browser, 3_000);
     process.exit(130);
   };
   const onSignal = (sig: NodeJS.Signals) => {
-    shutdown(`signal ${sig}`);
+    void shutdown(`signal ${sig}`);
   };
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
 
   const timeoutMinutes = Math.max(1, Math.floor(opts.timeout ?? 30));
   const globalTimeoutTimer = setTimeout(() => {
-    shutdown(`timeout ${timeoutMinutes}min`);
+    void shutdown(`timeout ${timeoutMinutes}min`);
   }, timeoutMinutes * 60_000);
   // Don't block process exit on the timer.
   globalTimeoutTimer.unref?.();
