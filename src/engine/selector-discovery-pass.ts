@@ -115,6 +115,8 @@ async function runLiveSelectorValidation(
 ): Promise<{
   validated: Partial<Record<keyof DiscoveredSelectors, boolean>>;
   failed: (keyof DiscoveredSelectors)[];
+  /** Open browser — caller is responsible for closing it when done (#167). */
+  browser: Browser;
 } | null> {
   let browser: Browser | null = null;
   try {
@@ -153,14 +155,19 @@ async function runLiveSelectorValidation(
     if (ctx.plpUrl) await runOn(ctx.plpUrl, PLP_VALIDATION_KEYS);
     if (ctx.pdpUrl) await runOn(ctx.pdpUrl, PDP_VALIDATION_KEYS);
 
+    // Close the validation context but keep the browser alive — the caller
+    // (e2e.ts) reuses it for the main flow, avoiding a second Chromium launch
+    // that can OOM machines with ~1.4 GB free RAM (issue #167).
     await context.close();
-    return { validated, failed: Array.from(failed) };
+    return { validated, failed: Array.from(failed), browser };
   } catch (err) {
     console.warn(`[selectors] live-validation falhou (não-fatal): ${(err as Error).message}`);
-    return null;
-  } finally {
+    // Close the browser on the error path — it won't be returned to the caller.
     if (browser) await browser.close().catch(() => {});
+    return null;
   }
+  // No `finally` block: success path hands the browser to the caller;
+  // error path already closed it above.
 }
 
 export interface SelectorDiscoveryPassOptions {
@@ -197,9 +204,18 @@ export interface SelectorDiscoveryPassOptions {
  * automation instead of only DEFAULT_SELECTORS + hand-written overrides
  * (issue #141). Mutates `rc` and `learned` in place; never throws.
  */
+/**
+ * Run the LLM selector discovery pass. Mutates `rc` and `learned` in place.
+ * Returns the open Chromium browser from the live-validation step so the
+ * caller (e2e.ts) can reuse it for the main flow run, avoiding a second
+ * Chromium launch that OOMs machines with limited RAM (issue #167).
+ * Returns `null` when no live-validation browser was created (no LLM available,
+ * discovery failed, or validation was skipped).
+ * The returned browser is OPEN — the caller is responsible for closing it.
+ */
 export async function runSelectorDiscoveryPass(
   opts: SelectorDiscoveryPassOptions,
-): Promise<void> {
+): Promise<Browser | null> {
   const { url, viewport, rc, learned, platform, host } = opts;
   const spinner = opts.quiet
     ? null
@@ -208,6 +224,7 @@ export async function runSelectorDiscoveryPass(
     if (spinner) spinner.warn(msg);
     else console.warn(`[selectors] ${msg}`);
   };
+  let reusableBrowser: Browser | null = null;
   try {
     const html = opts.homeHtml ?? (await fetchHomeHtml(url, viewport));
     if (!html) {
@@ -250,7 +267,15 @@ export async function runSelectorDiscoveryPass(
     );
     if (!discovered) {
       warn("LLM não retornou seletores; usando defaults");
-      return;
+      return null;
+    }
+
+    // When plpUrlHint is already configured, categoryLink is never used by the
+    // purchase-journey flow (it navigates directly via the hint). Validating it
+    // against a mobile viewport where desktop nav is CSS-hidden produces a false
+    // failure and a noisy "descartando categoryLink" warning. Skip it. (#167)
+    if (opts.rc.plpUrlHint) {
+      discovered.categoryLink = undefined;
     }
 
     const added = Object.entries(discovered).filter(
@@ -258,10 +283,9 @@ export async function runSelectorDiscoveryPass(
     ).length;
     if (spinner) spinner.text = `${added} seletor(es) inferido(s) pelo LLM — validando ao vivo…`;
 
-    // Live-validation pass (M4): a short-lived, throwaway browser context —
-    // closed right after — confirms each selector matches ≥1 element on the
-    // page it's supposed to live on before it's trusted enough to (a) survive
-    // into rc.selectors and (b) seed learned-selectors at `verified`.
+    // Live-validation pass (M4): opens a Chromium browser, confirms each
+    // selector matches ≥1 element before trusting it, then returns the open
+    // browser to the caller for reuse (avoids a second OOM-prone launch, #167).
     const validation = await runLiveSelectorValidation(discovered, {
       homeUrl: url,
       plpUrl,
@@ -270,6 +294,7 @@ export async function runSelectorDiscoveryPass(
     });
 
     if (validation) {
+      reusableBrowser = validation.browser;
       persistSelectorValidation(url, validation.validated);
       for (const key of validation.failed) {
         console.warn(
@@ -306,5 +331,11 @@ export async function runSelectorDiscoveryPass(
       );
   } catch (err) {
     warn(`Discovery falhou: ${(err as Error).message}`);
+    // If we got a browser before the error, close it — it won't be returned.
+    if (reusableBrowser) {
+      await reusableBrowser.close().catch(() => {});
+      reusableBrowser = null;
+    }
   }
+  return reusableBrowser;
 }

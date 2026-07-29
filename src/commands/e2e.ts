@@ -156,8 +156,12 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
     }
   }
   const wantsAutoSelectors = opts.autoSelectors !== false && isLlmAvailable();
+  // Capture the browser returned by discovery so we can reuse it for the main
+  // flow run instead of launching a second Chromium — two launches in quick
+  // succession OOM machines with ~1.4 GB free RAM (issue #167).
+  let discoveryBrowser: Browser | null = null;
   if (wantsAutoSelectors) {
-    await runSelectorDiscoveryPass({
+    discoveryBrowser = await runSelectorDiscoveryPass({
       url: opts.url,
       viewport: primaryViewport,
       rc,
@@ -190,13 +194,20 @@ export async function e2eCommand(opts: E2eCommandOptions): Promise<number> {
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
 
-  const spinner = opts.json ? null : ora("Lançando browser…").start();
-  let browser: Browser | null = null;
+  const spinner =
+    opts.json
+      ? null
+      : discoveryBrowser
+        ? ora("Iniciando fluxos…").start()
+        : ora("Lançando browser…").start();
+  let browser: Browser | null = discoveryBrowser;
   const allFlows: FlowCapture[] = [];
   const allPages: PageCapture[] = [];
 
   try {
-    browser = await launchBrowser({ headless: true });
+    if (!browser) {
+      browser = await launchBrowser({ headless: true });
+    }
     for (const viewport of viewports) {
       const ctx = await newContext(browser, { viewport });
       await installVitalsCollector(ctx);

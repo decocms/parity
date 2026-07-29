@@ -41,7 +41,15 @@ export function purchaseJourneyFlow(ctx: CheckContext): CheckResult {
   // (prod present, cand empty) never means single-site — it means cand
   // crashed during a comparison run, which must stay a critical
   // "checkout indisponível" signal in the comparative path below.
-  const single = ctx.prodFlows.length === 0 && ctx.candFlows.length > 0;
+  //
+  // Use `candFlows.some(pj)` instead of `candFlows.length > 0` because
+  // `candFlows` carries ALL flow captures (homepage, plp, pdp, …) — a
+  // non-empty array doesn't guarantee a purchase-journey capture exists.
+  // Without this guard, the loop falls into the comparative branch and
+  // fires the spurious "prod não produziu captura" issue (issue #168).
+  const single =
+    ctx.prodFlows.length === 0 &&
+    ctx.candFlows.some((f) => f.flow === "purchase-journey");
 
   // Pair flows by viewport
   for (const viewport of ctx.viewports) {
