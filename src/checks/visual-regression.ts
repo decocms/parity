@@ -369,7 +369,44 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
 
   const llmTargets = new Set(useLlm ? llmCandidates.slice(0, maxLlmCalls) : []);
 
-  // ─── Pass 3 ── execute LLM calls + finalize each result ──────────────
+  // Fire the visual-diff LLM calls concurrently up front. Each call is a
+  // multimodal request with 2-3 large screenshots and takes several seconds;
+  // the finalize loop below used to `await` them one at a time, serializing
+  // the whole batch even though the LLM client's own semaphore
+  // (MAX_CONCURRENT_LLM_CALLS) already allows up to 3 in flight. Kicking them
+  // off here lets that budget actually be used, cutting the visual-diff phase
+  // wall-clock by up to ~3× on runs with several non-cached pages. Real
+  // parallelism (and thus peak memory from the base64 image payloads) stays
+  // bounded by that same semaphore, so this doesn't reintroduce OOM pressure.
+  const llmOutcomes = new Map<PreparedPair, { differences?: VisualDifference[]; error?: string }>();
+  await Promise.all(
+    prepared
+      .filter((p) => !p.cacheHit && llmTargets.has(p))
+      .map(async (p) => {
+        try {
+          const diffs = await visualSemanticDiff({
+            prodPath: p.pair.prod.screenshotPath,
+            candPath: p.pair.cand.screenshotPath,
+            heatmapPath: p.heatmapWritten ? p.heatmapPath : undefined,
+            pctDiff: p.pctDiff,
+            pageContext: p.pair.key,
+            viewport: p.pair.viewport,
+            prodSections: p.prodSections,
+            candSections: p.candSections,
+            sectionsOnlyInProd: p.sectionsOnlyInProd,
+            bothHaveCarousel: p.bothHaveCarousel,
+            prodSkeletonCount: p.prodSkeletonCount,
+            candSkeletonCount: p.candSkeletonCount,
+          });
+          llmOutcomes.set(p, { differences: diffs ?? [] });
+        } catch (err) {
+          llmOutcomes.set(p, { error: (err as Error).message });
+        }
+      }),
+  );
+
+  // ─── Pass 3 ── finalize each result (sequential: cache writes, result
+  // ordering, and issue ordering must stay deterministic) ──────────────
   const results: VisualDiffPage[] = [];
   let pagesFromCache = 0;
 
@@ -388,24 +425,11 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
     } else if (llmTargets.has(p)) {
       llmCallsUsed++;
       llmCalled = true;
-      try {
-        const diffs = await visualSemanticDiff({
-          prodPath: p.pair.prod.screenshotPath,
-          candPath: p.pair.cand.screenshotPath,
-          heatmapPath: p.heatmapWritten ? p.heatmapPath : undefined,
-          pctDiff: p.pctDiff,
-          pageContext: p.pair.key,
-          viewport: p.pair.viewport,
-          prodSections: p.prodSections,
-          candSections: p.candSections,
-          sectionsOnlyInProd: p.sectionsOnlyInProd,
-          bothHaveCarousel: p.bothHaveCarousel,
-          prodSkeletonCount: p.prodSkeletonCount,
-          candSkeletonCount: p.candSkeletonCount,
-        });
-        differences = diffs ?? [];
-      } catch (err) {
-        llmError = (err as Error).message;
+      const outcome = llmOutcomes.get(p);
+      if (outcome?.error !== undefined) {
+        llmError = outcome.error;
+      } else {
+        differences = outcome?.differences ?? [];
       }
     }
 
