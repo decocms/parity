@@ -232,7 +232,18 @@ async function responseToEntry(resp: Response): Promise<NetworkEntry> {
   const req = resp.request();
   const headers = resp.headers();
   const timing = req.timing();
-  const bytes = (await safeBodySize(resp)) ?? parseIntOrNull(headers["content-length"]);
+  // Prefer the `content-length` header over reading the body. Calling
+  // `resp.body()` forces Chromium to materialize the ENTIRE response body
+  // (images, fonts, video, …) and copy it into the Node heap — done for every
+  // response of every page, across up to 4 concurrent contexts, it was one of
+  // the largest drivers of RSS and pushed machines into the OOM killer. Only
+  // fall back to `body()` for small text resources whose byte count actually
+  // matters downstream (HTML/JS/XHR) and only when the header is absent; never
+  // buffer binary assets just to count bytes.
+  const contentLength = parseIntOrNull(headers["content-length"]);
+  const bytes =
+    contentLength ??
+    (isSmallTextResource(req.resourceType()) ? await safeBodySize(resp) : null);
   return {
     url: resp.url(),
     method: req.method(),
@@ -250,6 +261,21 @@ async function responseToEntry(resp: Response): Promise<NetworkEntry> {
     serverTiming: headers["server-timing"] ?? null,
     decoSection: headers["x-deco-section"] ?? null,
   };
+}
+
+/**
+ * Resource types whose exact byte size is worth reading from the body when the
+ * `content-length` header is missing (chunked/streamed text). Binary assets
+ * (image/media/font/stylesheet) are excluded — buffering them just to count
+ * bytes is the memory cost we're avoiding.
+ */
+function isSmallTextResource(resourceType: string): boolean {
+  return (
+    resourceType === "document" ||
+    resourceType === "script" ||
+    resourceType === "xhr" ||
+    resourceType === "fetch"
+  );
 }
 
 async function safeBodySize(resp: Response): Promise<number | null> {
