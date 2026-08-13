@@ -40,6 +40,30 @@ export const WebVitals = z.object({
 });
 export type WebVitals = z.infer<typeof WebVitals>;
 
+export const WebVitalStat = z.object({
+  median: z.number(),
+  p75: z.number(),
+  min: z.number(),
+  max: z.number(),
+  /** Raw per-run values, in capture order (not sorted) — for debugging jitter. */
+  samples: z.array(z.number()),
+});
+export type WebVitalStat = z.infer<typeof WebVitalStat>;
+
+/**
+ * Per-metric aggregate across repeated navigations (`--runs`, issue #179).
+ * `null` when a metric never resolved on any run (e.g. INP with no
+ * interaction). Only populated when the capture opted into `runs > 1`.
+ */
+export const WebVitalsStats = z.object({
+  lcp: WebVitalStat.nullable(),
+  cls: WebVitalStat.nullable(),
+  fcp: WebVitalStat.nullable(),
+  ttfb: WebVitalStat.nullable(),
+  inp: WebVitalStat.nullable(),
+});
+export type WebVitalsStats = z.infer<typeof WebVitalsStats>;
+
 export const ConsoleEntry = z.object({
   type: z.enum(["error", "warning", "log", "info", "debug"]),
   text: z.string(),
@@ -77,7 +101,10 @@ export const PageCapture = z.object({
   side: Side,
   durationMs: z.number(),
   html: z.string(),
+  /** Representative value per metric — the median across runs when captured with `runs > 1`, else the single sample. */
   vitals: WebVitals,
+  /** Full per-metric stats (median/p75/min/max + raw samples), present only when captured with `runs > 1`. Issue #179. */
+  vitalsStats: WebVitalsStats.optional(),
   console: z.array(ConsoleEntry),
   network: z.array(NetworkEntry),
   screenshotPath: z.string(),

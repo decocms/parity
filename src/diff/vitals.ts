@@ -36,6 +36,13 @@ export interface VitalsDiff {
   anyFailed: boolean;
 }
 
+/**
+ * `prod`/`cand` are `PageCapture.vitals` — a single sample by default, or
+ * the per-metric median across `--runs` repeats when the capture opted
+ * into repeat sampling (issue #179). Comparing against the median instead
+ * of one navigation's raw numbers shrinks the run-to-run jitter false
+ * positives documented as the "prod-vs-prod noise floor".
+ */
 export function diffVitals(
   prod: WebVitals,
   cand: WebVitals,

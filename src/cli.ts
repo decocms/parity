@@ -209,6 +209,12 @@ program
     "Comma-separated severities that cause exit 1 (default: critical,high)",
     "critical,high",
   )
+  .option(
+    "--runs <n>",
+    "Repeat the Web Vitals navigation N times per page and audit against the median (reduces run-to-run jitter false positives). Default 1 (no repeat). Issue #179.",
+    (v) => Number(v),
+    1,
+  )
   .option("--pt", "Tell the LLM to respond in Brazilian Portuguese. Issue #67.")
   .action(async (opts) => {
     if (opts.pt) {
@@ -410,6 +416,12 @@ program
   .option("--limit <n>", "Max pages discovered from sitemap.xml", (v) => Number(v), 20)
   .option("--viewports <list>", "mobile,desktop", "mobile")
   .option("--concurrency <n>", "Parallel workers (1-8)", (v) => Number(v), 4)
+  .option(
+    "--runs <n>",
+    "Repeat each page's vitals navigation N times and compare against the median (reduces run-to-run jitter false positives). Default 1 (no repeat). Issue #179.",
+    (v) => Number(v),
+    1,
+  )
   .option("--output <dir>", "Output directory", "./parity-output")
   .option("--open", "Open the HTML report when done", false)
   .action(async (opts) => {
