@@ -296,4 +296,77 @@ describe("lazySectionPresence", () => {
       expect(missing?.severity).toBe("high");
     });
   });
+
+  describe("issue #178 (#4): reserved infra route name fallback blocklist", () => {
+    it("does not report false 'missing: render' when prod's fallback always resolves to a reserved name and cand has no lazy requests", () => {
+      // Reproduces the TanStack false-positive: prod's real lazy-render
+      // requests hit a fixed /deco/render path (section id via query param,
+      // no x-deco-section header) so the last-path-segment fallback always
+      // yields the literal "render" for every distinct section. Cand (a
+      // TanStack site using createServerFn RPC) produces zero matching
+      // network entries. Without the blocklist this reports a false
+      // high-severity "Faltando: render" on every page.
+      const r = lazySectionPresence(
+        makeContext({
+          prodPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "prod",
+              network: [
+                net({ url: "https://x.com/deco/render?s=hero", decoSection: null }),
+                net({ url: "https://x.com/deco/render?s=shelf", decoSection: null }),
+                net({ url: "https://x.com/deco/render?s=newsletter", decoSection: null }),
+              ],
+            }),
+          ],
+          candPages: [
+            makePageCapture({ url: "https://x.com/", side: "cand", network: [] }),
+          ],
+        }),
+      );
+      expect(r.issues.find((i) => i.id.includes("lazy:missing"))).toBeUndefined();
+      expect(r.status).toBe("pass");
+    });
+
+    it("still flags a real section id whose fallback segment is NOT reserved", () => {
+      const r = lazySectionPresence(
+        makeContext({
+          prodPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "prod",
+              network: [net({ url: "https://x.com/deco/render/shelf-1", decoSection: null })],
+            }),
+          ],
+          candPages: [makePageCapture({ url: "https://x.com/", side: "cand", network: [] })],
+        }),
+      );
+      const missing = r.issues.find((i) => i.id.includes("lazy:missing"));
+      expect(missing).toBeDefined();
+      expect(missing?.details).toMatch(/shelf-1/);
+    });
+
+    it("a legitimate section literally named 'render' still counts via the x-deco-section header (fallback blocklist doesn't touch the header path)", () => {
+      const r = lazySectionPresence(
+        makeContext({
+          prodPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "prod",
+              network: [net({ url: "https://x.com/deco/render", decoSection: "render" })],
+            }),
+          ],
+          candPages: [
+            makePageCapture({
+              url: "https://x.com/",
+              side: "cand",
+              network: [net({ url: "https://x.com/deco/render", decoSection: "render" })],
+            }),
+          ],
+        }),
+      );
+      expect(r.status).toBe("pass");
+      expect(r.issues.find((i) => i.id.includes("lazy:missing"))).toBeUndefined();
+    });
+  });
 });

@@ -3,6 +3,19 @@ import type { CheckContext } from "./index.ts";
 import { pairCaptures } from "./lib/pairing.ts";
 
 const LAZY_URL_PATTERN = /\/(deco\/render|_loader)\b/;
+/**
+ * Issue #178 (#4): known admin/infra route names that carry ZERO
+ * section-identifying information when used as a bare last-path-segment
+ * fallback. E.g. TanStack Start's `/deco/render` admin iframe-preview
+ * endpoint (section id passed via query param, not path segment) — every
+ * prod lazy-render request collapses to the literal id "render", which
+ * isn't a real section and would otherwise report as a false "missing
+ * lazy section" on every single page. Only gates the low-confidence
+ * fallback path; the `x-deco-section` header path (checked first, see
+ * `extractSectionIds`) is unaffected, so a real section actually named
+ * "render" that sets that header still counts correctly.
+ */
+const RESERVED_FALLBACK_SEGMENTS = new Set(["render", "meta", "invoke"]);
 /** Marker the framework (or the user) can emit when ALL sections render eagerly by design. */
 const EAGER_RENDERING_MARKER =
   /data-deco-async-rendering=["']eager["']|<meta\s+name=["']parity:async-rendering["']\s+content=["']eager["']/i;
@@ -185,7 +198,10 @@ export function extractSectionIds(entries: NetworkEntry[]): Set<string> {
       try {
         const u = new URL(e.url);
         const seg = u.pathname.split("/").filter(Boolean).pop();
-        if (seg) out.add(normalizeSectionId(seg));
+        if (seg) {
+          const normalized = normalizeSectionId(seg);
+          if (!RESERVED_FALLBACK_SEGMENTS.has(normalized)) out.add(normalized);
+        }
       } catch {
         /* skip malformed */
       }
