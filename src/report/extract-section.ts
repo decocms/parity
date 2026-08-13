@@ -141,7 +141,11 @@ function extractVitalsSlice(run: Run): unknown {
     for (const p of fc.pages) {
       if (!p.vitals) continue;
       const k = `${p.side}::${p.viewport}::${pathOf(p.url)}`;
-      out[k] = p.vitals;
+      // vitalsFullPage (issue #185) is the post-scroll snapshot — only
+      // present when the capture actually scrolled. Nest it alongside the
+      // pre-scroll `vitals` so CLI/JSON consumers can see both without
+      // silently losing the full-page number.
+      out[k] = p.vitalsFullPage ? { ...p.vitals, fullPage: p.vitalsFullPage } : p.vitals;
     }
   }
   return out;
