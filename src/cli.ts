@@ -100,11 +100,11 @@ program
   )
   .option(
     "--pages <list>",
-    'Comma-separated paths to compare visually (overrides sitemap discovery). E.g. "/,/account,/p/some-product". Use this when you want deterministic coverage instead of sampled.',
+    'Comma-separated paths to compare visually (overrides sitemap discovery). E.g. "/,/account,/p/some-product". Use this when you want deterministic coverage instead of sampled. Scopes the visual-diff + vitals-extra-pages passes ONLY — the flows crawl (--flows, default purchase-journey) discovers its own target pages independently and ignores this flag. To scope which page(s) a flow visits, use --flows to pick a lighter flow and/or set the matching *UrlHint (e.g. plpUrlHint) in .parityrc.json. Issue #178.',
   )
   .option(
     "--pages-file <path>",
-    "Read paths to compare visually from a text file (one path per line). Lines starting with # are ignored. Overrides --pages when both are present.",
+    "Read paths to compare visually from a text file (one path per line). Lines starting with # are ignored. Overrides --pages when both are present. Same visual-diff/vitals-only scope as --pages — see that flag's help. Issue #178.",
   )
   .option("--no-visual-diff", "Skip the visual diff capture pass entirely")
   .option(
