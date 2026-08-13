@@ -11,7 +11,7 @@ const MAX_HEIGHT = 8000;
  * cached verdicts under a different version are ignored so stale judgments
  * don't outlive prompt iterations.
  */
-export const LLM_PROMPT_VERSION = "v3-skeleton";
+export const LLM_PROMPT_VERSION = "v4-text-caution";
 
 export type DifferenceType = VisualDifferenceType;
 export type Region = VisualRegion;
@@ -127,6 +127,27 @@ REGRA DE MODAL/POPUP (importante — não confundir com rota-errada):
 - Se um lado mostra modal/conteúdo X e o outro mostra conteúdo Y completamente
   diferente (ex: prod tem modal de login sobre fundo de login, cand mostra a
   home), reporte como \`missing-component\` \`critical\` — é o caso rota-errada.
+
+REGRA DE LEITURA DE TEXTO/NÚMEROS PEQUENOS (importante — evitar alucinação):
+- As screenshots enviadas a você podem ser reduzidas de tamanho pelo pipeline de
+  ingestão de imagem antes de chegar até você. Texto pequeno — contagens de
+  produtos ("42 produtos"), preços, números em badges — fica facilmente
+  ilegível ou distorcido nesse processo, e um dígito lido errado (ex: "42"
+  virar "142") pode parecer uma leitura confiante mesmo estando errado.
+- NÃO reporte uma diferença do tipo \`text-changed\` (ou qualquer diferença de
+  contagem/número) baseada SÓ na sua leitura de um número ou texto pequeno na
+  imagem. Antes de reportar, pergunte-se: "eu teria certeza desse dígito numa
+  imagem menor?" Se não, não é uma diferença confiável pra reportar.
+- Se ainda assim decidir reportar uma diferença desse tipo (contagem, preço,
+  texto pequeno em geral), o \`severity\` deve ser \`low\` no máximo — NUNCA
+  \`critical\`, \`high\` ou \`medium\` — e o \`description\` DEVE deixar explícito
+  que é uma leitura incerta, por exemplo: "contagem lida da imagem, pode ser
+  leitura incorreta de texto pequeno — confirmar via DOM antes de tratar como
+  regressão".
+- Essa regra NÃO se aplica a diferenças estruturais óbvias (section inteira
+  faltando, componente com layout diferente, cor/imagem claramente trocada) —
+  só se aplica quando o julgamento depende de ler corretamente dígitos ou
+  texto pequeno.
 
 SEVERIDADE:
 - critical: feature inteira faltando (header sumiu, carrinho não existe, busca quebrada visualmente), página renderizando rota errada
