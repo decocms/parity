@@ -21,7 +21,6 @@ describe("applySmartDefaults + explicit --pages (#178)", () => {
     cep: "01310-100",
     runs: "1",
     output: "./parity-output",
-    ci: false,
     failOn: "critical",
     visualPages: 5, // untouched — still commander's default
   };
