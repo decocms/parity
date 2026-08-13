@@ -115,7 +115,7 @@ program
   )
   .option(
     "--bypass-cache",
-    "Bypass CDN/edge caches: append a cache-busting query param and send Cache-Control: no-cache on every request. Use right after a deploy to avoid false failures from stale CF edge content.",
+    "Bypass CDN/edge caches AND the browser's own HTTP cache (CDP cache-disable), forcing a cold-visit fetch. Use right after a deploy to avoid false failures from stale CF edge content, or to approximate Lighthouse/CrUX-comparable TTFB/FCP/LCP numbers — without this flag, parity's vitals are a warm-connection/cache-enabled ('repeat visit') measurement, not a cold first-visit one, so they aren't directly comparable 1:1 to Lighthouse.",
     false,
   )
   .option(

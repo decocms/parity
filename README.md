@@ -96,6 +96,10 @@ Without any provider, the CLI still runs and outputs raw check results — only 
 
 Individual flags always override the preset. See `parity run --help` for the full default behavior breakdown.
 
+### A note on Web Vitals numbers
+
+By default parity measures TTFB/FCP/LCP with the browser's HTTP cache enabled, on a warm connection — a "repeat visit" scenario. Lighthouse and CrUX field data, by contrast, simulate/measure cold first-time visits (cache disabled). Neither is wrong, but they answer different questions, so don't compare parity's default vitals 1:1 against Lighthouse or CrUX. Pass `--bypass-cache` to approximate a cold-visit measurement instead (disables the browser cache via CDP in addition to bypassing CDN/edge caches).
+
 ## CI usage (GitHub Actions)
 
 ```yaml

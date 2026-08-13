@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, resolve as resolvePath } from "node:path";
-import type { Browser, BrowserContext, BrowserContextOptions } from "playwright";
+import type { Browser, BrowserContext, BrowserContextOptions, Page } from "playwright";
 import { chromium, devices } from "playwright";
 import type { Viewport } from "../types/schema.ts";
 import { CAROUSEL_STABILIZER_INIT_SCRIPT } from "./carousel-stabilizer.ts";
@@ -230,11 +230,45 @@ export interface ContextOptions {
   /** Force cohort/A-B cookies to a stable bucket */
   cohortCookieValue?: string;
   /**
-   * Send `Cache-Control: no-cache` + `Pragma: no-cache` on every navigation
-   * to bypass intermediary caches (CF edge, CDN). Used by `--no-cache` to
-   * avoid false failures from stale edge content right after a deploy.
+   * Force a cold-visit fetch, approximating what Lighthouse simulates by
+   * default (cache disabled, no warm connection). Two layers, belt and
+   * suspenders:
+   *  1. `Cache-Control: no-cache` + `Pragma: no-cache` request headers,
+   *     which only force revalidation — a `304` still lets the browser
+   *     serve its own cached body.
+   *  2. A CDP `Network.setCacheDisabled(true)` call (see `disableHttpCache`
+   *     below) wired onto every page created in this context, which skips
+   *     the disk/memory cache entirely.
+   *
+   * Wired up by `--bypass-cache`.
+   *
+   * IMPORTANT: without this flag, parity's default captures are a
+   * warm-connection / cache-enabled scenario ("repeat visit"), not
+   * Lighthouse/CrUX's cold first-visit simulation — the two are not
+   * directly comparable 1:1 for TTFB/FCP/LCP. Pass `noCache: true` to
+   * approximate the cold-visit numbers those tools report. See issue #186.
    */
   noCache?: boolean;
+}
+
+/**
+ * Force a genuinely cold fetch via CDP — the DevTools "Disable cache"
+ * checkbox, not just a revalidation header. CDP sessions are per-page (not
+ * per-context), so this must run once per `Page`, before its first
+ * navigation. Chromium-only (parity only ever launches `chromium`, see
+ * `launchBrowser` above — no Firefox/WebKit code paths exist in this repo),
+ * so no engine-detection guard is needed; the try/catch is just defensive
+ * in case a CDP session can't be opened, so a hiccup here degrades to the
+ * header-based no-cache above instead of failing the whole capture.
+ */
+async function disableHttpCache(page: Page): Promise<void> {
+  try {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Network.enable");
+    await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+  } catch {
+    // Best-effort — the Cache-Control/Pragma request headers still apply.
+  }
 }
 
 export async function newContext(browser: Browser, opts: ContextOptions): Promise<BrowserContext> {
@@ -248,6 +282,20 @@ export async function newContext(browser: Browser, opts: ContextOptions): Promis
       ? { "Cache-Control": "no-cache", Pragma: "no-cache" }
       : undefined,
   });
+
+  if (opts.noCache) {
+    // Every call site across the codebase creates pages via `ctx.newPage()`
+    // (there's no other choke point), so wrap it here rather than threading
+    // a duplicate noCache flag through every capture call site — this way
+    // the CDP cache-disable is guaranteed to run, and to finish, before the
+    // caller can reach `page.goto()`.
+    const rawNewPage = ctx.newPage.bind(ctx);
+    ctx.newPage = (async () => {
+      const page = await rawNewPage();
+      await disableHttpCache(page);
+      return page;
+    }) as BrowserContext["newPage"];
+  }
 
   // Disable animations on every page in this context
   await ctx.addInitScript({
