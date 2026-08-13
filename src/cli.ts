@@ -44,7 +44,7 @@ program
       "  flows=purchase-journey, viewports=mobile,desktop, vitals-pages=10,",
       "  visual-pages=5 (auto-zeroed when no LLM provider available),",
       "  auto-selectors=ON (if LLM), learn=ON, cache=ON, visual-diff=ON,",
-      "  warmup=OFF, bypass-cache=OFF, ci=OFF.",
+      "  warmup=OFF, bypass-cache=OFF, fail-on=critical (exit 1 if hit).",
     ].join("\n"),
   )
   .option(
@@ -71,15 +71,18 @@ program
   .option("--runs <n>", "Repeat each measurement N times (median)", "1")
   .option("--baseline <name>", "Compare against a saved baseline")
   .option("--output <dir>", "Output directory", "./parity-output")
-  .option("--ci", "CI mode: stricter exit codes", false)
-  .option("--fail-on <severities>", "Comma-separated severities that cause exit 1", "critical")
+  .option(
+    "--fail-on <severities>",
+    "Comma-separated severities that cause exit 1 (default: critical)",
+    "critical",
+  )
   .option("--open", "Open the HTML report after the run completes", false)
   .option("--no-auto-selectors", "Disable LLM-based selector discovery (uses defaults instead)")
   .option("--refresh-selectors", "Bypass selector cache and re-run discovery", false)
   .option("--no-learn", "Don't write to learned-selectors.json (read-only mode)")
   .option(
     "--vitals-pages <n>",
-    "Extra pages from sitemap to crawl for Vitals coverage (default 10)",
+    "Extra pages from sitemap to crawl for Vitals coverage, beyond what --flows/--pages already cover (default 10). These are auto-sampled and can add significant unrelated noise to findings — pass 0 to scope the run to only the pages you explicitly requested.",
     (v) => Number(v),
     10,
   )
@@ -97,11 +100,11 @@ program
   )
   .option(
     "--pages <list>",
-    'Comma-separated paths to compare visually (overrides sitemap discovery). E.g. "/,/account,/p/some-product". Use this when you want deterministic coverage instead of sampled.',
+    'Comma-separated paths to compare visually (overrides sitemap discovery). E.g. "/,/account,/p/some-product". Use this when you want deterministic coverage instead of sampled. Scopes the visual-diff + vitals-extra-pages passes ONLY — the flows crawl (--flows, default purchase-journey) discovers its own target pages independently and ignores this flag. To scope which page(s) a flow visits, use --flows to pick a lighter flow and/or set the matching *UrlHint (e.g. plpUrlHint) in .parityrc.json. Issue #178.',
   )
   .option(
     "--pages-file <path>",
-    "Read paths to compare visually from a text file (one path per line). Lines starting with # are ignored. Overrides --pages when both are present.",
+    "Read paths to compare visually from a text file (one path per line). Lines starting with # are ignored. Overrides --pages when both are present. Same visual-diff/vitals-only scope as --pages — see that flag's help. Issue #178.",
   )
   .option("--no-visual-diff", "Skip the visual diff capture pass entirely")
   .option(

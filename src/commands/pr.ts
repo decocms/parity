@@ -49,7 +49,6 @@ export async function prCommand(opts: PrCommandOptions): Promise<number> {
     cep: "01310-100",
     runs: "1",
     output: opts.output,
-    ci: true,
     failOn: "critical,high",
     preset: opts.preset ?? "ci",
     open: false,

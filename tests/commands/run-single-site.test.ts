@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runCommand } from "../../src/commands/run.ts";
+import { evaluateFailOnGate, runCommand } from "../../src/commands/run.ts";
 import type { RunOptions } from "../../src/commands/run.ts";
+import type { Issue } from "../../src/types/schema.ts";
 
 /**
  * Issue #141: `parity run` compares two URLs. When `--prod` is omitted the
@@ -30,5 +31,29 @@ describe("runCommand single-site guard (#141)", () => {
     expect(code).toBe(2);
     const printed = errSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(printed).toMatch(/parity e2e --url <url>/);
+  });
+});
+
+/**
+ * Issue #178 (problem #1): the blocking-issue exit-1 check used to be gated
+ * behind `--ci`, which had no other effect anywhere in the codebase — a run
+ * with a blocking-severity issue silently exited 0 unless the caller also
+ * passed `--ci`. `evaluateFailOnGate` is the extracted, unconditional
+ * decision the full `runCommand` pipeline now always applies after a run
+ * completes, regardless of `--ci`.
+ */
+describe("evaluateFailOnGate (#178)", () => {
+  it("returns exit code 1 when a blocking-severity issue is present, without needing --ci", () => {
+    const issues = [{ severity: "critical" }, { severity: "low" }] as Issue[];
+    const result = evaluateFailOnGate(issues, ["critical"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.message).toMatch(/1 issue\(s\) bloqueante\(s\)/);
+  });
+
+  it("returns exit code 0 when no issue matches --fail-on severities", () => {
+    const issues = [{ severity: "low" }, { severity: "medium" }] as Issue[];
+    const result = evaluateFailOnGate(issues, ["critical"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.message).toBeUndefined();
   });
 });

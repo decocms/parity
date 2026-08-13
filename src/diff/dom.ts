@@ -145,6 +145,13 @@ export function snapshotDom(html: string): DomSnapshot {
     const looksLikeBanner =
       sectionName !== null || (widthAttr !== null && widthAttr >= BANNER_WIDTH_THRESHOLD);
     if (!looksLikeBanner) return;
+    // Carousel hydration-safe infinite wrap renders extra boundary-clone
+    // <img>s (aria-hidden="true" / data-slider-clone), on the img itself or
+    // a wrapping <li>/<div>. These are decorative duplicates, not real
+    // banners — exclude them from the census (issue #178). cheerio's
+    // .closest() tests the element itself before walking up ancestors, so
+    // this covers both the img-level and wrapper-level cases.
+    if ($el.closest('[aria-hidden="true"], [data-slider-clone]').length > 0) return;
     const src = $el.attr("src") ?? "";
     if (!src) return;
     const aspectRatio = widthAttr && heightAttr && heightAttr > 0 ? widthAttr / heightAttr : null;
