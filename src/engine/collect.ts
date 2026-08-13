@@ -18,6 +18,34 @@ function dlog(side: Side, viewport: Viewport, msg: string): void {
 }
 
 /**
+ * CLS session-windowing reducer: max 5s window with <=1s gaps between
+ * shifts, per spec (https://github.com/GoogleChrome/web-vitals/blob/main/src/onCLS.ts) —
+ * not a lifetime cumulative sum. Exported for unit testing; its source is
+ * inlined verbatim into VITALS_INIT_SCRIPT below via toString() so the
+ * in-browser collector runs the exact same code this is tested against.
+ */
+export function clsWindowReducer(
+  state: { sessionValue: number; sessionStart: number; sessionLast: number; clsValue: number },
+  entry: { startTime: number; value: number; hadRecentInput: boolean },
+): typeof state {
+  if (entry.hadRecentInput) return state;
+  let { sessionValue, sessionStart, sessionLast, clsValue } = state;
+  if (
+    sessionValue &&
+    entry.startTime - sessionLast < 1000 &&
+    entry.startTime - sessionStart < 5000
+  ) {
+    sessionValue += entry.value;
+  } else {
+    sessionValue = entry.value;
+    sessionStart = entry.startTime;
+  }
+  sessionLast = entry.startTime;
+  if (sessionValue > clsValue) clsValue = sessionValue;
+  return { sessionValue, sessionStart, sessionLast, clsValue };
+}
+
+/**
  * Inline collector that runs inside the page to capture Core Web Vitals
  * via PerformanceObserver. Uses a window-attached object that we read
  * via page.evaluate after navigation settles.
@@ -54,15 +82,14 @@ const VITALS_INIT_SCRIPT = `
       }).observe({ type: 'paint', buffered: true });
     } catch (e) {}
 
-    // CLS (cumulative, excluding shifts after recent user input)
+    // CLS
     try {
-      let cls = 0;
+      const clsWindowReducer = ${clsWindowReducer.toString()};
+      let clsState = { sessionValue: 0, sessionStart: 0, sessionLast: 0, clsValue: 0 };
       new PerformanceObserver(function(list) {
         for (const entry of list.getEntries()) {
-          if (!entry.hadRecentInput) {
-            cls += entry.value;
-            window.__parity_vitals.cls = cls;
-          }
+          clsState = clsWindowReducer(clsState, entry);
+          window.__parity_vitals.cls = clsState.clsValue;
         }
       }).observe({ type: 'layout-shift', buffered: true });
     } catch (e) {}
