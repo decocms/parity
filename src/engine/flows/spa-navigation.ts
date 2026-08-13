@@ -4,7 +4,13 @@ import { classify } from "../../diff/console.ts";
 import type { ConsoleEntry, PageCapture, StepCapture } from "../../types/schema.ts";
 import { capturePage } from "../collect.ts";
 import type { FlowContext, FlowResult } from "./shared.ts";
-import { findCategoryUrl, screenshotPath, screenshotStable, withCap } from "./shared.ts";
+import {
+  captureInpSnapshot,
+  findCategoryUrl,
+  screenshotPath,
+  screenshotStable,
+  withCap,
+} from "./shared.ts";
 
 /**
  * SPA-navigation flow (issue #54, M2.5 — "C. SPA navigation mode").
@@ -379,6 +385,14 @@ export async function flowSpaNavigation(ctx: FlowContext): Promise<FlowResult> {
       false,
     );
     const navType = classifyNavigationType({ urlChanged, markerSurvived });
+
+    // The nav click just fired above is a real interaction. When it's a
+    // genuine SPA nav (`markerSurvived`) the JS context — and with it
+    // `window.__parity_vitals` — is the SAME one `cap1` was captured from,
+    // so this is the only chance to read the INP it produced before
+    // `capF5Dest` below does its own `page.goto` and reinstalls a fresh
+    // collector on the destination document.
+    await captureInpSnapshot(page, cap1);
 
     const hydrationEntries = consoleDuringNav.filter(
       (e) => e.type === "error" && classify(e) === "hydration",

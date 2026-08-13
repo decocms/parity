@@ -14,6 +14,7 @@ import {
 import { selectVariant } from "./purchase-journey.ts";
 import type { FlowContext, FlowResult } from "./shared.ts";
 import {
+  captureInpSnapshot,
   collectCandidateLinks,
   findCategoryUrl,
   findElement,
@@ -397,6 +398,10 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
     // between the two steps.
     reportStart(5, "verify-cart-persistence");
     const t4b = Date.now();
+    // Steps 1-2 (seed add-to-cart, second add-to-cart, minicart opens) all
+    // clicked real elements on the current document — sample the INP they
+    // produced now, before the reload below reinstalls a fresh collector.
+    await captureInpSnapshot(page, pages[pages.length - 1]!);
     await page.reload({ waitUntil: "load" }).catch(() => undefined);
     await waitForCartHydration(page).catch(() => undefined);
     let persistRowVisible = await firstVisibleLocator(page, selFor(ctx, "cartItemRow"));
@@ -909,6 +914,10 @@ export async function flowCartInteractions(ctx: FlowContext): Promise<FlowResult
     });
     await screenshotStable(page, { path: screenshotPath(ctx, "cart-9-empty") });
     reportEnd(13, "verify-empty-state", emptyStatus, Date.now() - t9);
+
+    // Steps 6-13 (qty +/-, coupon, remove-item) all clicked real elements
+    // on this same post-reload document — sample the INP they produced.
+    await captureInpSnapshot(page, pages[pages.length - 1]!);
   } finally {
     await page.close().catch(() => undefined);
   }

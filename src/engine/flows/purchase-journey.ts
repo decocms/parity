@@ -19,6 +19,7 @@ import {
   VARIANT_REQUIRED_TEXT_PATTERNS,
   attemptRecovery,
   attemptStepAction,
+  captureInpSnapshot,
   clickAndMaybeWait,
   detectLandingPage,
   dismissBlockingOverlay,
@@ -709,6 +710,12 @@ export async function flowPurchaseJourney(ctx: FlowContext): Promise<PurchaseJou
       recoveredByLlm: miniRecovered || undefined,
     });
     reportEnd(7, "open-minicart", step7Status, Date.now() - t7, step7QuirkNote ?? step7RevealFailureNote);
+
+    // Steps 4-7 (variant select, add-to-cart, open-minicart) all clicked
+    // real elements on `pdpCap`'s document with no navigation in between —
+    // sample the INP they produced now, before step 9's checkout click can
+    // navigate away and reinstall the collector on a new document.
+    await captureInpSnapshot(page, pdpCap);
 
     // #12 — when prod hit the cart-empty quirk and we accepted it,
     // steps 8 and 9 can't be exercised on prod. Skip them with a matching

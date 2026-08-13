@@ -2,6 +2,7 @@ import type { PageCapture, StepCapture } from "../../types/schema.ts";
 import { capturePage } from "../collect.ts";
 import type { FlowContext, FlowResult } from "./shared.ts";
 import {
+  captureInpSnapshot,
   findElement,
   firstVisibleLocator,
   makeSkipStep,
@@ -223,6 +224,11 @@ export async function flowLogin(ctx: FlowContext): Promise<FlowResult> {
     });
     await screenshotStable(page, { path: screenshotPath(ctx, "login-3-invalid") });
     reportEnd(3, "submit-invalid", errorShown ? "ok" : "failed", Date.now() - t3);
+
+    // Steps 2-3 clicked real elements (open-login trigger, submit-invalid)
+    // without navigating away — sample the INP they produced before step 4's
+    // successful submit navigates the page and reinstalls the collector.
+    await captureInpSnapshot(page, homeCap);
 
     // Step 4: submit-valid — real credentials, expect redirect to account area
     reportStart(4, "submit-valid");

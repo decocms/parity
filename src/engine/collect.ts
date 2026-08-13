@@ -187,6 +187,43 @@ function percentile(sorted: number[], p: number): number {
 }
 
 /**
+ * Read `window.__parity_vitals` off `page` as-is — no navigation, no wait.
+ * Safe to call mid-flow, right after a real interaction (click, keypress),
+ * as long as the page hasn't navigated since the vitals collector was last
+ * installed on it.
+ *
+ * `capturePage()` calls this immediately after its own `page.goto()`, which
+ * historically was the ONLY place anything ever read this back out — so
+ * `inp` (which only populates from real user interactions, never from
+ * navigation) was structurally always `null` (issue #184). Flow steps that
+ * click something mid-visit should call this afterward and merge the result
+ * with {@link mergeInpSnapshot} instead of relying on the next `capturePage`
+ * call, which navigates first and wipes the interaction history.
+ */
+export async function readVitalsSnapshot(page: Page): Promise<WebVitals | null> {
+  return (
+    (await page
+      .evaluate(() => (window as unknown as { __parity_vitals?: WebVitals }).__parity_vitals)
+      .catch(() => null)) ?? null
+  );
+}
+
+/**
+ * Merge a mid-flow vitals snapshot's `inp` into an already-captured
+ * `WebVitals`, taking the larger value. Only `inp` is merged — LCP/CLS/FCP/
+ * TTFB are paint-timing metrics tied to the specific document `capturePage`
+ * already read at goto-time; re-reading them later (possibly after an SPA
+ * nav swapped routes, or a reload reinstalled the collector on a new
+ * document) risks misattributing them to the wrong page. INP is the one
+ * metric that's genuinely dead without a post-interaction read (issue #184).
+ */
+export function mergeInpSnapshot(vitals: WebVitals, snapshot: WebVitals | null): WebVitals {
+  if (snapshot?.inp == null) return vitals;
+  if (vitals.inp != null && vitals.inp >= snapshot.inp) return vitals;
+  return { ...vitals, inp: snapshot.inp };
+}
+
+/**
  * Chromium error codes that mean "the request was canceled, not a real
  * failure". `ERR_ABORTED` fires when the page navigates away before an
  * async request resolved — typical for tracking pixels in the
