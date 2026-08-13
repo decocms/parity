@@ -20,6 +20,8 @@ export interface AuditCommandOptions {
   json?: boolean;
   /** Comma-separated severities that cause exit 1. */
   failOn: string;
+  /** Repeat each page's vitals navigation N times, audit against the median. Default 1. Issue #179. */
+  runs?: number;
 }
 
 const SEVERITY_RANK: Record<Issue["severity"], number> = {
@@ -93,6 +95,7 @@ export async function auditCommand(opts: AuditCommandOptions): Promise<number> {
           timeoutMs: 30_000,
           fast: false,
           scrollToLoad: true,
+          runs: opts.runs,
         });
         captures.push(cap);
       } catch (err) {

@@ -33,6 +33,8 @@ export interface VitalsOptions {
   limit?: number;
   viewports: string;
   concurrency?: number;
+  /** Repeat each page's vitals navigation N times, compare against the median. Default 1. Issue #179. */
+  runs?: number;
   output: string;
   open?: boolean;
 }
@@ -96,6 +98,7 @@ export async function vitalsCommand(opts: VitalsOptions): Promise<number> {
           task.side,
           url,
           paths.screenshotsDir,
+          opts.runs,
         );
       } catch (err) {
         task.error = (err as Error).message;
@@ -219,6 +222,7 @@ async function captureVitalsPage(
   side: Side,
   url: string,
   screenshotsDir: string,
+  runs?: number,
 ): Promise<PageCapture> {
   const ctx = await newContext(browser, { viewport, cohortCookieValue: "control" });
   await installVitalsCollector(ctx);
@@ -238,6 +242,7 @@ async function captureVitalsPage(
       scrollToLoad: false,
       skipScreenshot: true,
       fast: true,
+      runs,
     });
   } finally {
     await page.close().catch(() => undefined);

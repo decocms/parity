@@ -15,6 +15,10 @@ import { VITAL_LABELS, VITAL_THRESHOLDS, classifyVital, formatVital } from "./th
  *   needs improvement → medium
  *   poor              → high
  *   poor × 2          → critical  (LCP/CLS/INP only)
+ *
+ * `vitals` is `PageCapture.vitals` — a single sample by default, or the
+ * per-metric median across `--runs` repeats when the capture opted into
+ * repeat sampling (issue #179), which is what's classified here.
  */
 export function auditVitals(pageKey: string, vitals: WebVitals): Issue[] {
   const out: Issue[] = [];

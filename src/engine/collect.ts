@@ -6,6 +6,8 @@ import type {
   Side,
   Viewport,
   WebVitals,
+  WebVitalsStats,
+  WebVitalStat,
 } from "../types/schema.ts";
 import { stabilizeCarousels } from "./carousel-stabilizer.ts";
 
@@ -85,6 +87,76 @@ const VITALS_INIT_SCRIPT = `
 
 export async function installVitalsCollector(ctx: BrowserContext): Promise<void> {
   await ctx.addInitScript({ content: VITALS_INIT_SCRIPT });
+}
+
+/**
+ * One extra vitals-only navigation for `CaptureOptions.runs` (issue #179).
+ * Runs in a throwaway page on the same context (which already has the
+ * vitals init script from `installVitalsCollector`) so it doesn't pollute
+ * the primary page's console/network collectors with a second navigation's
+ * worth of requests.
+ */
+async function captureVitalsSample(
+  context: BrowserContext,
+  url: string,
+  timeoutMs: number,
+): Promise<WebVitals | null> {
+  const page = await context.newPage();
+  try {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs }).catch(() => undefined);
+    await page
+      .waitForLoadState("networkidle", { timeout: Math.min(4_000, timeoutMs) })
+      .catch(() => undefined);
+    await page.waitForTimeout(300).catch(() => undefined);
+    return (
+      (await Promise.race([
+        page
+          .evaluate(() => (window as unknown as { __parity_vitals?: WebVitals }).__parity_vitals)
+          .catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000)),
+      ])) ?? null
+    );
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+}
+
+const VITALS_METRICS = ["lcp", "cls", "fcp", "ttfb", "inp"] as const;
+
+/**
+ * Aggregate raw per-run vitals samples into median/p75/min/max per metric.
+ * `null` values are dropped before aggregating (a metric that never fired
+ * on a given run, e.g. INP with no interaction) — a metric is `null` in the
+ * result only if it never resolved on ANY run. Exported for unit testing.
+ */
+export function aggregateVitalsSamples(samples: WebVitals[]): WebVitalsStats {
+  const out = {} as WebVitalsStats;
+  for (const metric of VITALS_METRICS) {
+    const values = samples.map((s) => s[metric]).filter((v): v is number => v != null);
+    out[metric] = values.length > 0 ? statFor(values) : null;
+  }
+  return out;
+}
+
+function statFor(raw: number[]): WebVitalStat {
+  const sorted = [...raw].sort((a, b) => a - b);
+  return {
+    median: percentile(sorted, 50),
+    p75: percentile(sorted, 75),
+    min: sorted[0]!,
+    max: sorted[sorted.length - 1]!,
+    samples: raw,
+  };
+}
+
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 1) return sorted[0]!;
+  const idx = (p / 100) * (sorted.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo]!;
+  const frac = idx - lo;
+  return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * frac;
 }
 
 /**
@@ -451,13 +523,25 @@ export interface CaptureOptions {
    * Issue #55. The Promise.race outer deadline still applies as a safety net.
    */
   noNetworkIdle?: boolean;
+  /**
+   * Repeat the vitals-collecting navigation this many times (in throwaway
+   * pages on the same context) and aggregate median/p75/min/max per metric
+   * into `vitalsStats`, with `vitals` itself becoming the per-metric median.
+   * Screenshot/console/network/HTML capture stay single-run — only the
+   * lightweight vitals read is repeated. Default 1 (no repeat). Issue #179.
+   */
+  runs?: number;
 }
 
 export async function capturePage(page: Page, opts: CaptureOptions): Promise<PageCapture> {
   const start = Date.now();
   const state = attachCollectors(page);
   /** Hard total cap so a single bad page can never hang the whole crawl. */
-  const overallBudgetMs = opts.fast ? 25_000 : 60_000;
+  // Extra `runs` (issue #179) each cost a full lightweight navigation on top
+  // of the base budget — 8s/run is generous headroom for the fast goto +
+  // networkidle + vitals read in captureVitalsSample.
+  const extraRunsBudgetMs = Math.max(0, (opts.runs ?? 1) - 1) * 8_000;
+  const overallBudgetMs = (opts.fast ? 25_000 : 60_000) + extraRunsBudgetMs;
   const deadline = start + overallBudgetMs;
   const remaining = () => Math.max(500, deadline - Date.now());
 
@@ -485,6 +569,7 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
     durationMs: Date.now() - start,
     html,
     vitals: vitals ?? { lcp: null, cls: null, fcp: null, ttfb: null, inp: null },
+    vitalsStats,
     console: state.console,
     network: state.network,
     screenshotPath: opts.screenshotPath,
@@ -497,6 +582,7 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
   let finalUrl = opts.url;
   let xRobotsTag: string | null = null;
   let vitals: WebVitals | null = null;
+  let vitalsStats: WebVitalsStats | undefined;
   let html = "";
 
   // Resolve immediately when the browser process dies or the page crashes so
@@ -728,6 +814,30 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
       `    capturePage: flushCollectors (cap=${Math.min(3_000, remaining())}ms)`,
     );
     await flushCollectors(state, Math.min(3_000, remaining()));
+
+    const extraRuns = Math.max(0, (opts.runs ?? 1) - 1);
+    if (extraRuns > 0 && vitals) {
+      dlog(opts.side, opts.viewport, `    capturePage: vitals repeat x${extraRuns} start`);
+      const samples: WebVitals[] = [vitals];
+      const ctx = page.context();
+      for (let i = 0; i < extraRuns && remaining() > 4_000; i++) {
+        const sample = await captureVitalsSample(ctx, opts.url, Math.min(10_000, remaining()));
+        if (sample) samples.push(sample);
+      }
+      vitalsStats = aggregateVitalsSamples(samples);
+      vitals = {
+        lcp: vitalsStats.lcp?.median ?? vitals.lcp,
+        cls: vitalsStats.cls?.median ?? vitals.cls,
+        fcp: vitalsStats.fcp?.median ?? vitals.fcp,
+        ttfb: vitalsStats.ttfb?.median ?? vitals.ttfb,
+        inp: vitalsStats.inp?.median ?? vitals.inp,
+      };
+      dlog(
+        opts.side,
+        opts.viewport,
+        `    capturePage: vitals repeat done samples=${samples.length}/${opts.runs}`,
+      );
+    }
 
     dlog(opts.side, opts.viewport, `    capturePage: inner done total=${Date.now() - start}ms`);
     return buildPartial();

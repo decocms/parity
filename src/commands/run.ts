@@ -904,6 +904,10 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     const candIsDevServer = isLocalhost(opts.cand);
     const vitalsPagesDefault = candIsDevServer ? 3 : 10;
     const vitalsPagesLimit = opts.vitalsPages ?? vitalsPagesDefault;
+    // Issue #179: --runs repeats just the vitals-collecting navigation and
+    // aggregates median/p75/min/max, shrinking the run-to-run jitter false
+    // positives that `web-vitals-mobile` otherwise flags. Default 1 (off).
+    const vitalsRuns = Math.max(1, Number.parseInt(opts.runs, 10) || 1);
     if (candIsDevServer && vitalsPagesLimit > 0) {
       console.log(
         chalk.dim(
@@ -977,11 +981,14 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
             const targetIsDevServer = isLocalhost(baseUrl);
             // Hard wall-clock per task so one wedged page can't stall the whole
             // worker. capturePage already has its own outer Promise.race (60s
-            // outer deadline for non-fast captures, 35s for fast), but this
-            // belt-and-suspenders bound here ensures even a totally pathological
-            // case (browser hang BEFORE Promise.race installs) doesn't poison
-            // the spinner. Issue #55.
-            const PER_TASK_WALLCLOCK_MS = 35_000;
+            // outer deadline for non-fast captures, 35s for fast — plus 8s per
+            // extra --runs repeat, issue #179), but this belt-and-suspenders
+            // bound here ensures even a totally pathological case (browser
+            // hang BEFORE Promise.race installs) doesn't poison the spinner.
+            // Must stay >= capturePage's own outer deadline or this race would
+            // fire first and silently drop the capture instead of returning
+            // capturePage's own partial result. Issue #55.
+            const PER_TASK_WALLCLOCK_MS = 35_000 + Math.max(0, vitalsRuns - 1) * 8_000;
             try {
               const ctx = await newContext(browser!, {
                 viewport: task.viewport,
@@ -1003,6 +1010,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
                     scrollToLoad: false,
                     skipScreenshot: true,
                     noNetworkIdle: targetIsDevServer,
+                    runs: vitalsRuns,
                   }),
                   new Promise<null>((resolve) => {
                     // .unref() so the timer never holds the event loop
