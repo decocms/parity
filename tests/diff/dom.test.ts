@@ -107,6 +107,23 @@ describe("snapshotDom", () => {
       expect(s.skeletonCount).toBeGreaterThanOrEqual(8);
     });
   });
+
+  it("exclui clones de boundary de carousel (aria-hidden / data-slider-clone) do census de banners", () => {
+    const html = `
+      <html><body>
+        <img src="real1.jpg" width="800" height="400"/>
+        <img src="real2.jpg" width="1200" height="600"/>
+        <img src="clone1.jpg" width="900" height="450" aria-hidden="true"/>
+        <img src="clone2.jpg" width="900" height="450" data-slider-clone="true"/>
+        <li aria-hidden="true"><img src="clone3.jpg" width="900" height="450"/></li>
+        <div data-slider-clone><img src="clone4.jpg" width="900" height="450"/></div>
+      </body></html>`;
+    const s = snapshotDom(html);
+    expect(s.imageStats.banners.length).toBe(2);
+    expect(s.imageStats.banners.map((b) => b.src).sort()).toEqual(["real1.jpg", "real2.jpg"]);
+    // total imgs count is unaffected — exclusion is scoped to the banner census only
+    expect(s.imageStats.total).toBe(6);
+  });
 });
 
 describe("diffDom", () => {
