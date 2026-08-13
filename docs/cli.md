@@ -31,7 +31,7 @@ Run any command with `--help` for the full flag list.
 ## Default behavior on `parity run` (no preset)
 
 - `flows=purchase-journey, viewports=mobile,desktop`
-- `vitals-pages=10`
+- `vitals-pages=10` — auto-sampled extra sitemap pages; see the noise/scoping note below
 - `visual-pages=5` (auto-zeroed when no LLM provider available, unless `--pages`/`--pages-file` was explicitly set — explicit page selection still gets the prod/cand screenshot + pixelmatch heatmap capture even without an LLM verdict)
 - `auto-selectors=ON` (if LLM available)
 - `learn=ON, cache=ON, visual-diff=ON`
@@ -48,6 +48,7 @@ Run any command with `--help` for the full flag list.
 | Flag | What it does |
 | --- | --- |
 | `--fail-on <severities>` | Comma-separated severities that flip the exit code to 1 (default: `critical`). Always active — no `--ci` flag needed to enable it. |
+| `--vitals-pages <n>` | Extra sitemap-sampled pages crawled for Vitals coverage, on top of `--flows`/`--pages` (default 10) — auto-sampled and can add significant unrelated noise to findings; pass `0` to scope the run to only the pages you explicitly requested |
 | `--timeout <minutes>` | Hard wall-clock budget for the whole run; writes a partial report on expiry |
 | `--llm-timeout <seconds>` | Per-call budget for the LLM aggregation pass |
 | `--llm <provider>` | Force a provider: `anthropic`, `openrouter`, `claude-code`, or `none` (offline) |
@@ -86,6 +87,14 @@ To scope which page(s) a flow actually visits:
 
 `parity run` prints a one-line warning when both `--pages`/`--pages-file` and
 a flows crawl are active in the same run, as a reminder of this split.
+
+> **Noisy findings? Check `--vitals-pages`.** By default `parity run` auto-samples
+> 10 extra pages from the sitemap for Vitals coverage, beyond whatever
+> `--flows`/`--pages` you explicitly asked for. Those extra pages are a real
+> source of unrelated noise — one run's `high`-severity findings dropped from
+> 53 to 13 on an otherwise identical command purely from adding
+> `--vitals-pages 0` (issue #178). If you want a run scoped tightly to only
+> the pages/flows you named, pass `--vitals-pages 0`.
 
 ## Module selection: `--only`, `--skip`, `--why`
 
