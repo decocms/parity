@@ -105,6 +105,15 @@ export const PageCapture = z.object({
   vitals: WebVitals,
   /** Full per-metric stats (median/p75/min/max + raw samples), present only when captured with `runs > 1`. Issue #179. */
   vitalsStats: WebVitalsStats.optional(),
+  /**
+   * Second read taken after `scrollFullPage()` finishes, when the capture
+   * actually scrolled (i.e. `scrollToLoad !== false`). Includes LCP/CLS
+   * contamination from scroll-triggered lazy content — a legitimate
+   * "full page including scroll" number, but NOT the one to diff against
+   * Lighthouse. Absent when the page wasn't scrolled (fast/vitals-only
+   * captures, or `scrollToLoad: false`). Issue #185.
+   */
+  vitalsFullPage: WebVitals.optional(),
   console: z.array(ConsoleEntry),
   network: z.array(NetworkEntry),
   screenshotPath: z.string(),

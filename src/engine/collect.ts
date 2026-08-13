@@ -623,6 +623,7 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
     html,
     vitals: vitals ?? { lcp: null, cls: null, fcp: null, ttfb: null, inp: null },
     vitalsStats,
+    vitalsFullPage: vitalsFullPage ?? undefined,
     console: state.console,
     network: state.network,
     screenshotPath: opts.screenshotPath,
@@ -636,7 +637,31 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
   let xRobotsTag: string | null = null;
   let vitals: WebVitals | null = null;
   let vitalsStats: WebVitalsStats | undefined;
+  let vitalsFullPage: WebVitals | null = null;
   let html = "";
+
+  /**
+   * Read `window.__parity_vitals` off the page. Wrapped in its own race so
+   * a wedged `page.evaluate` (previous evaluate still queued — see the
+   * scrollFullPage `__name` comment above) can't block past its budget.
+   */
+  const readVitals = async (): Promise<WebVitals | null> => {
+    dlog(
+      opts.side,
+      opts.viewport,
+      `    capturePage: vitals evaluate (cap=${Math.min(5_000, remaining())}ms)`,
+    );
+    return (
+      (await Promise.race([
+        page
+          .evaluate(() => (window as unknown as { __parity_vitals?: WebVitals }).__parity_vitals)
+          .catch(() => null),
+        new Promise<null>((resolve) =>
+          setTimeout(() => resolve(null), Math.min(5_000, remaining())),
+        ),
+      ])) ?? null
+    );
+  };
 
   // Resolve immediately when the browser process dies or the page crashes so
   // the outer race returns a partial capture instead of hanging until the
@@ -684,6 +709,9 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
             .catch(() => undefined);
         }
         await page.waitForTimeout(Math.min(opts.settleMs ?? 1_200, remaining()));
+        // Fast path never scrolls, so this is the only read — same scope
+        // as the non-fast path's pre-scroll read.
+        vitals = await readVitals();
       } else {
         dlog(
           opts.side,
@@ -709,6 +737,14 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
           `    capturePage: settle (cap=${Math.min(opts.settleMs ?? 2_000, remaining())}ms)`,
         );
         await page.waitForTimeout(Math.min(opts.settleMs ?? 2_000, remaining()));
+
+        // Read LCP/CLS BEFORE the forced full-page autoscroll. Reading
+        // after scrollFullPage() (the old behavior) let below-the-fold
+        // lazy content the crawler itself dragged into view outscore the
+        // real above-the-fold LCP candidate and count its layout shifts
+        // toward CLS — neither of which a real first-paint or Lighthouse's
+        // fixed-viewport, non-scrolling trace would ever see. Issue #185.
+        vitals = await readVitals();
 
         // Auto-scroll to trigger lazy-loaded content (images, sections, analytics)
         if (opts.scrollToLoad !== false && remaining() > 3_000) {
@@ -766,6 +802,12 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
               .catch(() => undefined);
           }
           await page.waitForTimeout(Math.min(800, remaining()));
+
+          // Second, distinct read: full-page LCP/CLS including whatever
+          // the forced scroll dragged into view. Useful as "field-like"
+          // CLS (real users do scroll), but kept out of `vitals` so it's
+          // never silently diffed 1:1 against Lighthouse. Issue #185.
+          vitalsFullPage = await readVitals();
         }
       }
     } catch (err) {
@@ -775,25 +817,13 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
       });
     }
 
-    // `page.evaluate(...)` has no built-in timeout — if a previous evaluate
-    // is still pending in the page's JS queue (e.g. scrollFullPage's
-    // setTimeout chain that didn't resolve before its outer race fired),
-    // this call blocks until that previous evaluate settles. Wrap it in
-    // an explicit race so the budget is actually enforced.
-    dlog(
-      opts.side,
-      opts.viewport,
-      `    capturePage: vitals evaluate (cap=${Math.min(5_000, remaining())}ms)`,
-    );
-    vitals =
-      (await Promise.race([
-        page
-          .evaluate(() => (window as unknown as { __parity_vitals?: WebVitals }).__parity_vitals)
-          .catch(() => null),
-        new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), Math.min(5_000, remaining())),
-        ),
-      ])) ?? null;
+    // Fallback: if navigation threw before either branch above reached its
+    // vitals read (e.g. goto() timed out but the page still rendered
+    // something), try once more so a slow-but-alive page isn't reported as
+    // all-null vitals.
+    if (vitals === null) {
+      vitals = await readVitals();
+    }
 
     if (!opts.skipScreenshot) {
       // Pin every detected carousel to slide 0 BEFORE the screenshot so
