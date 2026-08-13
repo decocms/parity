@@ -32,7 +32,7 @@ Run any command with `--help` for the full flag list.
 
 - `flows=purchase-journey, viewports=mobile,desktop`
 - `vitals-pages=10`
-- `visual-pages=5` (auto-zeroed when no LLM provider available)
+- `visual-pages=5` (auto-zeroed when no LLM provider available, unless `--pages`/`--pages-file` was explicitly set — explicit page selection still gets the prod/cand screenshot + pixelmatch heatmap capture even without an LLM verdict)
 - `auto-selectors=ON` (if LLM available)
 - `learn=ON, cache=ON, visual-diff=ON`
 - `warmup=OFF, bypass-cache=OFF, ci=OFF`
@@ -59,11 +59,32 @@ Run any command with `--help` for the full flag list.
 | `--clear-cache` | Wipe the visual-diff verdict cache before running |
 | `--no-visual-diff` | Skip the visual-diff capture/analysis pass entirely |
 | `--max-viewport-concurrency <n>` | How many viewports run in parallel (default 2) — lower this on resource-constrained machines if a full run stalls |
-| `--pages-file <path>` | Extra URLs (one per line) to fold into the vitals/visual sitemap crawl |
+| `--pages <list>` | Comma-separated paths for deterministic visual-diff coverage instead of sampled sitemap pages. **Scopes the visual-diff + vitals-extra-pages passes only** — see warning below |
+| `--pages-file <path>` | Same as `--pages`, read from a text file (one path per line, `#` comments). Overrides `--pages` when both are set |
 | `--accept-prod-quirks` | Demote prod-side cart-empty journey failures (VTEX session quirk) from failed to skipped — see issue #12 |
 | `--json <path\|->` | Stream JSONL progress (one line per check/metadata) to a file or stdout (`-`) for agents/scripts |
 | `--pt` | Tell the LLM to respond in Brazilian Portuguese |
 | `--no-interactive` | Disable the interactive selector/module prompts that auto-fire in a TTY |
+
+### `--pages`/`--pages-file` scoping gap (issue #178)
+
+`--pages`/`--pages-file` only feed the **visual-diff** and **vitals-extra-pages**
+capture passes. The `flows` crawl (`--flows`, default `purchase-journey`) does
+**not** read `--pages` — each flow discovers its own target page(s)
+independently (a `.parityrc.json` `*UrlHint` like `plpUrlHint`, sitemap/
+category-link discovery on the home page, or a hardcoded homepage
+click-through). Passing `--pages "/produto/x"` will NOT make
+`purchase-journey` visit `/produto/x`.
+
+To scope which page(s) a flow actually visits:
+
+- Pick a lighter/more specific flow with `--flows` (e.g. `--flows plp` or
+  `--flows pdp` instead of the full `purchase-journey`), and/or
+- Set the matching hint in `.parityrc.json` (e.g. `"plpUrlHint": "/produto/x"`)
+  to steer that flow's PLP/PDP discovery.
+
+`parity run` prints a one-line warning when both `--pages`/`--pages-file` and
+a flows crawl are active in the same run, as a reminder of this split.
 
 ## Module selection: `--only`, `--skip`, `--why`
 

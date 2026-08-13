@@ -260,6 +260,27 @@ const PRESETS: Record<NonNullable<RunOptions["preset"]>, PresetDefaults> = {
 };
 
 /**
+ * Issue #178 (problem 2): `--pages`/`--pages-file` only scope the
+ * visual-diff and vitals-extra-pages capture passes (see
+ * `resolveExplicitPages` below, used for `visualPathsLimit`/`visualPaths`).
+ * The `flows` crawl (default `purchase-journey`, or whatever `--flows`
+ * names) discovers its own target pages independently — via
+ * `.parityrc.json` `*UrlHint` overrides, sitemap/category-link discovery, or
+ * hardcoded homepage click-throughs (see `src/engine/flows/*.ts`) — and
+ * ignores `--pages` entirely. Surfacing that once, at the point flows are
+ * about to run, beats letting users find out via 5 confused migration runs.
+ * Exported for unit testing; not meant to be called outside `runCommand`.
+ */
+export function pagesFlowsScopeWarning(
+  opts: Pick<RunOptions, "pages" | "pagesFile">,
+  flows: readonly string[],
+): string | null {
+  if (!opts.pages && !opts.pagesFile) return null;
+  if (flows.length === 0) return null;
+  return `--pages/--pages-file only scope the visual-diff/vitals passes — the flows crawl (${flows.join(",")}) discovers its own pages; use --flows or .parityrc.json *UrlHint overrides to scope that.`;
+}
+
+/**
  * Apply LLM-availability heuristics to the resolved options. Issue #71:
  * Several flags are wasteful when no LLM provider is available — e.g.
  * `--visual-pages 5` captures screenshots and computes pixelmatch heatmaps
@@ -269,9 +290,17 @@ const PRESETS: Record<NonNullable<RunOptions["preset"]>, PresetDefaults> = {
  *
  * Detection is intentionally conservative: we only auto-disable if the
  * caller never touched the flag (still equals commander's default).
+ *
+ * Issue #178 (problem 2): when the caller explicitly passed `--pages`/
+ * `--pages-file`, that's a deliberate request for deterministic coverage of
+ * those exact paths — the pixelmatch heatmap capture is still useful without
+ * an LLM (just no semantic verdict on top). Don't silently force
+ * `noVisualDiff = true` in that case, or `--pages` becomes inert in
+ * no-LLM environments on top of the flows-scoping gap this issue tracks.
  */
-function applySmartDefaults(opts: RunOptions, llmAvailable: boolean): RunOptions {
+export function applySmartDefaults(opts: RunOptions, llmAvailable: boolean): RunOptions {
   if (llmAvailable) return opts;
+  if (opts.pages || opts.pagesFile) return opts;
   const merged: RunOptions = { ...opts };
   const COMMANDER_DEFAULTS: Record<string, unknown> = {
     visualPages: 5,
@@ -455,6 +484,11 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         ),
       );
     }
+  }
+
+  const pagesScopeWarning = pagesFlowsScopeWarning(opts, flows);
+  if (pagesScopeWarning) {
+    console.log(chalk.dim(`  ${pagesScopeWarning}`));
   }
 
   // Sitemap/LLM-dependent crawl passes are wasted work when no selected
