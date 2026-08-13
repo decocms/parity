@@ -35,7 +35,8 @@ Run any command with `--help` for the full flag list.
 - `visual-pages=5` (auto-zeroed when no LLM provider available)
 - `auto-selectors=ON` (if LLM available)
 - `learn=ON, cache=ON, visual-diff=ON`
-- `warmup=OFF, bypass-cache=OFF, ci=OFF`
+- `warmup=OFF, bypass-cache=OFF, fail-on=critical` (exit code is 1 whenever a
+  blocking-severity issue is present — no extra flag needed)
 
 ## Flag convention
 
@@ -46,7 +47,7 @@ Run any command with `--help` for the full flag list.
 
 | Flag | What it does |
 | --- | --- |
-| `--fail-on <severities>` | Comma-separated severities that flip the exit code to 1 (default: `critical`) |
+| `--fail-on <severities>` | Comma-separated severities that flip the exit code to 1 (default: `critical`). Always active — no `--ci` flag needed to enable it. |
 | `--timeout <minutes>` | Hard wall-clock budget for the whole run; writes a partial report on expiry |
 | `--llm-timeout <seconds>` | Per-call budget for the LLM aggregation pass |
 | `--llm <provider>` | Force a provider: `anthropic`, `openrouter`, `claude-code`, or `none` (offline) |

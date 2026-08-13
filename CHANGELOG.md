@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+* **`--fail-on` now gates the exit code on its own (issue #178).** The blocking-issue exit-1 check was gated behind `--ci`, which had no other effect in the codebase — a run with double-digit criticals exited 0 unless the caller also remembered `--ci`, even though `--fail-on` (default `critical`) was already parsed and ready. The check now always runs; `--ci` has been removed as dead weight (`parity audit` never had it and always gated on `--fail-on` alone, which is the pattern `parity run` now follows too).
+
 ## [0.17.3](https://github.com/decocms/parity/compare/v0.17.2...v0.17.3) (2026-07-28)
 
 ### Fixed
