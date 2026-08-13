@@ -5,8 +5,21 @@ import { pickCategoryLink } from "../../llm/pick-plp.ts";
 import { suggestRecovery } from "../../llm/recover-step.ts";
 import type { PageCapture, ParityRc, Side, StepCapture, Viewport } from "../../types/schema.ts";
 import { stabilizeCarousels } from "../carousel-stabilizer.ts";
+import { mergeInpSnapshot, readVitalsSnapshot } from "../collect.ts";
 import { selectorsFor } from "../selectors.ts";
 import type { SelectorKey } from "../selectors.ts";
+
+/**
+ * Sample `window.__parity_vitals` off `page` right now (no navigation) and
+ * merge its `inp` into `cap.vitals` in place. Call this after a real click/
+ * keypress and before anything that might navigate the page — `capturePage`
+ * only ever reads vitals immediately after its own `page.goto`, so INP from
+ * interactions a flow makes mid-visit (add-to-cart, open-minicart, SPA nav
+ * click, login submit) was previously discarded (issue #184).
+ */
+export async function captureInpSnapshot(page: Page, cap: PageCapture): Promise<void> {
+  cap.vitals = mergeInpSnapshot(cap.vitals, await readVitalsSnapshot(page));
+}
 
 /**
  * Stabilize any carousel/slider on the page and then take a screenshot.
