@@ -31,7 +31,7 @@ Run any command with `--help` for the full flag list.
 ## Default behavior on `parity run` (no preset)
 
 - `flows=purchase-journey, viewports=mobile,desktop`
-- `vitals-pages=10`
+- `vitals-pages=10` — auto-sampled extra sitemap pages; see the noise/scoping note below
 - `visual-pages=5` (auto-zeroed when no LLM provider available)
 - `auto-selectors=ON` (if LLM available)
 - `learn=ON, cache=ON, visual-diff=ON`
@@ -47,6 +47,7 @@ Run any command with `--help` for the full flag list.
 | Flag | What it does |
 | --- | --- |
 | `--fail-on <severities>` | Comma-separated severities that flip the exit code to 1 (default: `critical`) |
+| `--vitals-pages <n>` | Extra sitemap-sampled pages crawled for Vitals coverage, on top of `--flows`/`--pages` (default 10) — auto-sampled and can add significant unrelated noise to findings; pass `0` to scope the run to only the pages you explicitly requested |
 | `--timeout <minutes>` | Hard wall-clock budget for the whole run; writes a partial report on expiry |
 | `--llm-timeout <seconds>` | Per-call budget for the LLM aggregation pass |
 | `--llm <provider>` | Force a provider: `anthropic`, `openrouter`, `claude-code`, or `none` (offline) |
@@ -64,6 +65,14 @@ Run any command with `--help` for the full flag list.
 | `--json <path\|->` | Stream JSONL progress (one line per check/metadata) to a file or stdout (`-`) for agents/scripts |
 | `--pt` | Tell the LLM to respond in Brazilian Portuguese |
 | `--no-interactive` | Disable the interactive selector/module prompts that auto-fire in a TTY |
+
+> **Noisy findings? Check `--vitals-pages`.** By default `parity run` auto-samples
+> 10 extra pages from the sitemap for Vitals coverage, beyond whatever
+> `--flows`/`--pages` you explicitly asked for. Those extra pages are a real
+> source of unrelated noise — one run's `high`-severity findings dropped from
+> 53 to 13 on an otherwise identical command purely from adding
+> `--vitals-pages 0` (issue #178). If you want a run scoped tightly to only
+> the pages/flows you named, pass `--vitals-pages 0`.
 
 ## Module selection: `--only`, `--skip`, `--why`
 

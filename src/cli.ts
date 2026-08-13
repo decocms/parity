@@ -79,7 +79,7 @@ program
   .option("--no-learn", "Don't write to learned-selectors.json (read-only mode)")
   .option(
     "--vitals-pages <n>",
-    "Extra pages from sitemap to crawl for Vitals coverage (default 10)",
+    "Extra pages from sitemap to crawl for Vitals coverage, beyond what --flows/--pages already cover (default 10). These are auto-sampled and can add significant unrelated noise to findings — pass 0 to scope the run to only the pages you explicitly requested.",
     (v) => Number(v),
     10,
   )
