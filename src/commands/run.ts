@@ -564,8 +564,14 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   // grounds PDP/PLP-only keys in real markup, live-validates, merges into
   // rc.selectors, and seeds learned-selectors. Mutates rc + learned in place.
   const wantsAutoSelectors = opts.autoSelectors !== false && isLlmAvailable();
+  // Capture the browser handed back by discovery so we can reuse it for the
+  // main collect pass instead of launching a second Chromium (issue #167).
+  // Mirrors `e2e.ts`. Without this, `parity run` left the discovery/live-
+  // validation Chromium open for the whole run (an orphaned process alongside
+  // the main browser) and drove machines into the OOM killer.
+  let discoveryBrowser: Browser | null = null;
   if (wantsAutoSelectors) {
-    await runSelectorDiscoveryPass({
+    discoveryBrowser = await runSelectorDiscoveryPass({
       url: opts.prod,
       viewport: primaryViewport,
       rc,
@@ -713,7 +719,10 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   globalTimeoutTimer.unref?.();
 
   try {
-    browser = await launchBrowser({ headless: true });
+    // Reuse the discovery/live-validation browser when present, otherwise
+    // launch a fresh one. Assigning to `browser` here means the SIGINT/timeout
+    // `shutdown` handler and the outer `finally` both close it (issue #167).
+    browser = discoveryBrowser ?? (await launchBrowser({ headless: true }));
 
     if (opts.warmup) {
       const warmupSpinner = ora("Warmup: bustando cache em prod + cand…").start();
