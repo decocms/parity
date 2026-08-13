@@ -81,7 +81,6 @@ export interface RunOptions {
   runs: string;
   baseline?: string;
   output: string;
-  ci: boolean;
   failOn: string;
   open?: boolean;
   /** When false, skip LLM-based selector discovery (default: true if API key set) */
@@ -359,6 +358,25 @@ function applyLlmOptions(opts: RunOptions): string | null {
     applyModelOverrides({ defaultModel: opts.llmModelDefault });
   }
   return null;
+}
+
+/**
+ * Decides whether `--fail-on` should flip the exit code to 1. Runs
+ * unconditionally — no `--ci` flag required (issue #178: `--ci` used to be
+ * the only thing gating this check, but had no other effect anywhere in the
+ * codebase, so a run with blocking issues silently exited 0 unless the
+ * caller also remembered `--ci`).
+ */
+export function evaluateFailOnGate(
+  allIssues: Issue[],
+  failOn: string[],
+): { exitCode: 0 | 1; message?: string } {
+  const blocking = allIssues.filter((i) => failOn.includes(i.severity));
+  if (blocking.length === 0) return { exitCode: 0 };
+  return {
+    exitCode: 1,
+    message: `\n  ✖ ${blocking.length} issue(s) bloqueante(s) [${failOn.join(", ")}] — exit 1`,
+  };
 }
 
 export async function runCommand(rawOpts: RunOptions): Promise<number> {
@@ -1345,16 +1363,10 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     printSummary(run, paths.reportHtml, { promotedCount, deprecatedCount, platform });
     console.log(`\n${formatTimingsSummary(runTimings, buildFlowBreakdown(allFlowCaptures))}`);
 
-    if (opts.ci) {
-      const blocking = allIssues.filter((i) => failOn.includes(i.severity));
-      if (blocking.length > 0) {
-        console.log(
-          chalk.red(
-            `\n  ✖ ${blocking.length} issue(s) bloqueante(s) [${failOn.join(", ")}] — exit 1`,
-          ),
-        );
-        return 1;
-      }
+    const failOnGate = evaluateFailOnGate(allIssues, failOn);
+    if (failOnGate.exitCode === 1) {
+      console.log(chalk.red(failOnGate.message));
+      return 1;
     }
 
     // --open: spin up a local proxy server (so the Side-by-side iframe works)

@@ -44,7 +44,7 @@ program
       "  flows=purchase-journey, viewports=mobile,desktop, vitals-pages=10,",
       "  visual-pages=5 (auto-zeroed when no LLM provider available),",
       "  auto-selectors=ON (if LLM), learn=ON, cache=ON, visual-diff=ON,",
-      "  warmup=OFF, bypass-cache=OFF, ci=OFF.",
+      "  warmup=OFF, bypass-cache=OFF, fail-on=critical (exit 1 if hit).",
     ].join("\n"),
   )
   .option(
@@ -71,8 +71,11 @@ program
   .option("--runs <n>", "Repeat each measurement N times (median)", "1")
   .option("--baseline <name>", "Compare against a saved baseline")
   .option("--output <dir>", "Output directory", "./parity-output")
-  .option("--ci", "CI mode: stricter exit codes", false)
-  .option("--fail-on <severities>", "Comma-separated severities that cause exit 1", "critical")
+  .option(
+    "--fail-on <severities>",
+    "Comma-separated severities that cause exit 1 (default: critical)",
+    "critical",
+  )
   .option("--open", "Open the HTML report after the run completes", false)
   .option("--no-auto-selectors", "Disable LLM-based selector discovery (uses defaults instead)")
   .option("--refresh-selectors", "Bypass selector cache and re-run discovery", false)
