@@ -37,4 +37,5 @@ bun-debug.log*
 # TypeScript
 *.tsbuildinfo
 parity-output*/
+vitals-check-output/
 .claude/
