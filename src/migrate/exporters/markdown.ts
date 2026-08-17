@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { componentDirName } from "../../extract/naming.ts";
+import { countContentImages } from "../vtex/content-assets.ts";
 import type { MigratedComponent, MigrationBundle, ThemeBundle } from "../../types/migrate.ts";
 import { compactComponentHtml } from "../bundle.ts";
 import type { MigrateExporter } from "./types.ts";
@@ -71,7 +72,7 @@ function renderIndex(bundle: MigrationBundle, dirNames: string[], notes: string[
     md("## VTEX IO → FastStore blocks");
     md("");
     md(
-      `_${bundle.vtex.blocks.length} block instances from the store runtime · ${bundle.vtex.blocks.filter((x) => x.props).length} carry CMS content (props) → \`blocks.json\`. \`confidence\` (0–1) = how sure the deterministic mapper is; \`custom-component\` = build from captured DOM/CSS. See component-map.json._`,
+      `_${bundle.vtex.blocks.length} block instances · ${bundle.vtex.blocks.filter((x) => x.props).length} carry CMS content (props), ${countContentImages(bundle.vtex.blocks)} content images downloaded to \`assets/content/\` (URLs rewritten in \`blocks.json\`). \`confidence\` (0–1) = mapper certainty; \`custom-component\` = build from captured DOM/CSS._`,
     );
     md("");
     md("| VTEX block | → FastStore | confidence | count |");

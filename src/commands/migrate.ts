@@ -29,6 +29,12 @@ import { buildMigrationPrompt } from "../migrate/prompt.ts";
 import { buildFastStoreTheme } from "../migrate/targets/faststore.ts";
 import { getTargetPlaybook, TARGET_NAMES } from "../migrate/targets/index.ts";
 import { aggregateTheme, mergeRawThemeSamples, scrapeThemeSamples } from "../migrate/theme.ts";
+import {
+  collectImageRefs,
+  countContentImages,
+  downloadContentImages,
+  rewriteBlockUrls,
+} from "../migrate/vtex/content-assets.ts";
 import { mapVtexBlocksToFastStore } from "../migrate/vtex/faststore-map.ts";
 import { type VtexBlock, readVtexBlockTree } from "../migrate/vtex/runtime.ts";
 import { captureInteractions } from "../migrate/interactions.ts";
@@ -193,6 +199,30 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
             }
             // VTEX IO block tree — the store's real declarative structure.
             vtexBlocks = await readVtexBlockTree(page);
+            if (vtexBlocks) {
+              // Content images in block props are often site-relative pointers
+              // (/img/x, /arquivos/ids/…). Resolve them to the real absolute
+              // content URL in blocks.json, and ALSO download them locally with
+              // a url→file map (content-assets.json).
+              const refMap = collectImageRefs(vtexBlocks, opts.url);
+              vtexBlocks = rewriteBlockUrls(vtexBlocks, refMap);
+              const absUrls = [...new Set(Object.values(refMap))];
+              const { map, downloaded, skipped } = await downloadContentImages(
+                absUrls,
+                runDir,
+                fetchBytes,
+              );
+              if (Object.keys(map).length)
+                writeFileSync(
+                  resolve(runDir, "content-assets.json"),
+                  `${JSON.stringify(map, null, 2)}\n`,
+                  "utf8",
+                );
+              if (absUrls.length)
+                console.log(
+                  chalk.dim(`  vtex content: ${absUrls.length} image URLs resolved · ${downloaded} downloaded${skipped ? ` (${skipped} over cap skipped)` : ""}`),
+                );
+            }
           }
         } finally {
           await page.close().catch(() => undefined);
@@ -515,8 +545,9 @@ function printResults(runDir: string, bundle: MigrationBundle): void {
   if (bundle.vtex) {
     const mapped = bundle.vtex.map.filter((m) => m.strategy === "mapped").length;
     const withContent = bundle.vtex.blocks.filter((x) => x.props).length;
+    const contentImgs = countContentImages(bundle.vtex.blocks);
     console.log(
-      chalk.dim(`  vtex io:  ${bundle.vtex.blocks.length} blocks (${withContent} with CMS content) · ${mapped}/${bundle.vtex.map.length} block types mapped to FastStore`),
+      chalk.dim(`  vtex io:  ${bundle.vtex.blocks.length} blocks (${withContent} with CMS content, ${contentImgs} content images local) · ${mapped}/${bundle.vtex.map.length} mapped`),
     );
   }
   console.log(chalk.dim(`  pages:    ${bundle.pages.map((p) => p.kind).join(", ") || "—"}`));

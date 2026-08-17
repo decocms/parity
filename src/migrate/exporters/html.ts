@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { componentDirName } from "../../extract/naming.ts";
 import type { MigrationBundle } from "../../types/migrate.ts";
+import { countContentImages } from "../vtex/content-assets.ts";
 import type { MigrateExporter } from "./types.ts";
 
 /** How an image path is turned into an `<img src>` value. */
@@ -175,7 +176,7 @@ function renderHtml(b: MigrationBundle, embed: Embed): string {
     ${iconRows ? `<table style="margin-top:16px"><tr><th>kind</th><th>id</th><th>count</th></tr>${iconRows}</table>` : ""}
   </section>
 
-  ${b.vtex ? `<section class="card"><h2>VTEX IO → FastStore blocks</h2><p class="dim">${b.vtex.blocks.length} block instances from the store runtime · ${b.vtex.blocks.filter((x) => x.props).length} carry CMS content (props) → see <code>blocks.json</code>. <b>confidence</b> = how sure the deterministic mapper is (0–1).</p><table><tr><th>VTEX block</th><th>→ FastStore</th><th>confidence</th><th>count</th></tr>${vtexRows}</table></section>` : ""}
+  ${b.vtex ? `<section class="card"><h2>VTEX IO → FastStore blocks</h2><p class="dim">${b.vtex.blocks.length} block instances from the store runtime · ${b.vtex.blocks.filter((x) => x.props).length} carry CMS content (props), ${countContentImages(b.vtex.blocks)} content images downloaded to <code>assets/content/</code> (URLs rewritten in <code>blocks.json</code>). <b>confidence</b> = how sure the deterministic mapper is (0–1).</p><table><tr><th>VTEX block</th><th>→ FastStore</th><th>confidence</th><th>count</th></tr>${vtexRows}</table></section>` : ""}
 
   <section class="card">
     <h2>Components (${b.components.length})</h2>
