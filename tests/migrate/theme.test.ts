@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateTheme,
   isNeutral,
+  isOpaque,
   isPlausibleFontFamily,
   mergeRawThemeSamples,
   parseRgb,
@@ -61,10 +62,33 @@ describe("aggregateTheme", () => {
     expect(t.motion.easings).toEqual(["cubic-bezier(0.4, 0, 0.2, 1)"]); // "ease" dropped
   });
 
-  it("returns null primary when every interactive bg is neutral", () => {
-    const t = aggregateTheme(raw({ interactiveBackgrounds: ["rgb(255, 255, 255)", "rgb(0, 0, 0)"] }));
+  it("returns null primary when every color is neutral", () => {
+    const t = aggregateTheme(
+      raw({
+        colors: ["rgb(0, 0, 0)", "rgb(17, 17, 17)"],
+        backgrounds: ["rgb(255, 255, 255)"],
+        interactiveBackgrounds: ["rgb(255, 255, 255)", "rgb(0, 0, 0)"],
+      }),
+    );
     expect(t.colors.primary).toBeNull();
     expect(t.colors.secondary).toBeNull();
+  });
+
+  it("skips translucent overlays; elects an opaque chromatic color as primary", () => {
+    // Reproduces Electrolux: a translucent gray overlay is the most frequent
+    // interactive bg, but the opaque brand navy (from text/border) must win.
+    const t = aggregateTheme(
+      raw({
+        colors: ["rgb(4, 30, 80)", "rgb(4, 30, 80)", "rgb(4, 30, 80)", "rgb(0, 0, 0)"],
+        backgrounds: ["rgb(255, 255, 255)"],
+        interactiveBackgrounds: [
+          "rgba(123, 138, 156, 0.24)",
+          "rgba(123, 138, 156, 0.24)",
+          "rgba(123, 138, 156, 0.24)",
+        ],
+      }),
+    );
+    expect(t.colors.primary).toBe("rgb(4, 30, 80)");
   });
 });
 
@@ -90,6 +114,12 @@ describe("isNeutral / parseRgb", () => {
   });
   it("treats fully transparent as neutral", () => {
     expect(isNeutral("rgba(0, 0, 0, 0)")).toBe(true);
+  });
+  it("isOpaque rejects low-alpha, accepts opaque + hex/named", () => {
+    expect(isOpaque("rgba(123, 138, 156, 0.24)")).toBe(false);
+    expect(isOpaque("rgb(4, 30, 80)")).toBe(true);
+    expect(isOpaque("rgba(4, 30, 80, 0.9)")).toBe(true);
+    expect(isOpaque("#041e50")).toBe(true);
   });
   it("parseRgb handles rgb and rgba", () => {
     expect(parseRgb("rgb(1, 2, 3)")).toEqual({ r: 1, g: 2, b: 3, a: 1 });

@@ -106,14 +106,28 @@ export function mergeRawThemeSamples(list: RawThemeSamples[]): RawThemeSamples {
   };
 }
 
+/** A color is opaque enough to be a brand token (not a translucent overlay). */
+export function isOpaque(color: string): boolean {
+  const c = parseRgb(color);
+  // Non-rgb (hex/named) → assume opaque; rgba with low alpha → translucent.
+  return !c || c.a >= 0.5;
+}
+
 /** Pure theme election over raw samples. Testable without a browser. */
 export function aggregateTheme(raw: RawThemeSamples): ThemeBundle {
   // Palette: text + background colors, frequency-ranked.
   const paletteRanked = rank([...raw.colors, ...raw.backgrounds]);
 
-  // Primary: most frequent NON-neutral interactive background.
-  const interactiveRanked = rank(raw.interactiveBackgrounds);
-  const chromatic = [...interactiveRanked.keys()].filter((c) => !isNeutral(c));
+  // Primary: most frequent NON-neutral, OPAQUE color across ALL usages
+  // (text/border/bg + interactive), not just interactive backgrounds — brands
+  // often express their color as text/border (outlined CTAs), and a translucent
+  // hover overlay must never win primary (e.g. Electrolux's rgba(123,138,156,.24)).
+  const chromaticRanked = rank([
+    ...raw.colors,
+    ...raw.backgrounds,
+    ...raw.interactiveBackgrounds,
+  ]);
+  const chromatic = [...chromaticRanked.keys()].filter((c) => !isNeutral(c) && isOpaque(c));
   const primary = chromatic[0] ?? null;
   const secondary = chromatic.find((c) => c !== primary) ?? null;
 
