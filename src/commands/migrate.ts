@@ -36,7 +36,7 @@ import {
   rewriteBlockUrls,
 } from "../migrate/vtex/content-assets.ts";
 import { mapVtexBlocksToFastStore } from "../migrate/vtex/faststore-map.ts";
-import { type VtexBlock, readVtexBlockTree } from "../migrate/vtex/runtime.ts";
+import { type VtexBlock, readVtexBlockTree, readVtexStateImages } from "../migrate/vtex/runtime.ts";
 import { captureInteractions } from "../migrate/interactions.ts";
 import type {
   MigratedComponent,
@@ -206,7 +206,9 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
               // a url→file map (content-assets.json).
               const refMap = collectImageRefs(vtexBlocks, opts.url);
               vtexBlocks = rewriteBlockUrls(vtexBlocks, refMap);
-              const absUrls = [...new Set(Object.values(refMap))];
+              // CMS props images + product/catalog images from the Apollo state.
+              const stateImages = await readVtexStateImages(page);
+              const absUrls = [...new Set([...Object.values(refMap), ...stateImages])];
               const { map, downloaded, skipped } = await downloadContentImages(
                 absUrls,
                 runDir,
@@ -220,7 +222,7 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
                 );
               if (absUrls.length)
                 console.log(
-                  chalk.dim(`  vtex content: ${absUrls.length} image URLs resolved · ${downloaded} downloaded${skipped ? ` (${skipped} over cap skipped)` : ""}`),
+                  chalk.dim(`  vtex content: ${absUrls.length} image URLs (${Object.keys(refMap).length} CMS + ${stateImages.length} catalog) · ${downloaded} downloaded${skipped ? ` (${skipped} over cap skipped)` : ""}`),
                 );
             }
           }

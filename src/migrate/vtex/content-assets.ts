@@ -14,7 +14,7 @@ import type { FetchBytes } from "../assets.ts";
 import type { VtexBlock } from "./runtime.ts";
 
 /** Max content images to download per run (keeps big catalogs bounded). */
-const MAX_IMAGES = 80;
+const MAX_IMAGES = 150;
 
 const IMG_EXT = /\.(jpe?g|png|webp|gif|svg|avif)(\?|#|$)/i;
 const VTEX_ASSET = /vtexassets\.com|vteximg\.com\.br|\/arquivos\/(ids|assets)\//i;
