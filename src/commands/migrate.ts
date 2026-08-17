@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import chalk from "chalk";
 import type { Page } from "playwright";
-import { discoverPlpFromHome } from "../checks/plp-pagination.ts";
-import { resolveSitemapUrls } from "../diff/sitemap.ts";
+import { pickPlpFromHomeHtml } from "../checks/plp-pagination.ts";
+import { parseSitemap } from "../diff/sitemap.ts";
 import { launchBrowser, newContext } from "../engine/browser.ts";
 import { stabilizeCarousels } from "../engine/carousel-stabilizer.ts";
 import { scrollFullPage, waitForSkeletonsToResolve } from "../engine/collect.ts";
@@ -19,6 +19,7 @@ import {
   downloadSiteAssets,
   nodeFetchBytes,
 } from "../migrate/assets.ts";
+import { browserFetchText } from "../migrate/browser-fetch.ts";
 import { isGlobalRole, planComponentDedup, toMigratedComponent } from "../migrate/bundle.ts";
 import { jsonExporter } from "../migrate/exporters/json.ts";
 import { markdownExporter } from "../migrate/exporters/markdown.ts";
@@ -144,8 +145,21 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
       console.log(chalk.dim(`  phase 2 sitemap: cached (${resolvedPages.length} page(s))`));
     } else {
       console.log(chalk.dim("  phase 2 sitemap: resolving pages…"));
-      resolvedPages = await resolvePages(opts.url, opts.pages);
-      const sitemapUrls = await resolveSitemapUrls(opts.url).catch(() => [] as string[]);
+      // Discover through the BROWSER (bypasses bot 403s that would degrade a
+      // bare node fetch to home-only).
+      const ctx = await newContext(browser, { viewport });
+      const page = await ctx.newPage();
+      let sitemapUrls: string[] = [];
+      try {
+        await page.goto(opts.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+        await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => undefined);
+        const homeHtml = await page.content().catch(() => "");
+        resolvedPages = await resolvePages(page, opts.url, opts.pages, homeHtml);
+        sitemapUrls = await discoverSitemapUrls(page, opts.url);
+      } finally {
+        await page.close().catch(() => undefined);
+        await ctx.close().catch(() => undefined);
+      }
       const classified = sitemapUrls.slice(0, 500).map((u) => ({ url: u, kind: kindOf(u) }));
       writeFileSync(
         sitemapPath,
@@ -284,7 +298,12 @@ async function capturePages(
   return { pages, components };
 }
 
-async function resolvePages(baseUrl: string, pagesSpec?: string): Promise<ResolvedPage[]> {
+async function resolvePages(
+  page: Page,
+  baseUrl: string,
+  pagesSpec: string | undefined,
+  homeHtml: string,
+): Promise<ResolvedPage[]> {
   // Default to the canonical e-commerce trio: home + a PLP + a PDP.
   const tokens = (pagesSpec ?? "/,category-auto,pdp-auto")
     .split(",")
@@ -292,25 +311,33 @@ async function resolvePages(baseUrl: string, pagesSpec?: string): Promise<Resolv
     .filter(Boolean);
 
   const out: ResolvedPage[] = [];
-  let cachedPlp: string | null | undefined;
-  const resolvePlp = async (): Promise<string | null> => {
-    if (cachedPlp === undefined) cachedPlp = await discoverPlpFromHome(baseUrl);
-    return cachedPlp;
-  };
+  // PLP comes from the home HTML we already loaded via the browser — no fetch.
+  const plp = pickPlpFromHomeHtml(homeHtml, baseUrl);
 
   for (const token of tokens) {
     if (token === "category-auto") {
-      const plp = await resolvePlp();
       if (plp) out.push({ path: token, url: plp, kind: "plp" });
+      else console.warn(chalk.yellow("  ⚠ category-auto: nenhuma PLP descoberta na home"));
       continue;
     }
     if (token === "pdp-auto") {
-      const plp = await resolvePlp();
-      if (!plp) continue;
-      const html = await fetchText(plp);
-      if (!html) continue;
-      const pdp = firstProductHrefFromPlpHtml(html, plp);
+      if (!plp) {
+        console.warn(chalk.yellow("  ⚠ pdp-auto: sem PLP pra derivar PDP"));
+        continue;
+      }
+      // Navigate + read the RENDERED PLP DOM (client-rendered product grids
+      // aren't in the raw HTML), then pick the first product link.
+      let html: string | null = null;
+      try {
+        await page.goto(plp, { waitUntil: "domcontentloaded", timeout: 30_000 });
+        await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => undefined);
+        html = await page.content();
+      } catch {
+        html = await browserFetchText(page, plp);
+      }
+      const pdp = html ? firstProductHrefFromPlpHtml(html, plp) : null;
       if (pdp) out.push({ path: token, url: pdp, kind: "pdp" });
+      else console.warn(chalk.yellow("  ⚠ pdp-auto: nenhum produto encontrado na PLP"));
       continue;
     }
     try {
@@ -321,6 +348,27 @@ async function resolvePages(baseUrl: string, pagesSpec?: string): Promise<Resolv
     }
   }
   return out;
+}
+
+/** Fetch + parse sitemap.xml through the browser (follows one index level). */
+async function discoverSitemapUrls(page: Page, baseUrl: string): Promise<string[]> {
+  try {
+    const origin = new URL(baseUrl).origin;
+    const rootXml = await browserFetchText(page, `${origin}/sitemap.xml`);
+    if (!rootXml) return [];
+    const root = parseSitemap(rootXml);
+    if (!root.isIndex) return root.urls;
+    // Sitemap index — fetch a few children and flatten.
+    const urls: string[] = [];
+    for (const child of root.childSitemaps.slice(0, 5)) {
+      const xml = await browserFetchText(page, child);
+      if (xml) urls.push(...parseSitemap(xml).urls);
+      if (urls.length >= 500) break;
+    }
+    return urls;
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -373,16 +421,6 @@ function printResults(runDir: string, bundle: MigrationBundle): void {
     console.log(`    ${chalk.cyan(`${c.scope}/${c.role}`.padEnd(28))} ${chalk.dim(`${c.tailwind.length} tw · ${c.interactions.length} interactions`)}`);
   }
   console.log("");
-}
-
-async function fetchText(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-    if (!res.ok) return null;
-    return await res.text();
-  } catch {
-    return null;
-  }
 }
 
 function readJson<T>(path: string): T | null {

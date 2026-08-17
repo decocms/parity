@@ -285,6 +285,48 @@ function withPage(url: string, n: number): string {
  * category PLP — a depth-1 or depth-2 path not containing `/p` (product),
  * `/cart`, `/checkout`, `/account`, etc.
  */
+/**
+ * Pure part of `discoverPlpFromHome`: given already-fetched home HTML, pick
+ * the first href that looks like a category PLP. Exported so callers that
+ * already have the HTML (e.g. `parity migrate`, which loads it via the
+ * browser to bypass bot protection) can reuse the heuristic without a
+ * second, node-`fetch`-based request that a bot-protected site would 403.
+ */
+export function pickPlpFromHomeHtml(html: string, homeUrl: string): string | null {
+  const candidates = new Set<string>();
+  const re = /href="([^"]+)"/gi;
+  for (;;) {
+    const m = re.exec(html);
+    if (!m) break;
+    const href = m[1];
+    if (!href) continue;
+    // Skip non-PLP hrefs
+    if (
+      /^https?:\/\//.test(href) ||
+      href.startsWith("#") ||
+      href === "/" ||
+      /\/(p|cart|carrinho|checkout|account|conta|login|wishlist|favoritos)(\/|$|\?)/i.test(href) ||
+      /\.(jpg|png|webp|css|js|svg|ico|woff)/i.test(href)
+    ) {
+      continue;
+    }
+    const segments = href.split("?")[0]!.split("/").filter(Boolean);
+    if (segments.length === 0 || segments.length > 3) continue;
+    candidates.add(href.split("?")[0]!);
+  }
+  // First candidate that has another candidate as a prefix wins — that
+  // makes it likelier the URL points at a category index page vs an
+  // institutional landing.
+  const sorted = Array.from(candidates).sort((a, b) => a.length - b.length);
+  const pick = sorted[0];
+  if (!pick) return null;
+  try {
+    return new URL(pick, new URL(homeUrl)).toString();
+  } catch {
+    return null;
+  }
+}
+
 /** Exported for reuse by `plp-sorting.ts`. */
 export async function discoverPlpFromHome(homeUrl: string): Promise<string | null> {
   try {
@@ -296,38 +338,7 @@ export async function discoverPlpFromHome(homeUrl: string): Promise<string | nul
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) return null;
-    const html = await res.text();
-    const candidates = new Set<string>();
-    const re = /href="([^"]+)"/gi;
-    for (;;) {
-      const m = re.exec(html);
-      if (!m) break;
-      const href = m[1];
-      if (!href) continue;
-      // Skip non-PLP hrefs
-      if (
-        /^https?:\/\//.test(href) ||
-        href.startsWith("#") ||
-        href === "/" ||
-        /\/(p|cart|carrinho|checkout|account|conta|login|wishlist|favoritos)(\/|$|\?)/i.test(
-          href,
-        ) ||
-        /\.(jpg|png|webp|css|js|svg|ico|woff)/i.test(href)
-      ) {
-        continue;
-      }
-      const segments = href.split("?")[0]!.split("/").filter(Boolean);
-      if (segments.length === 0 || segments.length > 3) continue;
-      candidates.add(href.split("?")[0]!);
-    }
-    // First candidate that has another candidate as a prefix wins — that
-    // makes it likelier the URL points at a category index page vs an
-    // institutional landing.
-    const sorted = Array.from(candidates).sort((a, b) => a.length - b.length);
-    const home = new URL(homeUrl);
-    const pick = sorted[0];
-    if (!pick) return null;
-    return new URL(pick, home).toString();
+    return pickPlpFromHomeHtml(await res.text(), homeUrl);
   } catch {
     return null;
   }
