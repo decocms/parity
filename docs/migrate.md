@@ -64,6 +64,7 @@ phase whose artifact already exists. Pass `--refresh` to redo every phase.
 | `--viewport <viewport>` | `mobile` | `mobile` \| `desktop` \| `tablet` |
 | `--format <fmt>` | `both` | `md` \| `json` \| `both` |
 | `--out <dir>` | `./parity-migrate` | Output directory (stable per host) |
+| `--sample <spec>` | `plp=2,pdp=2,other=3,search=1` | Extra pages sampled from the sitemap by kind (`other` = institutional; institutional pages are preferred). Capped at 15 total pages. |
 | `--refresh` | off | Re-run all phases even if cached |
 | `--open` | off | Open the generated `index.html` visual report in the browser |
 | `--no-llm` | LLM on (if configured) | Skip the optional component-relabel pass |
@@ -130,7 +131,9 @@ source of truth; the `faststore` playbook spells this out.
 
 When the site is a VTEX IO storefront, `migrate` reads the store's **real
 declarative block tree** from `window.__RUNTIME__` (the render-runtime
-serialized into the page) instead of relying only on DOM heuristics. It writes:
+serialized into the page) **on every captured page** (home + PLP + PDP +
+institutional), merging them by treePath — so the whole store's content is
+captured, not just the home page. It writes:
 
 - `blocks.json` — every block instance (treePath, block id, resolved component,
   parent) from the runtime, **including each block's `props` — the CMS content

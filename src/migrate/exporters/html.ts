@@ -78,13 +78,23 @@ function renderHtml(b: MigrationBundle, embed: Embed): string {
     })
     .join("");
 
-  const componentRows = b.components
-    .map((c, i) => {
-      const keys = [...new Set(c.interactions.map((x) => x.e2eKey).filter(Boolean))];
-      const folder = componentDirName(c.role, i + 1);
-      return `<tr><td>${esc(c.scope)}</td><td><code>${esc(c.role)}</code>${c.repeated && c.repeated > 1 ? ` <span class="badge">×${c.repeated}</span>` : ""}</td><td>${c.tailwind.length}</td><td>${c.interactions.length}</td><td>${keys.length ? keys.map((k) => `<code>${esc(String(k))}</code>`).join(" ") : "—"}</td><td><a href="components/${esc(folder)}/README.md">${esc(folder)}</a></td></tr>`;
-    })
-    .join("");
+  // Folder index per component (stable across fresh/cache runs via role+selector).
+  const compIndex = new Map<string, number>();
+  b.components.forEach((c, i) => compIndex.set(`${c.role}::${c.selector}`, i + 1));
+  const compHead = "<tr><th>role</th><th>tw</th><th>interactions</th><th>e2e keys</th><th>folder</th></tr>";
+  const rowFor = (c: MigrationBundle["components"][number]): string => {
+    const keys = [...new Set(c.interactions.map((x) => x.e2eKey).filter(Boolean))];
+    const folder = componentDirName(c.role, compIndex.get(`${c.role}::${c.selector}`) ?? 1);
+    return `<tr><td><code>${esc(c.role)}</code>${c.repeated && c.repeated > 1 ? ` <span class="badge">×${c.repeated}</span>` : ""}</td><td>${c.tailwind.length}</td><td>${c.interactions.length}</td><td>${keys.length ? keys.map((k) => `<code>${esc(String(k))}</code>`).join(" ") : "—"}</td><td><a href="components/${esc(folder)}/README.md">${esc(folder)}</a></td></tr>`;
+  };
+  const globalComps = b.components.filter((c) => c.scope === "global");
+  const componentsByPage = [
+    `<section class="card"><h2>Global components (${globalComps.length})</h2><p class="dim">Captured once — shown on every page (header, footer, minicart…).</p><table>${compHead}${globalComps.map(rowFor).join("")}</table></section>`,
+    ...b.pages.map(
+      (pg) =>
+        `<section class="card"><h2>Page: ${esc(pg.kind)} <code>${esc(pg.path)}</code></h2>${pg.components.length ? `<table>${compHead}${pg.components.map(rowFor).join("")}</table>` : '<p class="dim">no page-specific components</p>'}</section>`,
+    ),
+  ].join("");
 
   const vtexRows = b.vtex
     ? b.vtex.map
@@ -178,13 +188,8 @@ function renderHtml(b: MigrationBundle, embed: Embed): string {
 
   ${b.vtex ? `<section class="card"><h2>VTEX IO → FastStore blocks</h2><p class="dim">${b.vtex.blocks.length} block instances from the store runtime · ${b.vtex.blocks.filter((x) => x.props).length} carry CMS content (props), ${countContentImages(b.vtex.blocks)} content images downloaded to <code>assets/content/</code> (URLs rewritten in <code>blocks.json</code>). <b>confidence</b> = how sure the deterministic mapper is (0–1).</p><table><tr><th>VTEX block</th><th>→ FastStore</th><th>confidence</th><th>count</th></tr>${vtexRows}</table></section>` : ""}
 
-  <section class="card">
-    <h2>Components (${b.components.length})</h2>
-    <table>
-      <tr><th>scope</th><th>role</th><th>tw</th><th>interactions</th><th>e2e keys</th><th>folder</th></tr>
-      ${componentRows}
-    </table>
-  </section>
+  <section class="card"><h2>Components (${b.components.length}) — by page</h2></section>
+  ${componentsByPage}
 
   <section class="card links">
     <h2>Files</h2>

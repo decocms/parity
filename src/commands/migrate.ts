@@ -66,6 +66,8 @@ export interface MigrateOptions {
   viewport: string;
   /** Comma-separated viewports for theme + site screenshots (default: --viewport). */
   viewports?: string;
+  /** Extra pages to sample from the sitemap by kind, e.g. "plp=2,pdp=2,other=3,search=1". */
+  sample?: string;
   format: string;
   outDir: string;
   target?: string;
@@ -138,14 +140,15 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
     let platform: Platform;
     let assets: SiteAssets;
     let screenshots: { viewport: string; path: string }[];
+    // VTEX blocks + content are produced in Phase 3 (read per captured page).
     let vtexBlocks: VtexBlock[] | null = null;
+    let contentMap: Record<string, string> = {};
     if (!opts.refresh && existsSync(themePath) && existsSync(assetsPath)) {
       theme = readJson<ThemeBundle>(themePath)!;
       const meta = readJson<Phase1Meta>(assetsPath)!;
       platform = meta.platform;
       assets = meta.assets;
       screenshots = meta.screenshots ?? [];
-      if (existsSync(blocksPath)) vtexBlocks = readJson<VtexBlock[]>(blocksPath);
       console.log(chalk.dim("  phase 1 theme+assets: cached"));
     } else {
       console.log(chalk.dim(`  phase 1 theme+assets: scraping (${viewports.join(", ")})…`));
@@ -197,34 +200,7 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
                 assetsResolved.logoSource = assetsResolved.logoSource ?? "screenshot";
               }
             }
-            // VTEX IO block tree — the store's real declarative structure.
-            vtexBlocks = await readVtexBlockTree(page);
-            if (vtexBlocks) {
-              // Content images in block props are often site-relative pointers
-              // (/img/x, /arquivos/ids/…). Resolve them to the real absolute
-              // content URL in blocks.json, and ALSO download them locally with
-              // a url→file map (content-assets.json).
-              const refMap = collectImageRefs(vtexBlocks, opts.url);
-              vtexBlocks = rewriteBlockUrls(vtexBlocks, refMap);
-              // CMS props images + product/catalog images from the Apollo state.
-              const stateImages = await readVtexStateImages(page);
-              const absUrls = [...new Set([...Object.values(refMap), ...stateImages])];
-              const { map, downloaded, skipped } = await downloadContentImages(
-                absUrls,
-                runDir,
-                fetchBytes,
-              );
-              if (Object.keys(map).length)
-                writeFileSync(
-                  resolve(runDir, "content-assets.json"),
-                  `${JSON.stringify(map, null, 2)}\n`,
-                  "utf8",
-                );
-              if (absUrls.length)
-                console.log(
-                  chalk.dim(`  vtex content: ${absUrls.length} image URLs (${Object.keys(refMap).length} CMS + ${stateImages.length} catalog) · ${downloaded} downloaded${skipped ? ` (${skipped} over cap skipped)` : ""}`),
-                );
-            }
+            // (VTEX block tree + content are now read PER PAGE in Phase 3.)
           }
         } finally {
           await page.close().catch(() => undefined);
@@ -240,10 +216,6 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
         `${JSON.stringify({ platform, assets, screenshots } satisfies Phase1Meta, null, 2)}\n`,
         "utf8",
       );
-      if (vtexBlocks) {
-        writeFileSync(blocksPath, `${JSON.stringify(vtexBlocks, null, 2)}\n`, "utf8");
-        console.log(chalk.dim(`  vtex io: ${vtexBlocks.length} blocks read from runtime`));
-      }
     }
 
     // ── Phase 2: SITEMAP ────────────────────────────────────────────
@@ -270,6 +242,18 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
         await ctx.close().catch(() => undefined);
       }
       const classified = sitemapUrls.slice(0, 500).map((u) => ({ url: u, kind: kindOf(u) }));
+      // Sample extra pages per kind (incl. institutional) from the sitemap.
+      const sampled = sampleFromSitemap(classified, parseSample(opts.sample), resolvedPages);
+      resolvedPages = [...resolvedPages, ...sampled].slice(0, MAX_PAGES);
+      if (sampled.length) {
+        const byKind = sampled.reduce<Record<string, number>>((a, p) => {
+          a[p.kind] = (a[p.kind] ?? 0) + 1;
+          return a;
+        }, {});
+        console.log(
+          chalk.dim(`  phase 2 sitemap: +${sampled.length} sampled (${Object.entries(byKind).map(([k, n]) => `${n} ${k}`).join(", ")})`),
+        );
+      }
       writeFileSync(
         sitemapPath,
         `${JSON.stringify({ pages: resolvedPages, sitemapUrls: classified }, null, 2)}\n`,
@@ -285,20 +269,42 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
     const capturePath = resolve(runDir, "capture.json");
     let pages: MigratedPage[];
     let components: MigratedComponent[];
+    type CaptureCache = {
+      pages: MigratedPage[];
+      components: MigratedComponent[];
+      vtexBlocks: VtexBlock[] | null;
+      contentMap: Record<string, string>;
+    };
     if (!opts.refresh && existsSync(capturePath)) {
-      const cached = readJson<{ pages: MigratedPage[]; components: MigratedComponent[] }>(capturePath)!;
+      const cached = readJson<CaptureCache>(capturePath)!;
       pages = cached.pages;
       components = cached.components;
+      vtexBlocks = cached.vtexBlocks ?? null;
+      contentMap = cached.contentMap ?? {};
       console.log(chalk.dim(`  phase 3 components: cached (${components.length})`));
     } else {
       console.log(chalk.dim("  phase 3 components: capturing…"));
-      ({ pages, components } = await capturePages(browser, primaryViewport, resolvedPages, theme, {
-        allowlist,
-        llm: !opts.noLlm,
-        runDir,
-      }));
-      writeFileSync(capturePath, `${JSON.stringify({ pages, components }, null, 2)}\n`, "utf8");
+      ({ pages, components, vtexBlocks, contentMap } = await capturePages(
+        browser,
+        primaryViewport,
+        resolvedPages,
+        theme,
+        { allowlist, llm: !opts.noLlm, runDir, baseUrl: opts.url },
+      ));
+      writeFileSync(
+        capturePath,
+        `${JSON.stringify({ pages, components, vtexBlocks, contentMap } satisfies CaptureCache, null, 2)}\n`,
+        "utf8",
+      );
     }
+    // Persist the VTEX artifacts (block tree + content map) after capture.
+    if (vtexBlocks) writeFileSync(blocksPath, `${JSON.stringify(vtexBlocks, null, 2)}\n`, "utf8");
+    if (Object.keys(contentMap).length)
+      writeFileSync(
+        resolve(runDir, "content-assets.json"),
+        `${JSON.stringify(contentMap, null, 2)}\n`,
+        "utf8",
+      );
 
     const bundle: MigrationBundle = {
       url: opts.url,
@@ -354,16 +360,28 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
   }
 }
 
+/** Global cap on content images downloaded across all captured pages. */
+const CONTENT_IMAGE_BUDGET = 200;
+
 async function capturePages(
   browser: Awaited<ReturnType<typeof launchBrowser>>,
   viewport: Viewport,
   resolvedPages: ResolvedPage[],
   theme: ThemeBundle,
-  cfg: { allowlist: Set<string> | null; llm: boolean; runDir: string },
-): Promise<{ pages: MigratedPage[]; components: MigratedComponent[] }> {
+  cfg: { allowlist: Set<string> | null; llm: boolean; runDir: string; baseUrl: string },
+): Promise<{
+  pages: MigratedPage[];
+  components: MigratedComponent[];
+  vtexBlocks: VtexBlock[] | null;
+  contentMap: Record<string, string>;
+}> {
   const pages: MigratedPage[] = [];
   const components: MigratedComponent[] = [];
   const seenGlobalRoles = new Set<string>();
+  // VTEX block tree + content, merged across ALL captured pages (dedupe by
+  // treePath) — so institutional/PLP/PDP content is captured, not just home's.
+  const blocksByPath = new Map<string, VtexBlock>();
+  const contentMap: Record<string, string> = {};
 
   for (const target of resolvedPages) {
     const ctx = await newContext(browser, { viewport });
@@ -419,12 +437,37 @@ async function capturePages(
         if (!global) pageComponents.push(migrated);
       }
       pages.push({ url: target.url, path: target.path, kind: target.kind, components: pageComponents });
+
+      // VTEX IO block tree + content for THIS page (merged across pages).
+      const pageBlocks = await readVtexBlockTree(page);
+      if (pageBlocks) {
+        const refMap = collectImageRefs(pageBlocks, cfg.baseUrl);
+        for (const b of rewriteBlockUrls(pageBlocks, refMap)) {
+          if (!blocksByPath.has(b.treePath)) blocksByPath.set(b.treePath, b);
+        }
+        if (Object.keys(contentMap).length < CONTENT_IMAGE_BUDGET) {
+          const stateImages = await readVtexStateImages(page);
+          const fetchBytes = async (url: string) =>
+            (await browserFetchBytes(page, url)) ?? (await nodeFetchBytes(url));
+          const remaining = CONTENT_IMAGE_BUDGET - Object.keys(contentMap).length;
+          const absUrls = [...new Set([...Object.values(refMap), ...stateImages])]
+            .filter((u) => !(u in contentMap))
+            .slice(0, remaining);
+          const { map } = await downloadContentImages(absUrls, cfg.runDir, fetchBytes);
+          Object.assign(contentMap, map);
+        }
+      }
     } finally {
       await page.close().catch(() => undefined);
       await ctx.close().catch(() => undefined);
     }
   }
-  return { pages, components };
+  return {
+    pages,
+    components,
+    vtexBlocks: blocksByPath.size ? [...blocksByPath.values()] : null,
+    contentMap,
+  };
 }
 
 async function resolvePages(
@@ -527,6 +570,81 @@ async function structuralSignatures(page: Page, selectors: string[]): Promise<st
   } catch {
     return selectors.map(() => "");
   }
+}
+
+/** Default extra pages sampled from the sitemap (incl. institutional = "other"). */
+const DEFAULT_SAMPLE = "plp=2,pdp=2,other=3,search=1";
+/** Hard cap on total captured pages, to keep runs bounded. */
+const MAX_PAGES = 15;
+/** URL patterns for real institutional pages (vs deep categories that also → "other"). */
+const INSTITUTIONAL_URL =
+  /(sobre|about|institucional|quem-somos|contato|contact|ajuda|help|faq|blog|trabalhe|careers|carreiras|politica|policy|privacidade|privacy|termos|terms|troca|devolu|garantia|warranty|lojas|stores|imprensa|press|sustentab|acessibilidade|cookies)/i;
+
+/** Parse a `--sample` spec ("plp=2,other=3") into a per-kind count map. */
+export function parseSample(spec: string | undefined): Partial<Record<PageKind, number>> {
+  const out: Partial<Record<PageKind, number>> = {};
+  for (const part of (spec ?? DEFAULT_SAMPLE).split(",")) {
+    const [k, n] = part.split("=").map((s) => s.trim());
+    const count = Number.parseInt(n ?? "", 10);
+    if (k && Number.isFinite(count) && count > 0) out[k as PageKind] = count;
+  }
+  return out;
+}
+
+/** Pick `count` items spread evenly across the list (variety, not first-N cluster). */
+export function pickSpread<T>(items: T[], count: number): T[] {
+  if (items.length <= count) return items;
+  const step = items.length / count;
+  const out: T[] = [];
+  for (let i = 0; i < count; i++) out.push(items[Math.floor(i * step)]!);
+  return out;
+}
+
+/**
+ * Sample additional pages per kind from the classified sitemap — home + a few
+ * PLPs/PDPs + a search page + institutional ("other") pages — skipping any URL
+ * already resolved. This is what captures the institutional pages you'll need
+ * to rebuild.
+ */
+export function sampleFromSitemap(
+  classified: { url: string; kind: PageKind }[],
+  spec: Partial<Record<PageKind, number>>,
+  existing: ResolvedPage[],
+): ResolvedPage[] {
+  const seen = new Set(existing.map((p) => p.url));
+  const byKind = new Map<PageKind, string[]>();
+  for (const c of classified) {
+    if (c.kind === "home" || seen.has(c.url)) continue;
+    const list = byKind.get(c.kind) ?? [];
+    list.push(c.url);
+    byKind.set(c.kind, list);
+  }
+  // Within "other", prefer real institutional pages (about/contact/policies/…)
+  // over deep-category pages that also fall through to "other".
+  const other = byKind.get("other");
+  if (other) {
+    const inst = other.filter((u) => INSTITUTIONAL_URL.test(u));
+    byKind.set("other", [...inst, ...other.filter((u) => !INSTITUTIONAL_URL.test(u))]);
+  }
+
+  const out: ResolvedPage[] = [];
+  for (const [kind, count] of Object.entries(spec) as [PageKind, number][]) {
+    // "other" is ordered institutional-first — take the head, don't spread.
+    const source = byKind.get(kind) ?? [];
+    const chosen = kind === "other" ? source.slice(0, count) : pickSpread(source, count);
+    for (const url of chosen) {
+      if (seen.has(url)) continue;
+      seen.add(url);
+      let path = url;
+      try {
+        path = new URL(url).pathname;
+      } catch {
+        /* keep url */
+      }
+      out.push({ path, url, kind });
+    }
+  }
+  return out;
 }
 
 function kindOf(url: string): PageKind {
