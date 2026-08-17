@@ -7,7 +7,7 @@ import { parseSitemap } from "../diff/sitemap.ts";
 import { launchBrowser, newContext } from "../engine/browser.ts";
 import { stabilizeCarousels } from "../engine/carousel-stabilizer.ts";
 import { scrollFullPage, waitForSkeletonsToResolve } from "../engine/collect.ts";
-import { firstProductHrefFromPlpHtml } from "../engine/selector-discovery-pass.ts";
+import { firstProductHref } from "../migrate/pdp-discovery.ts";
 import { type PageKind, classifyPath } from "../engine/sitemap-discover.ts";
 import { detectComponents } from "../extract/detect-components.ts";
 import { extractComponent } from "../extract/extract-component.ts";
@@ -203,7 +203,7 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
         await page.goto(opts.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
         await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => undefined);
         const homeHtml = await page.content().catch(() => "");
-        resolvedPages = await resolvePages(page, opts.url, opts.pages, homeHtml);
+        resolvedPages = await resolvePages(page, opts.url, opts.pages, homeHtml, platform);
         sitemapUrls = await discoverSitemapUrls(page, opts.url);
       } finally {
         await page.close().catch(() => undefined);
@@ -367,6 +367,7 @@ async function resolvePages(
   baseUrl: string,
   pagesSpec: string | undefined,
   homeHtml: string,
+  platform: Platform,
 ): Promise<ResolvedPage[]> {
   // Default to the canonical e-commerce trio: home + a PLP + a PDP.
   const tokens = (pagesSpec ?? "/,category-auto,pdp-auto")
@@ -399,7 +400,7 @@ async function resolvePages(
       } catch {
         html = await browserFetchText(page, plp);
       }
-      const pdp = html ? firstProductHrefFromPlpHtml(html, plp) : null;
+      const pdp = html ? firstProductHref(html, plp, platform) : null;
       if (pdp) out.push({ path: token, url: pdp, kind: "pdp" });
       else console.warn(chalk.yellow("  ⚠ pdp-auto: nenhum produto encontrado na PLP"));
       continue;
