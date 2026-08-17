@@ -224,5 +224,69 @@ function collectCandidatesInPage(): RawCandidate[] {
     }
   }
 
+  // Fallback header/footer for sites that render them as plain <div>s with no
+  // semantic tag (e.g. VTEX IO). Only fires when nothing semantic matched, so
+  // it can't regress sites that DO use <header>/<footer>.
+  const docHeight = Math.max(
+    document.documentElement.scrollHeight,
+    document.body?.scrollHeight ?? 0,
+  );
+  function widest(els: Element[]): Element | null {
+    let best: Element | null = null;
+    let bestArea = 0;
+    for (const el of els) {
+      const r = rectOf(el);
+      if (r.width < viewportWidth * 0.85) continue;
+      const area = r.width * r.height;
+      if (area > bestArea && area > 0) {
+        best = el;
+        bestArea = area;
+      }
+    }
+    return best;
+  }
+
+  if (!out.some((c) => c.role === "header")) {
+    // Anchor: the top-most full-width ancestor of the nav / logo / search.
+    let header: Element | null = null;
+    const anchor = document.querySelector("nav, [class*='logo' i], [class*='search' i]");
+    let el: Element | null = anchor;
+    while (el?.parentElement) {
+      const r = rectOf(el.parentElement);
+      if (r.y <= 5 && r.width >= viewportWidth * 0.85 && r.height < window.innerHeight * 1.5) {
+        header = el.parentElement;
+      }
+      el = el.parentElement;
+    }
+    header ??= widest(
+      Array.from(document.querySelectorAll("[class*='header' i]")).filter(
+        (e) => rectOf(e).y < 200,
+      ),
+    );
+    if (header) push("header", header);
+  }
+
+  if (!out.some((c) => c.role === "footer")) {
+    const footer =
+      widest(
+        Array.from(document.querySelectorAll("[class*='footer' i]")).filter((e) => {
+          const r = rectOf(e);
+          return r.y + r.height > docHeight - window.innerHeight && e.querySelectorAll("a").length >= 4;
+        }),
+      ) ??
+      // Geometry fallback: bottom full-width block with many links.
+      widest(
+        Array.from(document.querySelectorAll("div, section")).filter((e) => {
+          const r = rectOf(e);
+          return (
+            r.y + r.height > docHeight - window.innerHeight * 0.6 &&
+            r.y > docHeight * 0.5 &&
+            e.querySelectorAll("a").length >= 6
+          );
+        }),
+      );
+    if (footer) push("footer", footer);
+  }
+
   return out;
 }
