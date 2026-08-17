@@ -85,4 +85,19 @@ describe("detectPlatform — HTML heuristics", () => {
     const html = `<html><head><meta name="generator" content="Shopify 5.0"/></head></html>`;
     expect(detectPlatform({ url: "https://www.x.com", html })).toBe("shopify");
   });
+
+  it("detects Salesforce Commerce (Demandware) from asset host", () => {
+    const html = `<html><body><img src="https://www.x.com/on/demandware.static/Sites-X-Site/-/default/logo.png"></body></html>`;
+    expect(detectPlatform({ url: "https://www.x.com", html })).toBe("salesforce-commerce");
+  });
+
+  it("Salesforce Commerce wins over stray fs-/vtex- classes (issue #199)", () => {
+    // A Demandware store that also has generic `fs-`/`vtex-` utility classes
+    // must NOT be mis-detected as vtex/vtex-fs.
+    const html = `<html><body>
+      ${'<div class="fs-16 vtex-thing"></div>'.repeat(8)}
+      <img src="/on/demandware.static/Sites-Sephora_BR-Site/-/default/logo.gif">
+    </body></html>`;
+    expect(detectPlatform({ url: "https://www.sephora.com.br", html })).toBe("salesforce-commerce");
+  });
 });

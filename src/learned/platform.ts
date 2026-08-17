@@ -1,6 +1,14 @@
 import * as cheerio from "cheerio";
 
-export type Platform = "vtex" | "vtex-fs" | "shopify" | "deco" | "wake" | "nuvemshop" | "custom";
+export type Platform =
+  | "vtex"
+  | "vtex-fs"
+  | "shopify"
+  | "salesforce-commerce"
+  | "deco"
+  | "wake"
+  | "nuvemshop"
+  | "custom";
 
 export interface PlatformDetectionInput {
   url: string;
@@ -65,6 +73,15 @@ function detectFromHeaders(headers: Record<string, string>): Platform {
 
 function detectFromHtml(html: string): Platform {
   try {
+    // Salesforce Commerce Cloud (Demandware) — checked FIRST because its
+    // static-asset host (`demandware.static`) and `/on/demandware.store/`
+    // paths are unambiguous, whereas the generic `fs-`/`vtex-` substring
+    // checks below can false-positive on a Demandware store that happens to
+    // use `fs-`/utility classes (issue #199: Sephora BR mis-detected as vtex).
+    if (html.includes("demandware.static") || html.includes("/on/demandware.store/")) {
+      return "salesforce-commerce";
+    }
+
     const $ = cheerio.load(html);
 
     // VTEX FastStore (newer)
@@ -94,6 +111,8 @@ function detectFromHtml(html: string): Platform {
     const generator = $("meta[name='generator']").attr("content")?.toLowerCase() ?? "";
     if (generator.includes("vtex")) return "vtex";
     if (generator.includes("shopify")) return "shopify";
+    if (generator.includes("demandware") || generator.includes("salesforce"))
+      return "salesforce-commerce";
     if (generator.includes("deco")) return "deco";
   } catch {
     /* ignore */
