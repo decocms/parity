@@ -19,6 +19,12 @@ describe("pickPlpFromHomeHtml", () => {
     expect(pickPlpFromHomeHtml(html, "https://loja.com")).toBeNull();
   });
 
+  it("prefers a real category over a shorter institutional page (#200)", () => {
+    // "/sobre" is shorter but institutional; the real category should win.
+    const html = `<a href="/sobre">sobre</a><a href="/eletrodomesticos">cat</a>`;
+    expect(pickPlpFromHomeHtml(html, "https://loja.com")).toBe("https://loja.com/eletrodomesticos");
+  });
+
   it("skips asset and login/account links", () => {
     const html = `<a href="/logo.svg">l</a><a href="/login">in</a><a href="/eletronicos">cat</a>`;
     expect(pickPlpFromHomeHtml(html, "https://loja.com")).toBe("https://loja.com/eletronicos");

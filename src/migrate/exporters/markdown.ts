@@ -35,11 +35,11 @@ export const markdownExporter: MigrateExporter = {
       );
     });
 
-    writeFileSync(join(outDir, "index.md"), renderIndex(bundle, dirNames, notes), "utf8");
+    writeFileSync(join(outDir, "index.md"), renderIndex(bundle, notes), "utf8");
   },
 };
 
-function renderIndex(bundle: MigrationBundle, dirNames: string[], notes: string[]): string {
+function renderIndex(bundle: MigrationBundle, notes: string[]): string {
   const lines: string[] = [];
   const md = lines.push.bind(lines);
 
@@ -85,21 +85,37 @@ function renderIndex(bundle: MigrationBundle, dirNames: string[], notes: string[
     md("");
   }
 
-  md("## Components");
-  md("");
-  md("| Scope | Role | e2e keys | Folder |");
-  md("|---|---|---|---|");
-  bundle.components.forEach((c, i) => {
-    const keys = c.interactions
-      .map((x) => x.e2eKey)
-      .filter((k): k is string => Boolean(k));
-    const uniqueKeys = [...new Set(keys)];
+  // Folder index per component (stable across fresh/cache via role+selector).
+  const compIndex = new Map<string, number>();
+  bundle.components.forEach((c, i) => compIndex.set(`${c.role}::${c.selector}`, i + 1));
+  const rowFor = (c: MigrationBundle["components"][number]): string => {
+    const keys = [...new Set(c.interactions.map((x) => x.e2eKey).filter((k): k is string => Boolean(k)))];
+    const dir = componentDirName(c.role, compIndex.get(`${c.role}::${c.selector}`) ?? 1);
     const roleCell = c.repeated && c.repeated > 1 ? `\`${c.role}\` ×${c.repeated}` : `\`${c.role}\``;
-    md(
-      `| ${c.scope} | ${roleCell} | ${uniqueKeys.length ? uniqueKeys.map((k) => `\`${k}\``).join(", ") : "—"} | [${dirNames[i]}](./components/${dirNames[i]}/README.md) |`,
-    );
-  });
+    return `| ${roleCell} | ${keys.length ? keys.map((k) => `\`${k}\``).join(", ") : "—"} | [${dir}](./components/${dir}/README.md) |`;
+  };
+  const globalComps = bundle.components.filter((c) => c.scope === "global");
+
+  md("## Components — by page");
   md("");
+  md(`### Global (${globalComps.length}) — on every page`);
+  md("");
+  md("| Role | e2e keys | Folder |");
+  md("|---|---|---|");
+  for (const c of globalComps) md(rowFor(c));
+  md("");
+  for (const pg of bundle.pages) {
+    md(`### Page: ${pg.kind} \`${pg.path}\``);
+    md("");
+    if (pg.components.length) {
+      md("| Role | e2e keys | Folder |");
+      md("|---|---|---|");
+      for (const c of pg.components) md(rowFor(c));
+    } else {
+      md("_no page-specific components_");
+    }
+    md("");
+  }
 
   if (notes.length) {
     md("## Compaction notes");

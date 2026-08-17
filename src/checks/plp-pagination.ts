@@ -314,10 +314,16 @@ export function pickPlpFromHomeHtml(html: string, homeUrl: string): string | nul
     if (segments.length === 0 || segments.length > 3) continue;
     candidates.add(href.split("?")[0]!);
   }
-  // First candidate that has another candidate as a prefix wins — that
-  // makes it likelier the URL points at a category index page vs an
-  // institutional landing.
-  const sorted = Array.from(candidates).sort((a, b) => a.length - b.length);
+  // Drop institutional / non-category landings (about, contact, help, policies,
+  // blog, careers, …) so `category-auto` lands on a real PLP, not an
+  // institutional page (issue #200).
+  const INSTITUTIONAL =
+    /(sobre|about|institucional|contato|contact|ajuda|help|faq|blog|trabalhe|careers|carreiras|politica|policy|privacidade|privacy|termos|terms|troca|devolu|garantia|warranty|lojas|stores|imprensa|press|sustentab|newsletter)/i;
+  const filtered = Array.from(candidates).filter((c) => !INSTITUTIONAL.test(c));
+  // Shortest category-looking path wins (a category index vs a deep landing).
+  const sorted = (filtered.length ? filtered : Array.from(candidates)).sort(
+    (a, b) => a.length - b.length,
+  );
   const pick = sorted[0];
   if (!pick) return null;
   try {

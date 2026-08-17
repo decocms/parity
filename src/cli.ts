@@ -750,6 +750,10 @@ program
     "--viewports <list>",
     "Comma-separated viewports for theme + site screenshots (e.g. mobile,desktop). Default: --viewport only.",
   )
+  .option(
+    "--sample <spec>",
+    "Extra pages to sample from the sitemap by kind, e.g. 'plp=2,pdp=2,other=3,search=1' (other = institutional). Default samples a few of each incl. institutional pages.",
+  )
   .option("--format <fmt>", "md | json | both", "both")
   .option("--out <dir>", "Output directory (stable per host, for resume)", "./parity-migrate")
   .option("--refresh", "Re-run all phases even if cached artifacts exist", false)
@@ -768,6 +772,7 @@ program
         target: opts.target,
         viewport: opts.viewport,
         viewports: opts.viewports,
+        sample: opts.sample,
         format: opts.format,
         outDir: opts.out,
         refresh: opts.refresh,

@@ -64,6 +64,7 @@ phase whose artifact already exists. Pass `--refresh` to redo every phase.
 | `--viewport <viewport>` | `mobile` | `mobile` \| `desktop` \| `tablet` |
 | `--format <fmt>` | `both` | `md` \| `json` \| `both` |
 | `--out <dir>` | `./parity-migrate` | Output directory (stable per host) |
+| `--sample <spec>` | `plp=2,pdp=2,other=3,search=1` | Extra pages sampled from the sitemap by kind (`other` = institutional; institutional pages are preferred). Capped at 15 total pages. |
 | `--refresh` | off | Re-run all phases even if cached |
 | `--open` | off | Open the generated `index.html` visual report in the browser |
 | `--no-llm` | LLM on (if configured) | Skip the optional component-relabel pass |

@@ -66,6 +66,8 @@ export interface MigrateOptions {
   viewport: string;
   /** Comma-separated viewports for theme + site screenshots (default: --viewport). */
   viewports?: string;
+  /** Extra pages to sample from the sitemap by kind, e.g. "plp=2,pdp=2,other=3,search=1". */
+  sample?: string;
   format: string;
   outDir: string;
   target?: string;
@@ -270,6 +272,18 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
         await ctx.close().catch(() => undefined);
       }
       const classified = sitemapUrls.slice(0, 500).map((u) => ({ url: u, kind: kindOf(u) }));
+      // Sample extra pages per kind (incl. institutional) from the sitemap.
+      const sampled = sampleFromSitemap(classified, parseSample(opts.sample), resolvedPages);
+      resolvedPages = [...resolvedPages, ...sampled].slice(0, MAX_PAGES);
+      if (sampled.length) {
+        const byKind = sampled.reduce<Record<string, number>>((a, p) => {
+          a[p.kind] = (a[p.kind] ?? 0) + 1;
+          return a;
+        }, {});
+        console.log(
+          chalk.dim(`  phase 2 sitemap: +${sampled.length} sampled (${Object.entries(byKind).map(([k, n]) => `${n} ${k}`).join(", ")})`),
+        );
+      }
       writeFileSync(
         sitemapPath,
         `${JSON.stringify({ pages: resolvedPages, sitemapUrls: classified }, null, 2)}\n`,
@@ -527,6 +541,81 @@ async function structuralSignatures(page: Page, selectors: string[]): Promise<st
   } catch {
     return selectors.map(() => "");
   }
+}
+
+/** Default extra pages sampled from the sitemap (incl. institutional = "other"). */
+const DEFAULT_SAMPLE = "plp=2,pdp=2,other=3,search=1";
+/** Hard cap on total captured pages, to keep runs bounded. */
+const MAX_PAGES = 15;
+/** URL patterns for real institutional pages (vs deep categories that also → "other"). */
+const INSTITUTIONAL_URL =
+  /(sobre|about|institucional|quem-somos|contato|contact|ajuda|help|faq|blog|trabalhe|careers|carreiras|politica|policy|privacidade|privacy|termos|terms|troca|devolu|garantia|warranty|lojas|stores|imprensa|press|sustentab|acessibilidade|cookies)/i;
+
+/** Parse a `--sample` spec ("plp=2,other=3") into a per-kind count map. */
+export function parseSample(spec: string | undefined): Partial<Record<PageKind, number>> {
+  const out: Partial<Record<PageKind, number>> = {};
+  for (const part of (spec ?? DEFAULT_SAMPLE).split(",")) {
+    const [k, n] = part.split("=").map((s) => s.trim());
+    const count = Number.parseInt(n ?? "", 10);
+    if (k && Number.isFinite(count) && count > 0) out[k as PageKind] = count;
+  }
+  return out;
+}
+
+/** Pick `count` items spread evenly across the list (variety, not first-N cluster). */
+export function pickSpread<T>(items: T[], count: number): T[] {
+  if (items.length <= count) return items;
+  const step = items.length / count;
+  const out: T[] = [];
+  for (let i = 0; i < count; i++) out.push(items[Math.floor(i * step)]!);
+  return out;
+}
+
+/**
+ * Sample additional pages per kind from the classified sitemap — home + a few
+ * PLPs/PDPs + a search page + institutional ("other") pages — skipping any URL
+ * already resolved. This is what captures the institutional pages you'll need
+ * to rebuild.
+ */
+export function sampleFromSitemap(
+  classified: { url: string; kind: PageKind }[],
+  spec: Partial<Record<PageKind, number>>,
+  existing: ResolvedPage[],
+): ResolvedPage[] {
+  const seen = new Set(existing.map((p) => p.url));
+  const byKind = new Map<PageKind, string[]>();
+  for (const c of classified) {
+    if (c.kind === "home" || seen.has(c.url)) continue;
+    const list = byKind.get(c.kind) ?? [];
+    list.push(c.url);
+    byKind.set(c.kind, list);
+  }
+  // Within "other", prefer real institutional pages (about/contact/policies/…)
+  // over deep-category pages that also fall through to "other".
+  const other = byKind.get("other");
+  if (other) {
+    const inst = other.filter((u) => INSTITUTIONAL_URL.test(u));
+    byKind.set("other", [...inst, ...other.filter((u) => !INSTITUTIONAL_URL.test(u))]);
+  }
+
+  const out: ResolvedPage[] = [];
+  for (const [kind, count] of Object.entries(spec) as [PageKind, number][]) {
+    // "other" is ordered institutional-first — take the head, don't spread.
+    const source = byKind.get(kind) ?? [];
+    const chosen = kind === "other" ? source.slice(0, count) : pickSpread(source, count);
+    for (const url of chosen) {
+      if (seen.has(url)) continue;
+      seen.add(url);
+      let path = url;
+      try {
+        path = new URL(url).pathname;
+      } catch {
+        /* keep url */
+      }
+      out.push({ path, url, kind });
+    }
+  }
+  return out;
 }
 
 function kindOf(url: string): PageKind {
