@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-08-17
+
+### Added
+
+* **`parity migrate` HTML visual report + `--open`.** A self-contained `index.html` (theme color swatches + tokens, per-viewport screenshots, brand assets, component table, VTEX IO → FastStore block map) written alongside `index.md`; `--open` launches it in the browser (same `open` package `parity run`/`audit` use). (#207)
+
+### Fixed
+
+* **`migrate` theme primary election skips translucent overlays.** Primary/secondary are now elected from the most frequent non-neutral, **opaque** color across all usages (text/border/bg + interactive) instead of interactive backgrounds only — a translucent hover overlay could otherwise win (e.g. Electrolux came out `rgba(123,138,156,0.24)` instead of the brand navy). (#206)
+
 ## [0.18.0] — 2026-08-17
 
 ### Added
