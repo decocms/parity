@@ -1,22 +1,55 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { componentDirName } from "../../extract/naming.ts";
 import type { MigrationBundle } from "../../types/migrate.ts";
 import type { MigrateExporter } from "./types.ts";
 
+/** How an image path is turned into an `<img src>` value. */
+type Embed = (relPath: string | null | undefined) => string | null;
+
 /**
- * Self-contained `index.html` — a human-friendly visual view of the migration
- * result (theme swatches, per-viewport screenshots, brand assets, component
- * table, VTEX→FastStore map). Inline CSS, no external deps; references the
- * local `screenshots/` and `assets/` files by relative path so it works when
- * opened as a `file://` (via `parity migrate --open`).
+ * Human-friendly visual view of the migration result (theme swatches,
+ * per-viewport screenshots, brand assets, component table, VTEX→FastStore map).
+ * Inline CSS, no external deps.
+ *
+ * Two outputs:
+ *  - `index.html` — references local `screenshots/`/`assets/` by relative path
+ *    (lighter; for local viewing via `--open`).
+ *  - `report.html` — a **single self-contained file** with every image inlined
+ *    as a base64 data URI, so it can be uploaded/shared as one link.
  */
 export const htmlExporter: MigrateExporter = {
   name: "html",
   async export(bundle, outDir) {
-    writeFileSync(join(outDir, "index.html"), renderHtml(bundle), "utf8");
+    // index.html — referenced paths.
+    writeFileSync(join(outDir, "index.html"), renderHtml(bundle, (p) => p ?? null), "utf8");
+    // report.html — everything inlined as data URIs.
+    const inline: Embed = (p) => (p ? dataUri(join(outDir, p)) ?? p : null);
+    writeFileSync(join(outDir, "report.html"), renderHtml(bundle, inline), "utf8");
   },
 };
+
+const MIME: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+};
+
+/** Read a local image and return a base64 data URI, or null if unreadable. */
+function dataUri(absPath: string): string | null {
+  try {
+    const ext = absPath.slice(absPath.lastIndexOf(".")).toLowerCase();
+    const mime = MIME[ext];
+    if (!mime) return null;
+    return `data:${mime};base64,${readFileSync(absPath).toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
 
 function esc(s: string): string {
   return s
@@ -35,10 +68,13 @@ function chips(items: string[]): string {
   return items.length ? items.map((i) => `<code>${esc(i)}</code>`).join(" ") : "<em>none</em>";
 }
 
-function renderHtml(b: MigrationBundle): string {
+function renderHtml(b: MigrationBundle, embed: Embed): string {
   const t = b.theme;
   const shots = (b.screenshots ?? [])
-    .map((s) => `<figure><figcaption>${esc(s.viewport)}</figcaption><a href="${esc(s.path)}" target="_blank"><img src="${esc(s.path)}" alt="${esc(s.viewport)}"></a></figure>`)
+    .map((s) => {
+      const src = embed(s.path);
+      return src ? `<figure><figcaption>${esc(s.viewport)}</figcaption><img src="${esc(src)}" alt="${esc(s.viewport)}"></figure>` : "";
+    })
     .join("");
 
   const componentRows = b.components
@@ -132,14 +168,14 @@ function renderHtml(b: MigrationBundle): string {
   <section class="card">
     <h2>Brand assets</h2>
     <div class="assets">
-      ${b.assets.logo ? `<div><div class="dim">logo</div><img src="${esc(b.assets.logo)}" alt="logo"></div>` : '<span class="dim">no logo</span>'}
-      ${b.assets.favicon ? `<div><div class="dim">favicon</div><img src="${esc(b.assets.favicon)}" alt="favicon" style="max-height:32px"></div>` : ""}
-      <div class="dim">${b.assets.icons.length} icons · ${b.assets.fonts.length} web fonts</div>
+      ${(() => { const s = embed(b.assets.logo); return s ? `<div><div class="dim">logo</div><img src="${esc(s)}" alt="logo"></div>` : '<span class="dim">no logo</span>'; })()}
+      ${(() => { const s = embed(b.assets.favicon); return s ? `<div><div class="dim">favicon</div><img src="${esc(s)}" alt="favicon" style="max-height:32px"></div>` : ""; })()}
+      <div class="dim">${b.assets.icons.length} icons · ${b.assets.fontFiles.length}/${b.assets.fonts.length} web fonts downloaded${b.assets.fontFiles.length ? " → assets/fonts/" : ""}</div>
     </div>
     ${iconRows ? `<table style="margin-top:16px"><tr><th>kind</th><th>id</th><th>count</th></tr>${iconRows}</table>` : ""}
   </section>
 
-  ${b.vtex ? `<section class="card"><h2>VTEX IO → FastStore blocks</h2><p class="dim">${b.vtex.blocks.length} block instances from the store runtime.</p><table><tr><th>VTEX block</th><th>→ FastStore</th><th>confidence</th><th>count</th></tr>${vtexRows}</table></section>` : ""}
+  ${b.vtex ? `<section class="card"><h2>VTEX IO → FastStore blocks</h2><p class="dim">${b.vtex.blocks.length} block instances from the store runtime · ${b.vtex.blocks.filter((x) => x.props).length} carry CMS content (props) → see <code>blocks.json</code>. <b>confidence</b> = how sure the deterministic mapper is (0–1).</p><table><tr><th>VTEX block</th><th>→ FastStore</th><th>confidence</th><th>count</th></tr>${vtexRows}</table></section>` : ""}
 
   <section class="card">
     <h2>Components (${b.components.length})</h2>

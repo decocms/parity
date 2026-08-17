@@ -6,6 +6,7 @@ import {
   isPlausibleFontFamily,
   mergeRawThemeSamples,
   parseRgb,
+  plausibleDuration,
   type RawThemeSamples,
 } from "../../src/migrate/theme.ts";
 
@@ -74,6 +75,18 @@ describe("aggregateTheme", () => {
     expect(t.colors.secondary).toBeNull();
   });
 
+  it("falls back to the most frequent opaque background when body bg is transparent", () => {
+    const t = aggregateTheme(
+      raw({ bodyBackground: "rgba(0, 0, 0, 0)", backgrounds: ["rgb(255, 255, 255)", "rgb(255, 255, 255)"] }),
+    );
+    expect(t.colors.background).toBe("rgb(255, 255, 255)");
+  });
+
+  it("drops implausible motion durations like 91s", () => {
+    const t = aggregateTheme(raw({ motionDurations: ["0.3s", "91s", "250ms"] }));
+    expect(t.motion.durations).toEqual(["0.3s", "250ms"]);
+  });
+
   it("skips translucent overlays; elects an opaque chromatic color as primary", () => {
     // Reproduces Electrolux: a translucent gray overlay is the most frequent
     // interactive bg, but the opaque brand navy (from text/border) must win.
@@ -129,5 +142,11 @@ describe("isNeutral / parseRgb", () => {
   it("isPlausibleFontFamily rejects query-string hacks", () => {
     expect(isPlausibleFontFamily("Inter, sans-serif")).toBe(true);
     expect(isPlausibleFontFamily("small=0em&medium=47em")).toBe(false);
+  });
+  it("plausibleDuration keeps 0<d≤10s, drops 0s and huge values", () => {
+    expect(plausibleDuration("0.2s")).toBe(true);
+    expect(plausibleDuration("300ms")).toBe(true);
+    expect(plausibleDuration("0s")).toBe(false);
+    expect(plausibleDuration("91s")).toBe(false);
   });
 });

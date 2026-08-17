@@ -71,7 +71,7 @@ function renderIndex(bundle: MigrationBundle, dirNames: string[], notes: string[
     md("## VTEX IO → FastStore blocks");
     md("");
     md(
-      `_${bundle.vtex.blocks.length} block instances from the store runtime. \`custom-component\` = build from captured DOM/CSS; see component-map.json._`,
+      `_${bundle.vtex.blocks.length} block instances from the store runtime · ${bundle.vtex.blocks.filter((x) => x.props).length} carry CMS content (props) → \`blocks.json\`. \`confidence\` (0–1) = how sure the deterministic mapper is; \`custom-component\` = build from captured DOM/CSS. See component-map.json._`,
     );
     md("");
     md("| VTEX block | → FastStore | confidence | count |");
@@ -139,7 +139,7 @@ function renderAssets(md: (s: string) => void, assets: MigrationBundle["assets"]
   md(`- **Apple touch icon**: ${assets.appleTouchIcon ? `\`${assets.appleTouchIcon}\`` : "—"}`);
   md(`- **OG image**: ${assets.ogImage ? `\`${assets.ogImage}\`` : "—"}`);
   md(`- **Web app manifest**: ${assets.manifest ? assets.manifest : "—"}`);
-  md(`- **Web fonts**: ${listOrNone(assets.fonts)}`);
+  md(`- **Web fonts**: ${assets.fontFiles.length}/${assets.fonts.length} downloaded${assets.fontFiles.length ? ` → ${listOrNone(assets.fontFiles)}` : ""}`);
   md("");
   if (assets.icons.length) {
     md(`## Icons (${assets.icons.length})`);

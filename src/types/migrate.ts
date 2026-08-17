@@ -96,8 +96,10 @@ export interface SiteAssets {
   ogImage: string | null;
   /** Web app manifest URL (referenced, not downloaded). */
   manifest: string | null;
-  /** Declared/preloaded web-font URLs (referenced, not downloaded). */
+  /** Web-font source URLs (from preload links + `@font-face`). */
   fonts: string[];
+  /** Downloaded web-font files (local paths under the out dir). */
+  fontFiles: string[];
   /** Deduped icon inventory. */
   icons: IconRef[];
 }

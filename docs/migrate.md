@@ -81,7 +81,9 @@ parity-migrate/
     sitemap.json        # Phase 2
     capture.json        # Phase 3 (resume checkpoint)
     manifest.json       # FULL tier: complete MigrationBundle (raw HTML + CSS)
-    index.html          # human visual report (theme swatches, screenshots, tables) — `--open`
+    index.html          # human visual report (references screenshots/ + assets/)
+    report.html         # SAME report, fully self-contained (images inlined) — shareable single file; `--open` opens this
+    assets/fonts/       # downloaded web-font files (.woff2/.woff)
     index.md            # LEAN tier: theme + assets + component map + notes
     MIGRATION_PROMPT.md # LEAN tier: agent instructions (+ target playbook)
     custom-theme.scss   # --target faststore: brand tokens → --fs-* (starter)
@@ -131,7 +133,9 @@ declarative block tree** from `window.__RUNTIME__` (the render-runtime
 serialized into the page) instead of relying only on DOM heuristics. It writes:
 
 - `blocks.json` — every block instance (treePath, block id, resolved component,
-  parent) from the runtime.
+  parent) from the runtime, **including each block's `props` — the CMS content
+  the merchant registered** (banner images, texts, links, shelf config, …). This
+  captures the storefront's actual content, not just its structure.
 - `component-map.json` — each unique block id → a FastStore component with a
   confidence hint (e.g. `product-summary→ProductCard`, `flex-layout.row→
   FlexLayout`, `rich-text→RichText`). Unknown/`custom.*` blocks get

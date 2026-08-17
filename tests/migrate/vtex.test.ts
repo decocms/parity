@@ -21,11 +21,11 @@ describe("blockNameFromTreePath / parentTreePath", () => {
 
 describe("mapVtexBlocksToFastStore", () => {
   const blocks: VtexBlock[] = [
-    { treePath: "store.home/shelf#a", blockName: "shelf", component: null, parent: "store.home" },
-    { treePath: "store.home/shelf#b", blockName: "shelf", component: null, parent: "store.home" },
-    { treePath: "store.home/product-summary#1", blockName: "product-summary", component: null, parent: "store.home/shelf#a" },
-    { treePath: "store.home/flex-layout.row#x", blockName: "flex-layout.row", component: null, parent: "store.home" },
-    { treePath: "store.home/custom.my-banner#1", blockName: "custom.my-banner", component: null, parent: "store.home" },
+    { treePath: "store.home/shelf#a", blockName: "shelf", component: null, parent: "store.home", props: null },
+    { treePath: "store.home/shelf#b", blockName: "shelf", component: null, parent: "store.home", props: null },
+    { treePath: "store.home/product-summary#1", blockName: "product-summary", component: null, parent: "store.home/shelf#a", props: null },
+    { treePath: "store.home/flex-layout.row#x", blockName: "flex-layout.row", component: null, parent: "store.home", props: null },
+    { treePath: "store.home/custom.my-banner#1", blockName: "custom.my-banner", component: null, parent: "store.home", props: { title: "Promo" } },
   ];
 
   it("maps known blocks (incl. dotted head) and ranks by frequency", () => {

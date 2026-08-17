@@ -24,9 +24,9 @@ function bundle(): MigrationBundle {
       motion: { durations: [], easings: [] },
       tokens: { primary: "rgb(4, 30, 80)" },
     },
-    assets: { logo: "assets/logo.svg", logoSource: null, favicon: "assets/favicon.png", faviconSource: null, appleTouchIcon: null, ogImage: null, manifest: null, fonts: [], icons: [{ kind: "svg-use", id: "cart", count: 3 }] },
+    assets: { logo: "assets/logo.png", logoSource: null, favicon: "assets/favicon.png", faviconSource: null, appleTouchIcon: null, ogImage: null, manifest: null, fonts: [], fontFiles: [], icons: [{ kind: "svg-use", id: "cart", count: 3 }] },
     vtex: {
-      blocks: [{ treePath: "store.home/shelf#a", blockName: "shelf", component: null, parent: "store.home" }],
+      blocks: [{ treePath: "store.home/shelf#a", blockName: "shelf", component: null, parent: "store.home", props: { title: "Deals" } }],
       map: [{ vtex: "shelf", faststore: "ProductShelf", confidence: 0.9, strategy: "mapped", count: 1 }],
     },
     pages: [{ url: "https://loja.com/", path: "/", kind: "home", components: [] }],
@@ -54,6 +54,8 @@ describe("htmlExporter", () => {
     expect(html).toContain("ProductShelf");
     expect(html).toContain("buyButton"); // e2e key in component table
     expect(html).toContain("custom-theme.scss"); // faststore link
+    // Self-contained report.html is also written.
+    expect(readFileSync(join(dir, "report.html"), "utf8")).toContain("<!doctype html>");
   });
 
   it("escapes HTML in values", async () => {
