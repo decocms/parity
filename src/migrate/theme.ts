@@ -106,6 +106,17 @@ export function mergeRawThemeSamples(list: RawThemeSamples[]): RawThemeSamples {
   };
 }
 
+/** Keep only plausible transition/animation durations (0 < d ≤ 10s) — drops
+ * bogus values like "91s" that leak from odd elements. */
+export function plausibleDuration(d: string): boolean {
+  const v = d.trim();
+  if (!v || v === "0s" || v === "0ms") return false;
+  const n = Number.parseFloat(v);
+  if (Number.isNaN(n)) return false;
+  const seconds = v.endsWith("ms") ? n / 1000 : n;
+  return seconds > 0 && seconds <= 10;
+}
+
 /** A color is opaque enough to be a brand token (not a translucent overlay). */
 export function isOpaque(color: string): boolean {
   const c = parseRgb(color);
@@ -134,8 +145,13 @@ export function aggregateTheme(raw: RawThemeSamples): ThemeBundle {
   const tokens: Record<string, string> = {};
   if (primary) tokens.primary = primary;
   if (secondary) tokens.secondary = secondary;
-  if (raw.bodyBackground && !TRANSPARENT.has(raw.bodyBackground.trim()))
-    tokens.background = raw.bodyBackground.trim();
+  // Background: body bg if opaque, else the most frequent opaque bg (usually white).
+  const bodyBg = raw.bodyBackground.trim();
+  const background =
+    bodyBg && !TRANSPARENT.has(bodyBg) && isOpaque(bodyBg)
+      ? bodyBg
+      : [...rank(raw.backgrounds).keys()].find((c) => isOpaque(c)) ?? null;
+  if (background) tokens.background = background;
   if (raw.bodyText) tokens.text = raw.bodyText.trim();
 
   const palette: ThemeColor[] = [...paletteRanked.entries()].map(([value, count]) => ({
@@ -161,11 +177,11 @@ export function aggregateTheme(raw: RawThemeSamples): ThemeBundle {
     spacingScale: sortByPx(raw.spacings),
     radii: sortByPx(raw.radii).filter((r) => r !== "0px"),
     shadows: [...new Set(raw.shadows.map((s) => s.trim()))].filter((s) => s && s !== "none"),
-    breakpoints: sortByPx(raw.breakpoints),
+    // Keep the most FREQUENT breakpoints (real tiers recur across many rules);
+    // one-off media widths are noise. Top 14, sorted ascending.
+    breakpoints: sortByPx([...rank(raw.breakpoints).keys()].slice(0, 14)),
     motion: {
-      durations: [...new Set(raw.motionDurations.map((d) => d.trim()))].filter(
-        (d) => d && d !== "0s" && d !== "0ms",
-      ),
+      durations: [...new Set(raw.motionDurations.map((d) => d.trim()))].filter(plausibleDuration),
       easings: [...new Set(raw.motionEasings.map((e) => e.trim()))].filter(
         (e) => e && e !== "ease" && e !== "linear",
       ),

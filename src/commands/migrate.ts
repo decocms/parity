@@ -155,6 +155,14 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
         try {
           await page.goto(opts.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
           await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => undefined);
+          // Scroll to trigger lazy sections (footer etc.) BEFORE the screenshot
+          // + theme scrape, so below-the-fold content isn't blank.
+          await Promise.race([stabilizeCarousels(page).catch(() => undefined), sleep(3_000)]);
+          await Promise.race([scrollFullPage(page, 30_000).catch(() => undefined), sleep(32_000)]);
+          await Promise.race([
+            waitForSkeletonsToResolve(page, 5_000).catch(() => undefined),
+            sleep(5_000),
+          ]);
           samples.push(await scrapeThemeSamples(page));
           const shot = resolve(runDir, "screenshots", `${vp}.png`);
           await page
@@ -167,6 +175,22 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
             const fetchBytes = async (url: string) =>
               (await browserFetchBytes(page, url)) ?? (await nodeFetchBytes(url));
             assetsResolved = await downloadSiteAssets(rawAssets, runDir, fetchBytes);
+            // Logo: screenshot the rendered element (robust against sprite
+            // `<use>` logos that save blank as markup). `collectSiteAssets`
+            // tagged it with `data-parity-logo`.
+            if (rawAssets.logo) {
+              const logoPng = resolve(runDir, "assets", "logo.png");
+              const ok = await page
+                .locator("[data-parity-logo]")
+                .first()
+                .screenshot({ path: logoPng, timeout: 8_000 })
+                .then(() => true)
+                .catch(() => false);
+              if (ok) {
+                assetsResolved.logo = "assets/logo.png";
+                assetsResolved.logoSource = assetsResolved.logoSource ?? "screenshot";
+              }
+            }
             // VTEX IO block tree — the store's real declarative structure.
             vtexBlocks = await readVtexBlockTree(page);
           }
@@ -289,7 +313,8 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
     }
     printResults(runDir, bundle);
     if (opts.open && format !== "json") {
-      await open(resolve(runDir, "index.html")).catch(() => undefined);
+      // report.html is fully self-contained (images inlined) — always renders.
+      await open(resolve(runDir, "report.html")).catch(() => undefined);
     }
     return 0;
   } finally {
@@ -486,11 +511,12 @@ function printResults(runDir: string, bundle: MigrationBundle): void {
   console.log(chalk.dim(`  platform: ${bundle.platform}${bundle.target ? ` → ${bundle.target}` : ""}`));
   console.log(chalk.dim(`  viewports:${(bundle.viewports ?? [bundle.viewport]).join(", ")}`));
   console.log(chalk.dim(`  theme:    primary=${bundle.theme.colors.primary ?? "—"} text=${bundle.theme.colors.text ?? "—"}`));
-  console.log(chalk.dim(`  assets:   logo=${bundle.assets.logo ? "✓" : "✗"} favicon=${bundle.assets.favicon ? "✓" : "✗"} icons=${bundle.assets.icons.length}`));
+  console.log(chalk.dim(`  assets:   logo=${bundle.assets.logo ? "✓" : "✗"} favicon=${bundle.assets.favicon ? "✓" : "✗"} icons=${bundle.assets.icons.length} fonts=${bundle.assets.fontFiles.length}`));
   if (bundle.vtex) {
     const mapped = bundle.vtex.map.filter((m) => m.strategy === "mapped").length;
+    const withContent = bundle.vtex.blocks.filter((x) => x.props).length;
     console.log(
-      chalk.dim(`  vtex io:  ${bundle.vtex.blocks.length} blocks · ${mapped}/${bundle.vtex.map.length} block types mapped to FastStore`),
+      chalk.dim(`  vtex io:  ${bundle.vtex.blocks.length} blocks (${withContent} with CMS content) · ${mapped}/${bundle.vtex.map.length} block types mapped to FastStore`),
     );
   }
   console.log(chalk.dim(`  pages:    ${bundle.pages.map((p) => p.kind).join(", ") || "—"}`));

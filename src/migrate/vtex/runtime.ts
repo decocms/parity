@@ -24,6 +24,13 @@ export interface VtexBlock {
   component: string | null;
   /** Parent treePath (the treePath minus its last segment), or null at the root. */
   parent: string | null;
+  /**
+   * The block's configured props — i.e. the CONTENT the merchant registered in
+   * the CMS (banner images, texts, links, shelf config, …). Only JSON-safe
+   * values are kept; large blobs are the reason blocks.json is the full tier.
+   * `null` when the block has no props or they couldn't be serialized.
+   */
+  props: Record<string, unknown> | null;
 }
 
 /**
@@ -44,19 +51,28 @@ export function parentTreePath(treePath: string): string | null {
 }
 
 export async function readVtexBlockTree(page: Page): Promise<VtexBlock[] | null> {
-  let paths: { treePath: string; component: string | null }[] | null;
+  let paths: { treePath: string; component: string | null; props: Record<string, unknown> | null }[] | null;
   try {
     paths = await page.evaluate(() => {
       const rt = (window as unknown as { __RUNTIME__?: { extensions?: Record<string, unknown> } })
         .__RUNTIME__;
       if (!rt || !rt.extensions || typeof rt.extensions !== "object") return null;
-      return Object.entries(rt.extensions).map(([treePath, ext]) => ({
-        treePath,
-        component:
-          ext && typeof ext === "object" && "component" in ext
-            ? ((ext as { component?: unknown }).component as string | null) ?? null
-            : null,
-      }));
+      return Object.entries(rt.extensions).map(([treePath, ext]) => {
+        const e = ext && typeof ext === "object" ? (ext as { component?: unknown; props?: unknown }) : {};
+        // props = the merchant's registered CONTENT. Keep only a JSON-safe copy
+        // and drop children/context noise; skip if it can't be serialized.
+        let props: Record<string, unknown> | null = null;
+        if (e.props && typeof e.props === "object") {
+          try {
+            const clean = JSON.parse(JSON.stringify(e.props)) as Record<string, unknown>;
+            for (const k of ["children", "__context", "context"]) delete clean[k];
+            props = Object.keys(clean).length ? clean : null;
+          } catch {
+            props = null;
+          }
+        }
+        return { treePath, component: (e.component as string | null) ?? null, props };
+      });
     });
   } catch {
     return null;
@@ -68,6 +84,7 @@ export async function readVtexBlockTree(page: Page): Promise<VtexBlock[] | null>
       blockName: blockNameFromTreePath(p.treePath),
       component: p.component,
       parent: parentTreePath(p.treePath),
+      props: p.props,
     }))
     // Drop `$`-prefixed slots (before/after/around layout hooks, e.g.
     // `$before_header.full`) — they're layout plumbing, not components.

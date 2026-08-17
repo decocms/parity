@@ -54,10 +54,29 @@ export async function collectSiteAssets(page: Page): Promise<RawSiteAssets> {
     const ogImage = abs(
       document.querySelector("meta[property='og:image']")?.getAttribute("content"),
     );
-    // Preloaded/declared web fonts.
-    const fonts = Array.from(document.querySelectorAll("link[rel='preload'][as='font']"))
-      .map((l) => abs(l.getAttribute("href")))
-      .filter((u): u is string => Boolean(u));
+    // Web fonts: preloaded links + `@font-face { src: url(...) }` in stylesheets.
+    const fontUrls = new Set<string>();
+    for (const l of Array.from(document.querySelectorAll("link[rel='preload'][as='font']"))) {
+      const u = abs(l.getAttribute("href"));
+      if (u) fontUrls.add(u);
+    }
+    for (const sheet of Array.from(document.styleSheets)) {
+      let rules: CSSRuleList;
+      try {
+        rules = (sheet as CSSStyleSheet).cssRules;
+      } catch {
+        continue; // cross-origin sheet
+      }
+      for (const rule of Array.from(rules)) {
+        if (rule.constructor.name !== "CSSFontFaceRule") continue;
+        const src = (rule as CSSFontFaceRule).style.getPropertyValue("src");
+        for (const m of src.matchAll(/url\((['"]?)([^'")]+)\1\)/gi)) {
+          const u = abs(m[2]);
+          if (u && /\.(woff2?|ttf|otf)(\?|$)/i.test(u)) fontUrls.add(u);
+        }
+      }
+    }
+    const fonts = [...fontUrls].slice(0, 20);
 
     // Logo: an <img>/<svg> in the header/banner whose alt/class/href hints logo,
     // else the header's home link image, else the first header image.
@@ -71,6 +90,9 @@ export async function collectSiteAssets(page: Page): Promise<RawSiteAssets> {
       });
       const el = hinted ?? header.querySelector("a[href='/'] img, a[href='/'] svg") ?? header.querySelector("img, svg");
       if (el) {
+        // Mark it so the command can screenshot the rendered element — robust
+        // against sprite `<use>` logos (which are blank when saved as markup).
+        el.setAttribute("data-parity-logo", "1");
         if (el.tagName.toLowerCase() === "img") {
           const url = abs(el.getAttribute("src"));
           if (url) logo = { type: "img", url };
@@ -208,6 +230,18 @@ export async function downloadSiteAssets(
     raw.ogImage ? downloadTo(raw.ogImage, dir, "og-image", fetchBytes) : Promise.resolve(null),
   ]);
 
+  // Download web-font files into assets/fonts/ so they ship with the migration.
+  const fontsDir = join(dir, "fonts");
+  mkdirSync(fontsDir, { recursive: true });
+  const fontFiles: string[] = [];
+  for (const [i, url] of raw.fonts.entries()) {
+    const got = await fetchBytes(url);
+    if (!got) continue;
+    const base = safeFontName(url, i);
+    writeFileSync(join(fontsDir, base), got.buf);
+    fontFiles.push(`assets/fonts/${base}`);
+  }
+
   return {
     logo,
     logoSource,
@@ -217,6 +251,19 @@ export async function downloadSiteAssets(
     ogImage,
     manifest: raw.manifest,
     fonts: raw.fonts,
+    fontFiles,
     icons: raw.icons,
   };
+}
+
+/** Filename for a downloaded font: the URL basename if sane, else `font-N.<ext>`. */
+function safeFontName(url: string, i: number): string {
+  try {
+    const base = new URL(url).pathname.split("/").pop() ?? "";
+    if (/^[\w.-]+\.(woff2?|ttf|otf)$/i.test(base)) return base;
+    const ext = base.match(/\.(woff2?|ttf|otf)$/i)?.[0] ?? ".woff2";
+    return `font-${i}${ext}`;
+  } catch {
+    return `font-${i}.woff2`;
+  }
 }
