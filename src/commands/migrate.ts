@@ -140,14 +140,15 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
     let platform: Platform;
     let assets: SiteAssets;
     let screenshots: { viewport: string; path: string }[];
+    // VTEX blocks + content are produced in Phase 3 (read per captured page).
     let vtexBlocks: VtexBlock[] | null = null;
+    let contentMap: Record<string, string> = {};
     if (!opts.refresh && existsSync(themePath) && existsSync(assetsPath)) {
       theme = readJson<ThemeBundle>(themePath)!;
       const meta = readJson<Phase1Meta>(assetsPath)!;
       platform = meta.platform;
       assets = meta.assets;
       screenshots = meta.screenshots ?? [];
-      if (existsSync(blocksPath)) vtexBlocks = readJson<VtexBlock[]>(blocksPath);
       console.log(chalk.dim("  phase 1 theme+assets: cached"));
     } else {
       console.log(chalk.dim(`  phase 1 theme+assets: scraping (${viewports.join(", ")})…`));
@@ -199,34 +200,7 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
                 assetsResolved.logoSource = assetsResolved.logoSource ?? "screenshot";
               }
             }
-            // VTEX IO block tree — the store's real declarative structure.
-            vtexBlocks = await readVtexBlockTree(page);
-            if (vtexBlocks) {
-              // Content images in block props are often site-relative pointers
-              // (/img/x, /arquivos/ids/…). Resolve them to the real absolute
-              // content URL in blocks.json, and ALSO download them locally with
-              // a url→file map (content-assets.json).
-              const refMap = collectImageRefs(vtexBlocks, opts.url);
-              vtexBlocks = rewriteBlockUrls(vtexBlocks, refMap);
-              // CMS props images + product/catalog images from the Apollo state.
-              const stateImages = await readVtexStateImages(page);
-              const absUrls = [...new Set([...Object.values(refMap), ...stateImages])];
-              const { map, downloaded, skipped } = await downloadContentImages(
-                absUrls,
-                runDir,
-                fetchBytes,
-              );
-              if (Object.keys(map).length)
-                writeFileSync(
-                  resolve(runDir, "content-assets.json"),
-                  `${JSON.stringify(map, null, 2)}\n`,
-                  "utf8",
-                );
-              if (absUrls.length)
-                console.log(
-                  chalk.dim(`  vtex content: ${absUrls.length} image URLs (${Object.keys(refMap).length} CMS + ${stateImages.length} catalog) · ${downloaded} downloaded${skipped ? ` (${skipped} over cap skipped)` : ""}`),
-                );
-            }
+            // (VTEX block tree + content are now read PER PAGE in Phase 3.)
           }
         } finally {
           await page.close().catch(() => undefined);
@@ -242,10 +216,6 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
         `${JSON.stringify({ platform, assets, screenshots } satisfies Phase1Meta, null, 2)}\n`,
         "utf8",
       );
-      if (vtexBlocks) {
-        writeFileSync(blocksPath, `${JSON.stringify(vtexBlocks, null, 2)}\n`, "utf8");
-        console.log(chalk.dim(`  vtex io: ${vtexBlocks.length} blocks read from runtime`));
-      }
     }
 
     // ── Phase 2: SITEMAP ────────────────────────────────────────────
@@ -299,20 +269,42 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
     const capturePath = resolve(runDir, "capture.json");
     let pages: MigratedPage[];
     let components: MigratedComponent[];
+    type CaptureCache = {
+      pages: MigratedPage[];
+      components: MigratedComponent[];
+      vtexBlocks: VtexBlock[] | null;
+      contentMap: Record<string, string>;
+    };
     if (!opts.refresh && existsSync(capturePath)) {
-      const cached = readJson<{ pages: MigratedPage[]; components: MigratedComponent[] }>(capturePath)!;
+      const cached = readJson<CaptureCache>(capturePath)!;
       pages = cached.pages;
       components = cached.components;
+      vtexBlocks = cached.vtexBlocks ?? null;
+      contentMap = cached.contentMap ?? {};
       console.log(chalk.dim(`  phase 3 components: cached (${components.length})`));
     } else {
       console.log(chalk.dim("  phase 3 components: capturing…"));
-      ({ pages, components } = await capturePages(browser, primaryViewport, resolvedPages, theme, {
-        allowlist,
-        llm: !opts.noLlm,
-        runDir,
-      }));
-      writeFileSync(capturePath, `${JSON.stringify({ pages, components }, null, 2)}\n`, "utf8");
+      ({ pages, components, vtexBlocks, contentMap } = await capturePages(
+        browser,
+        primaryViewport,
+        resolvedPages,
+        theme,
+        { allowlist, llm: !opts.noLlm, runDir, baseUrl: opts.url },
+      ));
+      writeFileSync(
+        capturePath,
+        `${JSON.stringify({ pages, components, vtexBlocks, contentMap } satisfies CaptureCache, null, 2)}\n`,
+        "utf8",
+      );
     }
+    // Persist the VTEX artifacts (block tree + content map) after capture.
+    if (vtexBlocks) writeFileSync(blocksPath, `${JSON.stringify(vtexBlocks, null, 2)}\n`, "utf8");
+    if (Object.keys(contentMap).length)
+      writeFileSync(
+        resolve(runDir, "content-assets.json"),
+        `${JSON.stringify(contentMap, null, 2)}\n`,
+        "utf8",
+      );
 
     const bundle: MigrationBundle = {
       url: opts.url,
@@ -368,16 +360,28 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
   }
 }
 
+/** Global cap on content images downloaded across all captured pages. */
+const CONTENT_IMAGE_BUDGET = 200;
+
 async function capturePages(
   browser: Awaited<ReturnType<typeof launchBrowser>>,
   viewport: Viewport,
   resolvedPages: ResolvedPage[],
   theme: ThemeBundle,
-  cfg: { allowlist: Set<string> | null; llm: boolean; runDir: string },
-): Promise<{ pages: MigratedPage[]; components: MigratedComponent[] }> {
+  cfg: { allowlist: Set<string> | null; llm: boolean; runDir: string; baseUrl: string },
+): Promise<{
+  pages: MigratedPage[];
+  components: MigratedComponent[];
+  vtexBlocks: VtexBlock[] | null;
+  contentMap: Record<string, string>;
+}> {
   const pages: MigratedPage[] = [];
   const components: MigratedComponent[] = [];
   const seenGlobalRoles = new Set<string>();
+  // VTEX block tree + content, merged across ALL captured pages (dedupe by
+  // treePath) — so institutional/PLP/PDP content is captured, not just home's.
+  const blocksByPath = new Map<string, VtexBlock>();
+  const contentMap: Record<string, string> = {};
 
   for (const target of resolvedPages) {
     const ctx = await newContext(browser, { viewport });
@@ -433,12 +437,37 @@ async function capturePages(
         if (!global) pageComponents.push(migrated);
       }
       pages.push({ url: target.url, path: target.path, kind: target.kind, components: pageComponents });
+
+      // VTEX IO block tree + content for THIS page (merged across pages).
+      const pageBlocks = await readVtexBlockTree(page);
+      if (pageBlocks) {
+        const refMap = collectImageRefs(pageBlocks, cfg.baseUrl);
+        for (const b of rewriteBlockUrls(pageBlocks, refMap)) {
+          if (!blocksByPath.has(b.treePath)) blocksByPath.set(b.treePath, b);
+        }
+        if (Object.keys(contentMap).length < CONTENT_IMAGE_BUDGET) {
+          const stateImages = await readVtexStateImages(page);
+          const fetchBytes = async (url: string) =>
+            (await browserFetchBytes(page, url)) ?? (await nodeFetchBytes(url));
+          const remaining = CONTENT_IMAGE_BUDGET - Object.keys(contentMap).length;
+          const absUrls = [...new Set([...Object.values(refMap), ...stateImages])]
+            .filter((u) => !(u in contentMap))
+            .slice(0, remaining);
+          const { map } = await downloadContentImages(absUrls, cfg.runDir, fetchBytes);
+          Object.assign(contentMap, map);
+        }
+      }
     } finally {
       await page.close().catch(() => undefined);
       await ctx.close().catch(() => undefined);
     }
   }
-  return { pages, components };
+  return {
+    pages,
+    components,
+    vtexBlocks: blocksByPath.size ? [...blocksByPath.values()] : null,
+    contentMap,
+  };
 }
 
 async function resolvePages(
