@@ -27,6 +27,12 @@ export interface RawThemeSamples {
   shadows: string[];
   /** gap + single-value padding values, for the spacing scale. */
   spacings: string[];
+  /** Breakpoint widths (px) parsed from @media rules. */
+  breakpoints: string[];
+  /** transition/animation durations across sampled elements. */
+  motionDurations: string[];
+  /** transition/animation timing functions. */
+  motionEasings: string[];
 }
 
 const TRANSPARENT = new Set(["transparent", "rgba(0, 0, 0, 0)", "rgba(0,0,0,0)"]);
@@ -113,6 +119,15 @@ export function aggregateTheme(raw: RawThemeSamples): ThemeBundle {
     spacingScale: sortByPx(raw.spacings),
     radii: sortByPx(raw.radii).filter((r) => r !== "0px"),
     shadows: [...new Set(raw.shadows.map((s) => s.trim()))].filter((s) => s && s !== "none"),
+    breakpoints: sortByPx(raw.breakpoints),
+    motion: {
+      durations: [...new Set(raw.motionDurations.map((d) => d.trim()))].filter(
+        (d) => d && d !== "0s" && d !== "0ms",
+      ),
+      easings: [...new Set(raw.motionEasings.map((e) => e.trim()))].filter(
+        (e) => e && e !== "ease" && e !== "linear",
+      ),
+    },
     tokens,
   };
 }
@@ -130,6 +145,8 @@ export async function scrapeThemeSamples(page: Page): Promise<RawThemeSamples> {
     const radii: string[] = [];
     const shadows: string[] = [];
     const spacings: string[] = [];
+    const motionDurations: string[] = [];
+    const motionEasings: string[] = [];
     const transparent = new Set(["transparent", "rgba(0, 0, 0, 0)"]);
 
     for (const el of els) {
@@ -145,10 +162,34 @@ export async function scrapeThemeSamples(page: Page): Promise<RawThemeSamples> {
       const pad = cs.padding.split(/\s+/);
       if (pad.length === 1 && pad[0] && pad[0] !== "0px") spacings.push(pad[0]);
 
+      for (const d of cs.transitionDuration.split(",")) if (d.trim()) motionDurations.push(d.trim());
+      for (const d of cs.animationDuration.split(",")) if (d.trim()) motionDurations.push(d.trim());
+      for (const e of cs.transitionTimingFunction.split(","))
+        if (e.trim()) motionEasings.push(e.trim());
+
       const tag = el.tagName.toLowerCase();
       const role = el.getAttribute("role");
       const isInteractive = tag === "button" || tag === "a" || role === "button";
       if (isInteractive && !transparent.has(bg)) interactiveBackgrounds.push(bg);
+    }
+
+    // Breakpoints: parse min/max-width px from @media rules across stylesheets.
+    const breakpoints: string[] = [];
+    for (const sheet of Array.from(document.styleSheets)) {
+      let rules: CSSRuleList;
+      try {
+        rules = (sheet as CSSStyleSheet).cssRules;
+      } catch {
+        continue;
+      }
+      for (const rule of Array.from(rules)) {
+        const media = (rule as CSSMediaRule).media?.mediaText;
+        if (!media) continue;
+        const re = /(?:min|max)-width:\s*(\d+(?:\.\d+)?)px/g;
+        let m: RegExpExecArray | null;
+        // biome-ignore lint/suspicious/noAssignInExpressions: standard regex exec loop.
+        while ((m = re.exec(media)) !== null) breakpoints.push(`${m[1]}px`);
+      }
     }
 
     const body = getComputedStyle(document.body);
@@ -164,6 +205,9 @@ export async function scrapeThemeSamples(page: Page): Promise<RawThemeSamples> {
       radii,
       shadows,
       spacings,
+      breakpoints,
+      motionDurations,
+      motionEasings,
     };
   });
 }

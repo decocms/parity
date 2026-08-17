@@ -46,6 +46,15 @@ export interface ThemeBundle {
   radii: string[];
   /** Distinct box-shadow values. */
   shadows: string[];
+  /** Distinct breakpoint widths (px) from @media rules, ascending. */
+  breakpoints: string[];
+  /** Deterministic motion tokens declared on the page. */
+  motion: {
+    /** Distinct transition/animation durations, e.g. ["0.2s","300ms"]. */
+    durations: string[];
+    /** Distinct timing functions, e.g. ["ease","cubic-bezier(...)"]. */
+    easings: string[];
+  };
   /**
    * Flat token map ready to drop into a target theme config
    * (e.g. `{ "--color-primary": "rgb(228, 0, 43)" }`). Token → value.

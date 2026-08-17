@@ -101,6 +101,8 @@ function renderTheme(md: (s: string) => void, theme: ThemeBundle): void {
   md(`- **Font sizes**: ${listOrNone(theme.typography.sizeScale)}`);
   md(`- **Spacing scale**: ${listOrNone(theme.spacingScale)}`);
   md(`- **Radii**: ${listOrNone(theme.radii)}`);
+  md(`- **Breakpoints**: ${listOrNone(theme.breakpoints)}`);
+  md(`- **Motion**: durations ${listOrNone(theme.motion.durations)} · easings ${listOrNone(theme.motion.easings)}`);
   md(`- **Shadows**: ${theme.shadows.length}`);
   md("");
 }

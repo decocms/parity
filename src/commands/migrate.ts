@@ -24,6 +24,7 @@ import { isGlobalRole, planComponentDedup, toMigratedComponent } from "../migrat
 import { jsonExporter } from "../migrate/exporters/json.ts";
 import { markdownExporter } from "../migrate/exporters/markdown.ts";
 import { buildMigrationPrompt } from "../migrate/prompt.ts";
+import { buildFastStoreTheme } from "../migrate/targets/faststore.ts";
 import { getTargetPlaybook, TARGET_NAMES } from "../migrate/targets/index.ts";
 import { aggregateTheme, scrapeThemeSamples } from "../migrate/theme.ts";
 import { captureInteractions } from "../migrate/interactions.ts";
@@ -212,6 +213,10 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
         buildMigrationPrompt(bundle, playbook),
         "utf8",
       );
+    }
+    // FastStore-specific starter theme (deterministic token mapping).
+    if (opts.target === "faststore") {
+      writeFileSync(resolve(runDir, "custom-theme.scss"), buildFastStoreTheme(theme), "utf8");
     }
 
     if (opts.json) {

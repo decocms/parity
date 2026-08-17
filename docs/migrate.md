@@ -81,6 +81,7 @@ parity-migrate/
     manifest.json       # FULL tier: complete MigrationBundle (raw HTML + CSS)
     index.md            # LEAN tier: theme + assets + component map + notes
     MIGRATION_PROMPT.md # LEAN tier: agent instructions (+ target playbook)
+    custom-theme.scss   # --target faststore: brand tokens → --fs-* (starter)
     components/
       header-3/
         README.md       # LEAN: Tailwind, interactions, e2e selectors, compacted HTML
