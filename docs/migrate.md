@@ -135,7 +135,12 @@ serialized into the page) instead of relying only on DOM heuristics. It writes:
 - `blocks.json` — every block instance (treePath, block id, resolved component,
   parent) from the runtime, **including each block's `props` — the CMS content
   the merchant registered** (banner images, texts, links, shelf config, …). This
-  captures the storefront's actual content, not just its structure.
+  captures the storefront's actual content, not just its structure. Image
+  references in props are **resolved to absolute URLs** (VTEX stores use
+  site-relative pointers like `/arquivos/ids/…` and `/img/…`).
+- `content-assets.json` + `assets/content/` — the content images from block
+  props, **downloaded** locally with a `url → local file` map (so the migration
+  ships the store's actual content imagery).
 - `component-map.json` — each unique block id → a FastStore component with a
   confidence hint (e.g. `product-summary→ProductCard`, `flex-layout.row→
   FlexLayout`, `rich-text→RichText`). Unknown/`custom.*` blocks get

@@ -50,6 +50,32 @@ export function parentTreePath(treePath: string): string | null {
   return i > 0 ? treePath.slice(0, i) : null;
 }
 
+/**
+ * Image URLs from the VTEX Apollo cache (`window.__STATE__`) — the product /
+ * catalog imagery that isn't in block props (products, search results). Scans
+ * the serialized state for vtexassets/vteximg image URLs. Returns [] when
+ * there's no state.
+ */
+export async function readVtexStateImages(page: Page): Promise<string[]> {
+  try {
+    return await page.evaluate(() => {
+      const w = window as unknown as { __STATE__?: unknown; __APOLLO_STATE__?: unknown };
+      const st = w.__STATE__ ?? w.__APOLLO_STATE__;
+      if (!st) return [];
+      let s: string;
+      try {
+        s = JSON.stringify(st);
+      } catch {
+        return [];
+      }
+      const re = /https?:\/\/[^"'\\ ]*(?:vtexassets\.com|vteximg\.com\.br)[^"'\\ ]*\.(?:jpe?g|png|webp|gif|avif)/gi;
+      return [...new Set(s.match(re) ?? [])].slice(0, 300);
+    });
+  } catch {
+    return [];
+  }
+}
+
 export async function readVtexBlockTree(page: Page): Promise<VtexBlock[] | null> {
   let paths: { treePath: string; component: string | null; props: Record<string, unknown> | null }[] | null;
   try {
