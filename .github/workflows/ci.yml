@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -24,7 +26,12 @@ jobs:
       - name: Lint
         run: bun run lint
 
-      - name: Test
+      - name: Test (changed only)
+        if: github.event_name == 'pull_request'
+        run: bunx vitest run --changed origin/${{ github.base_ref }}
+
+      - name: Test (all)
+        if: github.event_name != 'pull_request'
         run: bun run test
 
       - name: Dead code (informational)
