@@ -14,6 +14,7 @@ import { htmlCommand } from "./commands/html.ts";
 import { journeyCommand } from "./commands/journey.ts";
 import { learnedStats, learnedValidate } from "./commands/learned.ts";
 import { listCommand, listModulesCommand } from "./commands/list.ts";
+import { migrateCommand } from "./commands/migrate.ts";
 import { prCommand } from "./commands/pr.ts";
 import { promptCommand } from "./commands/prompt.ts";
 import { reportCommand } from "./commands/report.ts";
@@ -27,7 +28,7 @@ const program = new Command();
 
 program
   .name("parity")
-  .description("E2E parity validator for Fresh -> TanStack site migrations")
+  .description("E2E parity validator + migration capture for site migrations")
   .version(getPackageVersion());
 
 program
@@ -723,6 +724,47 @@ program
         viewport: opts.viewport,
         format: opts.format,
         outDir: opts.out,
+        noLlm: !opts.llm,
+        json: opts.json,
+      }),
+    );
+  });
+
+program
+  .command("migrate")
+  .description(
+    "Single-site, phased migration capture (theme → sitemap → components). No prod×cand comparison — produces a target-agnostic, token-lean bundle + prompt for a migration agent: site theme (colors/typography/spacing as Tailwind tokens), classified pages, and per-component detail (suggested Tailwind classes, interaction hints, e2e selectors). Works whether or not the source code exists. Pass --target faststore to append a target playbook. Resumable: re-runs skip a completed phase unless --refresh.",
+  )
+  .requiredOption("--url <url>", "Site to migrate from")
+  .option(
+    "--pages <list>",
+    'Comma-separated pages: literal paths/URLs, and/or "category-auto"/"pdp-auto". Default: "/,category-auto,pdp-auto" (home + a PLP + a PDP).',
+  )
+  .option(
+    "--components <list>",
+    "Comma-separated role allowlist, e.g. header,footer,nav,shelf,minicart. Default: all detected.",
+  )
+  .option("--target <name>", "Target playbook to append to the prompt (e.g. faststore)")
+  .option("--viewport <viewport>", "mobile | desktop | tablet", "mobile")
+  .option("--format <fmt>", "md | json | both", "both")
+  .option("--out <dir>", "Output directory (stable per host, for resume)", "./parity-migrate")
+  .option("--refresh", "Re-run all phases even if cached artifacts exist", false)
+  .option(
+    "--no-llm",
+    "Skip the optional LLM component-relabeling pass (heuristic detection always runs regardless).",
+  )
+  .option("--json", "Emit one-line JSON instead of pretty text", false)
+  .action(async (opts) => {
+    process.exit(
+      await migrateCommand({
+        url: opts.url,
+        pages: opts.pages,
+        components: opts.components,
+        target: opts.target,
+        viewport: opts.viewport,
+        format: opts.format,
+        outDir: opts.out,
+        refresh: opts.refresh,
         noLlm: !opts.llm,
         json: opts.json,
       }),

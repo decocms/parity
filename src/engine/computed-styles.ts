@@ -44,9 +44,15 @@ export const SECTION_STYLE_KEYS: ReadonlyArray<string> = [
   // Typography (just enough to catch the obvious).
   "font-size",
   "font-weight",
+  "line-height",
+  "letter-spacing",
+  "text-transform",
   "color",
   "background-color",
   "background-image",
+  // Surface — needed for a faithful Tailwind translation (parity migrate).
+  "border-radius",
+  "box-shadow",
   // Layout primitives we use a lot in Deco sections.
   "flex-direction",
   "justify-content",
