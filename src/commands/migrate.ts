@@ -27,6 +27,8 @@ import { buildMigrationPrompt } from "../migrate/prompt.ts";
 import { buildFastStoreTheme } from "../migrate/targets/faststore.ts";
 import { getTargetPlaybook, TARGET_NAMES } from "../migrate/targets/index.ts";
 import { aggregateTheme, mergeRawThemeSamples, scrapeThemeSamples } from "../migrate/theme.ts";
+import { mapVtexBlocksToFastStore } from "../migrate/vtex/faststore-map.ts";
+import { type VtexBlock, readVtexBlockTree } from "../migrate/vtex/runtime.ts";
 import { captureInteractions } from "../migrate/interactions.ts";
 import type {
   MigratedComponent,
@@ -121,16 +123,19 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
       assets: SiteAssets;
       screenshots: { viewport: string; path: string }[];
     };
+    const blocksPath = resolve(runDir, "blocks.json");
     let theme: ThemeBundle;
     let platform: Platform;
     let assets: SiteAssets;
     let screenshots: { viewport: string; path: string }[];
+    let vtexBlocks: VtexBlock[] | null = null;
     if (!opts.refresh && existsSync(themePath) && existsSync(assetsPath)) {
       theme = readJson<ThemeBundle>(themePath)!;
       const meta = readJson<Phase1Meta>(assetsPath)!;
       platform = meta.platform;
       assets = meta.assets;
       screenshots = meta.screenshots ?? [];
+      if (existsSync(blocksPath)) vtexBlocks = readJson<VtexBlock[]>(blocksPath);
       console.log(chalk.dim("  phase 1 theme+assets: cached"));
     } else {
       console.log(chalk.dim(`  phase 1 theme+assets: scraping (${viewports.join(", ")})…`));
@@ -158,6 +163,8 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
             const fetchBytes = async (url: string) =>
               (await browserFetchBytes(page, url)) ?? (await nodeFetchBytes(url));
             assetsResolved = await downloadSiteAssets(rawAssets, runDir, fetchBytes);
+            // VTEX IO block tree — the store's real declarative structure.
+            vtexBlocks = await readVtexBlockTree(page);
           }
         } finally {
           await page.close().catch(() => undefined);
@@ -173,6 +180,10 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
         `${JSON.stringify({ platform, assets, screenshots } satisfies Phase1Meta, null, 2)}\n`,
         "utf8",
       );
+      if (vtexBlocks) {
+        writeFileSync(blocksPath, `${JSON.stringify(vtexBlocks, null, 2)}\n`, "utf8");
+        console.log(chalk.dim(`  vtex io: ${vtexBlocks.length} blocks read from runtime`));
+      }
     }
 
     // ── Phase 2: SITEMAP ────────────────────────────────────────────
@@ -239,6 +250,7 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
       target: opts.target,
       theme,
       assets,
+      vtex: vtexBlocks ? { blocks: vtexBlocks, map: mapVtexBlocksToFastStore(vtexBlocks) } : undefined,
       pages,
       components,
     };
@@ -256,6 +268,14 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
     // FastStore-specific starter theme (deterministic token mapping).
     if (opts.target === "faststore") {
       writeFileSync(resolve(runDir, "custom-theme.scss"), buildFastStoreTheme(theme), "utf8");
+    }
+    // VTEX IO → FastStore component map (when the block tree was read).
+    if (bundle.vtex) {
+      writeFileSync(
+        resolve(runDir, "component-map.json"),
+        `${JSON.stringify(bundle.vtex.map, null, 2)}\n`,
+        "utf8",
+      );
     }
 
     if (opts.json) {
@@ -458,6 +478,12 @@ function printResults(runDir: string, bundle: MigrationBundle): void {
   console.log(chalk.dim(`  viewports:${(bundle.viewports ?? [bundle.viewport]).join(", ")}`));
   console.log(chalk.dim(`  theme:    primary=${bundle.theme.colors.primary ?? "—"} text=${bundle.theme.colors.text ?? "—"}`));
   console.log(chalk.dim(`  assets:   logo=${bundle.assets.logo ? "✓" : "✗"} favicon=${bundle.assets.favicon ? "✓" : "✗"} icons=${bundle.assets.icons.length}`));
+  if (bundle.vtex) {
+    const mapped = bundle.vtex.map.filter((m) => m.strategy === "mapped").length;
+    console.log(
+      chalk.dim(`  vtex io:  ${bundle.vtex.blocks.length} blocks · ${mapped}/${bundle.vtex.map.length} block types mapped to FastStore`),
+    );
+  }
   console.log(chalk.dim(`  pages:    ${bundle.pages.map((p) => p.kind).join(", ") || "—"}`));
   console.log(chalk.dim(`  out:      ${runDir}`));
   console.log("");

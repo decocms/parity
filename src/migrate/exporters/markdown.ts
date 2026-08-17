@@ -67,6 +67,23 @@ function renderIndex(bundle: MigrationBundle, dirNames: string[], notes: string[
   renderTheme(md, bundle.theme);
   renderAssets(md, bundle.assets);
 
+  if (bundle.vtex) {
+    md("## VTEX IO → FastStore blocks");
+    md("");
+    md(
+      `_${bundle.vtex.blocks.length} block instances from the store runtime. \`custom-component\` = build from captured DOM/CSS; see component-map.json._`,
+    );
+    md("");
+    md("| VTEX block | → FastStore | confidence | count |");
+    md("|---|---|---|---|");
+    for (const m of bundle.vtex.map.slice(0, 40)) {
+      md(
+        `| \`${m.vtex}\` | ${m.faststore ? `\`${m.faststore}\`` : "_custom-component_"} | ${m.confidence || "—"} | ${m.count} |`,
+      );
+    }
+    md("");
+  }
+
   md("## Components");
   md("");
   md("| Scope | Role | e2e keys | Folder |");

@@ -12,6 +12,8 @@
 
 import type { PageKind } from "../engine/sitemap-discover.ts";
 import type { Platform } from "../learned/platform.ts";
+import type { BlockMapping } from "../migrate/vtex/faststore-map.ts";
+import type { VtexBlock } from "../migrate/vtex/runtime.ts";
 import type { ExtractedComponent } from "./extract.ts";
 
 /** A single color observed on the site, ranked by how often it appears. */
@@ -161,6 +163,8 @@ export interface MigrationBundle {
   theme: ThemeBundle;
   /** Brand + meta assets (logo/favicon/…) + icon inventory. */
   assets: SiteAssets;
+  /** VTEX IO declarative block tree + FastStore mapping (present only for VTEX IO stores). */
+  vtex?: { blocks: VtexBlock[]; map: BlockMapping[] };
   pages: MigratedPage[];
   /** Flattened across all pages, globals first. */
   components: MigratedComponent[];
