@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-08-17
+
+### Added
+
+* **`parity migrate` now covers the whole store, not just the home page.** It samples extra pages per kind from the classified sitemap (`--sample`, default `plp=2,pdp=2,other=3,search=1`, capped at 15) — including **institutional** pages (`other`, which prefers real about/contact/policy URLs over deep categories) — and reads the **VTEX block tree + content on every captured page**, merged by treePath. On Electrolux this took the captured content from home-only to home + PLP + PDP + institutional (`store.home`/`store.product`/`store.search`). (#214)
+* **Report organized per page.** `index.md` / `index.html` / `report.html` show a "Global components" section (captured once) plus one section per captured page — a single report separated by page. (#214)
+
+### Fixed
+
+* **Exact-duplicate VTEX blocks are collapsed** (a `product-summary` per product, repeated layout wrappers) into one representative with a `repeated` count, keeping distinct-content blocks — `blocks.json` went from 5242 to 883 on Electrolux without losing content. (#215)
+* **`category-auto` no longer lands on an institutional page** (institutional keywords filtered from the PLP pick). (#214)
+
 ## [0.20.0] — 2026-08-17
 
 ### Added
