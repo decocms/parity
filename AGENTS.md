@@ -31,6 +31,7 @@ Do **not** run parity for:
 | "explain this specific issue"                | `parity explain <runId> <issueId>` (needs `ANTHROPIC_API_KEY`)     |
 | "does THIS single site actually work?"       | `parity e2e --url ... --flows ...` (no comparison — pre-launch / partner audit) |
 | "exercise search / cart / login on a site"   | `parity e2e --url ... --flows=search,cart-interactions,login`      |
+| "migrate a live storefront to a new stack"    | `parity migrate --url ... --target faststore` (phased capture → agent-ready bundle; see `docs/migrate.md`) |
 
 ### `parity run` vs `parity e2e` — decision tree
 
