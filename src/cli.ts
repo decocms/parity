@@ -753,6 +753,7 @@ program
   .option("--format <fmt>", "md | json | both", "both")
   .option("--out <dir>", "Output directory (stable per host, for resume)", "./parity-migrate")
   .option("--refresh", "Re-run all phases even if cached artifacts exist", false)
+  .option("--open", "Open the generated index.html visual report in the browser", false)
   .option(
     "--no-llm",
     "Skip the optional LLM component-relabeling pass (heuristic detection always runs regardless).",
@@ -770,6 +771,7 @@ program
         format: opts.format,
         outDir: opts.out,
         refresh: opts.refresh,
+        open: opts.open,
         noLlm: !opts.llm,
         json: opts.json,
       }),
