@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { mapVtexBlocksToFastStore } from "../../src/migrate/vtex/faststore-map.ts";
-import { blockNameFromTreePath, parentTreePath, type VtexBlock } from "../../src/migrate/vtex/runtime.ts";
+import {
+  blockNameFromTreePath,
+  dedupeVtexBlocks,
+  parentTreePath,
+  type VtexBlock,
+} from "../../src/migrate/vtex/runtime.ts";
 
 describe("blockNameFromTreePath / parentTreePath", () => {
   it("strips instance suffix and returns the leaf block id", () => {
@@ -16,6 +21,35 @@ describe("blockNameFromTreePath / parentTreePath", () => {
       "store.home/flex-layout.row#deals",
     );
     expect(parentTreePath("store.home")).toBeNull();
+  });
+});
+
+describe("dedupeVtexBlocks", () => {
+  const b = (treePath: string, blockName: string, props: Record<string, unknown> | null): VtexBlock => ({
+    treePath,
+    blockName,
+    component: null,
+    parent: null,
+    props,
+  });
+
+  it("collapses identical blocks (same name + props) with a repeated count", () => {
+    const out = dedupeVtexBlocks([
+      b("store.plp/ps#1", "product-summary", null),
+      b("store.plp/ps#2", "product-summary", null),
+      b("store.plp/ps#3", "product-summary", null),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.repeated).toBe(3);
+  });
+
+  it("keeps blocks with distinct content (different props)", () => {
+    const out = dedupeVtexBlocks([
+      b("store.home/b#1", "banner", { image: "/a.jpg" }),
+      b("store.home/b#2", "banner", { image: "/b.jpg" }),
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out.every((x) => (x.repeated ?? 1) === 1)).toBe(true);
   });
 });
 

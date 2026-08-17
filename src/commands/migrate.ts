@@ -36,7 +36,12 @@ import {
   rewriteBlockUrls,
 } from "../migrate/vtex/content-assets.ts";
 import { mapVtexBlocksToFastStore } from "../migrate/vtex/faststore-map.ts";
-import { type VtexBlock, readVtexBlockTree, readVtexStateImages } from "../migrate/vtex/runtime.ts";
+import {
+  type VtexBlock,
+  dedupeVtexBlocks,
+  readVtexBlockTree,
+  readVtexStateImages,
+} from "../migrate/vtex/runtime.ts";
 import { captureInteractions } from "../migrate/interactions.ts";
 import type {
   MigratedComponent,
@@ -465,7 +470,9 @@ async function capturePages(
   return {
     pages,
     components,
-    vtexBlocks: blocksByPath.size ? [...blocksByPath.values()] : null,
+    // Collapse exact-duplicate blocks (product-summary per product, repeated
+    // layout wrappers) — keeps distinct-content blocks, shrinks blocks.json.
+    vtexBlocks: blocksByPath.size ? dedupeVtexBlocks([...blocksByPath.values()]) : null,
     contentMap,
   };
 }

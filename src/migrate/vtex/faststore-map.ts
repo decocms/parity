@@ -61,7 +61,7 @@ function lookup(blockName: string): MapEntry | null {
 /** Map a block tree to unique block→FastStore mappings, ranked by frequency. */
 export function mapVtexBlocksToFastStore(blocks: VtexBlock[]): BlockMapping[] {
   const counts = new Map<string, number>();
-  for (const b of blocks) counts.set(b.blockName, (counts.get(b.blockName) ?? 0) + 1);
+  for (const b of blocks) counts.set(b.blockName, (counts.get(b.blockName) ?? 0) + (b.repeated ?? 1));
 
   const out: BlockMapping[] = [];
   for (const [vtex, count] of counts) {
