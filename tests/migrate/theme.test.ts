@@ -3,6 +3,7 @@ import {
   aggregateTheme,
   isNeutral,
   isPlausibleFontFamily,
+  mergeRawThemeSamples,
   parseRgb,
   type RawThemeSamples,
 } from "../../src/migrate/theme.ts";
@@ -64,6 +65,17 @@ describe("aggregateTheme", () => {
     const t = aggregateTheme(raw({ interactiveBackgrounds: ["rgb(255, 255, 255)", "rgb(0, 0, 0)"] }));
     expect(t.colors.primary).toBeNull();
     expect(t.colors.secondary).toBeNull();
+  });
+});
+
+describe("mergeRawThemeSamples", () => {
+  it("pools array fields across viewports, keeps first body-level fields", () => {
+    const a = raw({ colors: ["rgb(1, 1, 1)"], breakpoints: ["768px"], bodyText: "rgb(1, 1, 1)" });
+    const b = raw({ colors: ["rgb(2, 2, 2)"], breakpoints: ["1024px"], bodyText: "rgb(9, 9, 9)" });
+    const merged = mergeRawThemeSamples([a, b]);
+    expect(merged.colors).toEqual(["rgb(1, 1, 1)", "rgb(2, 2, 2)"]);
+    expect(merged.breakpoints).toEqual(["768px", "1024px"]);
+    expect(merged.bodyText).toBe("rgb(1, 1, 1)"); // first viewport wins
   });
 });
 

@@ -26,7 +26,7 @@ import { markdownExporter } from "../migrate/exporters/markdown.ts";
 import { buildMigrationPrompt } from "../migrate/prompt.ts";
 import { buildFastStoreTheme } from "../migrate/targets/faststore.ts";
 import { getTargetPlaybook, TARGET_NAMES } from "../migrate/targets/index.ts";
-import { aggregateTheme, scrapeThemeSamples } from "../migrate/theme.ts";
+import { aggregateTheme, mergeRawThemeSamples, scrapeThemeSamples } from "../migrate/theme.ts";
 import { captureInteractions } from "../migrate/interactions.ts";
 import type {
   MigratedComponent,
@@ -54,6 +54,8 @@ export interface MigrateOptions {
   pages?: string;
   components?: string;
   viewport: string;
+  /** Comma-separated viewports for theme + site screenshots (default: --viewport). */
+  viewports?: string;
   format: string;
   outDir: string;
   target?: string;
@@ -74,6 +76,16 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
     console.error(chalk.red(`viewport inválido: ${opts.viewport} (use mobile|desktop|tablet)`));
     return 2;
   }
+  // Multi-viewport for theme + site screenshots. Defaults to --viewport; the
+  // primary (first) viewport is used for component capture (Phase 3).
+  const viewports = (opts.viewports ? opts.viewports.split(",") : [opts.viewport])
+    .map((v) => parseViewport(v.trim()))
+    .filter((v): v is Viewport => Boolean(v));
+  if (viewports.length === 0) {
+    console.error(chalk.red(`--viewports inválido: ${opts.viewports}`));
+    return 2;
+  }
+  const primaryViewport = viewports[0]!;
   if (!isValidUrl(opts.url)) {
     console.error(chalk.red(`--url inválido: ${opts.url}`));
     return 2;
@@ -104,38 +116,63 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
     // ── Phase 1: THEME + ASSETS ─────────────────────────────────────
     const themePath = resolve(runDir, "theme.json");
     const assetsPath = resolve(runDir, "assets.json");
+    type Phase1Meta = {
+      platform: Platform;
+      assets: SiteAssets;
+      screenshots: { viewport: string; path: string }[];
+    };
     let theme: ThemeBundle;
     let platform: Platform;
     let assets: SiteAssets;
+    let screenshots: { viewport: string; path: string }[];
     if (!opts.refresh && existsSync(themePath) && existsSync(assetsPath)) {
       theme = readJson<ThemeBundle>(themePath)!;
-      const meta = readJson<{ platform: Platform; assets: SiteAssets }>(assetsPath)!;
+      const meta = readJson<Phase1Meta>(assetsPath)!;
       platform = meta.platform;
       assets = meta.assets;
+      screenshots = meta.screenshots ?? [];
       console.log(chalk.dim("  phase 1 theme+assets: cached"));
     } else {
-      console.log(chalk.dim("  phase 1 theme+assets: scraping…"));
-      const ctx = await newContext(browser, { viewport });
-      const page = await ctx.newPage();
-      let assetsResolved: SiteAssets;
-      try {
-        await page.goto(opts.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
-        await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => undefined);
-        const html = await page.content().catch(() => "");
-        platform = detectPlatform({ url: opts.url, html });
-        theme = aggregateTheme(await scrapeThemeSamples(page));
-        const rawAssets = await collectSiteAssets(page);
-        // Download through the BROWSER (already past bot protection), node fallback.
-        const fetchBytes = async (url: string) =>
-          (await browserFetchBytes(page, url)) ?? (await nodeFetchBytes(url));
-        assetsResolved = await downloadSiteAssets(rawAssets, runDir, fetchBytes);
-      } finally {
-        await page.close().catch(() => undefined);
-        await ctx.close().catch(() => undefined);
+      console.log(chalk.dim(`  phase 1 theme+assets: scraping (${viewports.join(", ")})…`));
+      mkdirSync(resolve(runDir, "screenshots"), { recursive: true });
+      const samples: Awaited<ReturnType<typeof scrapeThemeSamples>>[] = [];
+      screenshots = [];
+      let platformSeen: Platform | null = null;
+      let assetsResolved: SiteAssets | null = null;
+      // Theme aggregates across all viewports; assets/platform captured once.
+      for (const vp of viewports) {
+        const ctx = await newContext(browser, { viewport: vp });
+        const page = await ctx.newPage();
+        try {
+          await page.goto(opts.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+          await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => undefined);
+          samples.push(await scrapeThemeSamples(page));
+          const shot = resolve(runDir, "screenshots", `${vp}.png`);
+          await page
+            .screenshot({ path: shot, fullPage: true, animations: "disabled", timeout: 15_000 })
+            .then(() => screenshots.push({ viewport: vp, path: `screenshots/${vp}.png` }))
+            .catch(() => undefined);
+          if (!assetsResolved) {
+            platformSeen = detectPlatform({ url: opts.url, html: await page.content().catch(() => "") });
+            const rawAssets = await collectSiteAssets(page);
+            const fetchBytes = async (url: string) =>
+              (await browserFetchBytes(page, url)) ?? (await nodeFetchBytes(url));
+            assetsResolved = await downloadSiteAssets(rawAssets, runDir, fetchBytes);
+          }
+        } finally {
+          await page.close().catch(() => undefined);
+          await ctx.close().catch(() => undefined);
+        }
       }
-      assets = assetsResolved;
+      theme = aggregateTheme(mergeRawThemeSamples(samples));
+      platform = platformSeen ?? "custom";
+      assets = assetsResolved!;
       writeFileSync(themePath, `${JSON.stringify(theme, null, 2)}\n`, "utf8");
-      writeFileSync(assetsPath, `${JSON.stringify({ platform, assets }, null, 2)}\n`, "utf8");
+      writeFileSync(
+        assetsPath,
+        `${JSON.stringify({ platform, assets, screenshots } satisfies Phase1Meta, null, 2)}\n`,
+        "utf8",
+      );
     }
 
     // ── Phase 2: SITEMAP ────────────────────────────────────────────
@@ -148,7 +185,7 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
       console.log(chalk.dim("  phase 2 sitemap: resolving pages…"));
       // Discover through the BROWSER (bypasses bot 403s that would degrade a
       // bare node fetch to home-only).
-      const ctx = await newContext(browser, { viewport });
+      const ctx = await newContext(browser, { viewport: primaryViewport });
       const page = await ctx.newPage();
       let sitemapUrls: string[] = [];
       try {
@@ -184,7 +221,7 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
       console.log(chalk.dim(`  phase 3 components: cached (${components.length})`));
     } else {
       console.log(chalk.dim("  phase 3 components: capturing…"));
-      ({ pages, components } = await capturePages(browser, viewport, resolvedPages, theme, {
+      ({ pages, components } = await capturePages(browser, primaryViewport, resolvedPages, theme, {
         allowlist,
         llm: !opts.noLlm,
         runDir,
@@ -195,7 +232,9 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
     const bundle: MigrationBundle = {
       url: opts.url,
       timestamp: new Date().toISOString(),
-      viewport,
+      viewport: primaryViewport,
+      viewports,
+      screenshots,
       platform,
       target: opts.target,
       theme,
@@ -416,6 +455,7 @@ function printResults(runDir: string, bundle: MigrationBundle): void {
   console.log(chalk.bold("\n  parity migrate"));
   console.log(chalk.dim(`  url:      ${bundle.url}`));
   console.log(chalk.dim(`  platform: ${bundle.platform}${bundle.target ? ` → ${bundle.target}` : ""}`));
+  console.log(chalk.dim(`  viewports:${(bundle.viewports ?? [bundle.viewport]).join(", ")}`));
   console.log(chalk.dim(`  theme:    primary=${bundle.theme.colors.primary ?? "—"} text=${bundle.theme.colors.text ?? "—"}`));
   console.log(chalk.dim(`  assets:   logo=${bundle.assets.logo ? "✓" : "✗"} favicon=${bundle.assets.favicon ? "✓" : "✗"} icons=${bundle.assets.icons.length}`));
   console.log(chalk.dim(`  pages:    ${bundle.pages.map((p) => p.kind).join(", ") || "—"}`));

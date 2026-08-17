@@ -745,7 +745,11 @@ program
     "Comma-separated role allowlist, e.g. header,footer,nav,shelf,minicart. Default: all detected.",
   )
   .option("--target <name>", "Target playbook to append to the prompt (e.g. faststore)")
-  .option("--viewport <viewport>", "mobile | desktop | tablet", "mobile")
+  .option("--viewport <viewport>", "Primary viewport for component capture: mobile | desktop | tablet", "mobile")
+  .option(
+    "--viewports <list>",
+    "Comma-separated viewports for theme + site screenshots (e.g. mobile,desktop). Default: --viewport only.",
+  )
   .option("--format <fmt>", "md | json | both", "both")
   .option("--out <dir>", "Output directory (stable per host, for resume)", "./parity-migrate")
   .option("--refresh", "Re-run all phases even if cached artifacts exist", false)
@@ -762,6 +766,7 @@ program
         components: opts.components,
         target: opts.target,
         viewport: opts.viewport,
+        viewports: opts.viewports,
         format: opts.format,
         outDir: opts.out,
         refresh: opts.refresh,

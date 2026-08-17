@@ -73,9 +73,10 @@ phase whose artifact already exists. Pass `--refresh` to redo every phase.
 ```
 parity-migrate/
   loja.com/
-    theme.json          # Phase 1 (theme tokens + scales)
-    assets.json         # Phase 1 (platform + brand assets + icon inventory)
+    theme.json          # Phase 1 (theme tokens + scales + breakpoints + motion)
+    assets.json         # Phase 1 (platform + brand assets + icons + screenshots)
     assets/             # Phase 1 (downloaded logo, favicon, og-image, …)
+    screenshots/        # Phase 1 (full-page site screenshot per viewport)
     sitemap.json        # Phase 2
     capture.json        # Phase 3 (resume checkpoint)
     manifest.json       # FULL tier: complete MigrationBundle (raw HTML + CSS)

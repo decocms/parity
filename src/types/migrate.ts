@@ -154,6 +154,10 @@ export interface MigrationBundle {
   platform: Platform;
   /** Selected target playbook name, when `--target` was passed. */
   target?: string;
+  /** Viewports captured for the theme + site screenshots. */
+  viewports?: string[];
+  /** Full-page site screenshots, one per viewport (path under the out dir). */
+  screenshots?: { viewport: string; path: string }[];
   theme: ThemeBundle;
   /** Brand + meta assets (logo/favicon/…) + icon inventory. */
   assets: SiteAssets;

@@ -57,6 +57,13 @@ function renderIndex(bundle: MigrationBundle, dirNames: string[], notes: string[
   md(`- **Pages**: ${bundle.pages.map((p) => `${p.kind} \`${p.path}\``).join(", ") || "—"}`);
   md("");
 
+  if (bundle.screenshots?.length) {
+    md("## Screenshots by viewport");
+    md("");
+    for (const s of bundle.screenshots) md(`- **${s.viewport}**: ![${s.viewport}](${s.path})`);
+    md("");
+  }
+
   renderTheme(md, bundle.theme);
   renderAssets(md, bundle.assets);
 

@@ -78,6 +78,34 @@ function sortByPx(values: string[]): string[] {
   return uniq.sort((a, b) => (Number.parseFloat(a) || 0) - (Number.parseFloat(b) || 0));
 }
 
+/**
+ * Merge raw samples from multiple viewports into one before election.
+ * Responsive sites expose different colors/spacings per viewport; pooling the
+ * samples gives a fuller, more confident palette/scale. Body-level fields take
+ * the first viewport (they don't vary meaningfully).
+ */
+export function mergeRawThemeSamples(list: RawThemeSamples[]): RawThemeSamples {
+  const first = list[0]!;
+  const concat = (key: keyof RawThemeSamples): string[] =>
+    list.flatMap((s) => s[key] as string[]);
+  return {
+    bodyBackground: first.bodyBackground,
+    bodyText: first.bodyText,
+    bodyFontFamily: first.bodyFontFamily,
+    colors: concat("colors"),
+    backgrounds: concat("backgrounds"),
+    interactiveBackgrounds: concat("interactiveBackgrounds"),
+    fontFamilies: concat("fontFamilies"),
+    fontSizes: concat("fontSizes"),
+    radii: concat("radii"),
+    shadows: concat("shadows"),
+    spacings: concat("spacings"),
+    breakpoints: concat("breakpoints"),
+    motionDurations: concat("motionDurations"),
+    motionEasings: concat("motionEasings"),
+  };
+}
+
 /** Pure theme election over raw samples. Testable without a browser. */
 export function aggregateTheme(raw: RawThemeSamples): ThemeBundle {
   // Palette: text + background colors, frequency-ranked.
