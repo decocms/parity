@@ -57,8 +57,32 @@ function renderIndex(bundle: MigrationBundle, dirNames: string[], notes: string[
   md(`- **Pages**: ${bundle.pages.map((p) => `${p.kind} \`${p.path}\``).join(", ") || "—"}`);
   md("");
 
+  if (bundle.screenshots?.length) {
+    md("## Screenshots by viewport");
+    md("");
+    for (const s of bundle.screenshots) md(`- **${s.viewport}**: ![${s.viewport}](${s.path})`);
+    md("");
+  }
+
   renderTheme(md, bundle.theme);
   renderAssets(md, bundle.assets);
+
+  if (bundle.vtex) {
+    md("## VTEX IO → FastStore blocks");
+    md("");
+    md(
+      `_${bundle.vtex.blocks.length} block instances from the store runtime. \`custom-component\` = build from captured DOM/CSS; see component-map.json._`,
+    );
+    md("");
+    md("| VTEX block | → FastStore | confidence | count |");
+    md("|---|---|---|---|");
+    for (const m of bundle.vtex.map.slice(0, 40)) {
+      md(
+        `| \`${m.vtex}\` | ${m.faststore ? `\`${m.faststore}\`` : "_custom-component_"} | ${m.confidence || "—"} | ${m.count} |`,
+      );
+    }
+    md("");
+  }
 
   md("## Components");
   md("");
@@ -101,6 +125,8 @@ function renderTheme(md: (s: string) => void, theme: ThemeBundle): void {
   md(`- **Font sizes**: ${listOrNone(theme.typography.sizeScale)}`);
   md(`- **Spacing scale**: ${listOrNone(theme.spacingScale)}`);
   md(`- **Radii**: ${listOrNone(theme.radii)}`);
+  md(`- **Breakpoints**: ${listOrNone(theme.breakpoints)}`);
+  md(`- **Motion**: durations ${listOrNone(theme.motion.durations)} · easings ${listOrNone(theme.motion.easings)}`);
   md(`- **Shadows**: ${theme.shadows.length}`);
   md("");
 }

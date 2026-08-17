@@ -3,6 +3,7 @@ import {
   aggregateTheme,
   isNeutral,
   isPlausibleFontFamily,
+  mergeRawThemeSamples,
   parseRgb,
   type RawThemeSamples,
 } from "../../src/migrate/theme.ts";
@@ -20,6 +21,9 @@ function raw(overrides: Partial<RawThemeSamples> = {}): RawThemeSamples {
     radii: ["0px", "8px", "8px"],
     shadows: ["none", "rgba(0, 0, 0, 0.1) 0px 1px 2px 0px"],
     spacings: ["8px", "16px", "8px"],
+    breakpoints: ["768px", "1024px", "768px", "40px"],
+    motionDurations: ["0s", "0.2s", "300ms", "0.2s"],
+    motionEasings: ["ease", "cubic-bezier(0.4, 0, 0.2, 1)"],
     ...overrides,
   };
 }
@@ -50,10 +54,28 @@ describe("aggregateTheme", () => {
     expect(t.typography.fontFamilies).toEqual(["Inter, sans-serif", "Georgia, serif"]);
   });
 
+  it("extracts sorted breakpoints and non-default motion tokens", () => {
+    const t = aggregateTheme(raw());
+    expect(t.breakpoints).toEqual(["40px", "768px", "1024px"]);
+    expect(t.motion.durations).toEqual(["0.2s", "300ms"]); // 0s dropped
+    expect(t.motion.easings).toEqual(["cubic-bezier(0.4, 0, 0.2, 1)"]); // "ease" dropped
+  });
+
   it("returns null primary when every interactive bg is neutral", () => {
     const t = aggregateTheme(raw({ interactiveBackgrounds: ["rgb(255, 255, 255)", "rgb(0, 0, 0)"] }));
     expect(t.colors.primary).toBeNull();
     expect(t.colors.secondary).toBeNull();
+  });
+});
+
+describe("mergeRawThemeSamples", () => {
+  it("pools array fields across viewports, keeps first body-level fields", () => {
+    const a = raw({ colors: ["rgb(1, 1, 1)"], breakpoints: ["768px"], bodyText: "rgb(1, 1, 1)" });
+    const b = raw({ colors: ["rgb(2, 2, 2)"], breakpoints: ["1024px"], bodyText: "rgb(9, 9, 9)" });
+    const merged = mergeRawThemeSamples([a, b]);
+    expect(merged.colors).toEqual(["rgb(1, 1, 1)", "rgb(2, 2, 2)"]);
+    expect(merged.breakpoints).toEqual(["768px", "1024px"]);
+    expect(merged.bodyText).toBe("rgb(1, 1, 1)"); // first viewport wins
   });
 });
 

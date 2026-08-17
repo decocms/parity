@@ -73,14 +73,18 @@ phase whose artifact already exists. Pass `--refresh` to redo every phase.
 ```
 parity-migrate/
   loja.com/
-    theme.json          # Phase 1 (theme tokens + scales)
-    assets.json         # Phase 1 (platform + brand assets + icon inventory)
+    theme.json          # Phase 1 (theme tokens + scales + breakpoints + motion)
+    assets.json         # Phase 1 (platform + brand assets + icons + screenshots)
     assets/             # Phase 1 (downloaded logo, favicon, og-image, …)
+    screenshots/        # Phase 1 (full-page site screenshot per viewport)
     sitemap.json        # Phase 2
     capture.json        # Phase 3 (resume checkpoint)
     manifest.json       # FULL tier: complete MigrationBundle (raw HTML + CSS)
     index.md            # LEAN tier: theme + assets + component map + notes
     MIGRATION_PROMPT.md # LEAN tier: agent instructions (+ target playbook)
+    custom-theme.scss   # --target faststore: brand tokens → --fs-* (starter)
+    blocks.json         # VTEX IO only: raw block tree from window.__RUNTIME__
+    component-map.json  # VTEX IO only: block → FastStore component (+ custom-component)
     components/
       header-3/
         README.md       # LEAN: Tailwind, interactions, e2e selectors, compacted HTML
@@ -117,6 +121,22 @@ v4 styles with **SCSS design tokens + `data-fs-*` attributes** and **Phosphor
 icons**. For those, the extracted **theme tokens** map to the target's design
 tokens and the **raw computed styles** (in `manifest.json`) are the exact-value
 source of truth; the `faststore` playbook spells this out.
+
+## VTEX IO stores (block tree)
+
+When the site is a VTEX IO storefront, `migrate` reads the store's **real
+declarative block tree** from `window.__RUNTIME__` (the render-runtime
+serialized into the page) instead of relying only on DOM heuristics. It writes:
+
+- `blocks.json` — every block instance (treePath, block id, resolved component,
+  parent) from the runtime.
+- `component-map.json` — each unique block id → a FastStore component with a
+  confidence hint (e.g. `product-summary→ProductCard`, `flex-layout.row→
+  FlexLayout`, `rich-text→RichText`). Unknown/`custom.*` blocks get
+  `strategy: "custom-component"` (build from the captured DOM/CSS/assets).
+
+Layout slots (`$before_*`/`$around_*`) are dropped. The map is deterministic and
+additive — DOM capture still runs and remains the target-agnostic fallback.
 
 ## Relationship to `extract`
 

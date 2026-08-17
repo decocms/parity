@@ -12,6 +12,8 @@
 
 import type { PageKind } from "../engine/sitemap-discover.ts";
 import type { Platform } from "../learned/platform.ts";
+import type { BlockMapping } from "../migrate/vtex/faststore-map.ts";
+import type { VtexBlock } from "../migrate/vtex/runtime.ts";
 import type { ExtractedComponent } from "./extract.ts";
 
 /** A single color observed on the site, ranked by how often it appears. */
@@ -46,6 +48,15 @@ export interface ThemeBundle {
   radii: string[];
   /** Distinct box-shadow values. */
   shadows: string[];
+  /** Distinct breakpoint widths (px) from @media rules, ascending. */
+  breakpoints: string[];
+  /** Deterministic motion tokens declared on the page. */
+  motion: {
+    /** Distinct transition/animation durations, e.g. ["0.2s","300ms"]. */
+    durations: string[];
+    /** Distinct timing functions, e.g. ["ease","cubic-bezier(...)"]. */
+    easings: string[];
+  };
   /**
    * Flat token map ready to drop into a target theme config
    * (e.g. `{ "--color-primary": "rgb(228, 0, 43)" }`). Token → value.
@@ -145,9 +156,15 @@ export interface MigrationBundle {
   platform: Platform;
   /** Selected target playbook name, when `--target` was passed. */
   target?: string;
+  /** Viewports captured for the theme + site screenshots. */
+  viewports?: string[];
+  /** Full-page site screenshots, one per viewport (path under the out dir). */
+  screenshots?: { viewport: string; path: string }[];
   theme: ThemeBundle;
   /** Brand + meta assets (logo/favicon/…) + icon inventory. */
   assets: SiteAssets;
+  /** VTEX IO declarative block tree + FastStore mapping (present only for VTEX IO stores). */
+  vtex?: { blocks: VtexBlock[]; map: BlockMapping[] };
   pages: MigratedPage[];
   /** Flattened across all pages, globals first. */
   components: MigratedComponent[];
