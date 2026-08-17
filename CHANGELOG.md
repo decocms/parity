@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-08-17
+
+### Added
+
+* **`parity migrate` now captures the VTEX CMS content + all its images.** Each block's `props` (the merchant's registered content — banner images, texts, links, shelf config) is kept in `blocks.json`; content-image references (site-relative `/arquivos/ids/…`, `/img/…`) are resolved to absolute URLs, and the images — from block props **and** the Apollo `__STATE__` (product/catalog imagery) — are downloaded to `assets/content/` with a `content-assets.json` url→file map (up to 150/run). (#209, #211)
+* **Quality pass:** robust logo capture (screenshots the element, so sprite `<use>` logos aren't blank), web-font download from `@font-face` (`assets/fonts/`), scroll-before-screenshot (lazy footers render), and a self-contained **`report.html`** (every image inlined) to share as a single link. (#209)
+
+### Fixed
+
+* **Header/footer are now detected on sites without semantic tags** (e.g. VTEX IO, which renders both as plain `<div>`s) via a geometry/anchor fallback that only fires when no `<header>`/`<footer>` matched. Shared by `extract` + `migrate`. (#212)
+* **Theme election cleanups:** primary skips translucent overlays and considers opaque colors across all usages; breakpoints kept by frequency (real tiers, not 100+ media-query one-offs); background falls back to the most frequent opaque color; implausible motion durations dropped. (#209)
+* Ignore `parity-migrate/` / `parity-extract/` output dirs so scraped store data can't be committed. (#210)
+
 ## [0.19.0] — 2026-08-17
 
 ### Added
