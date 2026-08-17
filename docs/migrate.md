@@ -65,6 +65,7 @@ phase whose artifact already exists. Pass `--refresh` to redo every phase.
 | `--format <fmt>` | `both` | `md` \| `json` \| `both` |
 | `--out <dir>` | `./parity-migrate` | Output directory (stable per host) |
 | `--refresh` | off | Re-run all phases even if cached |
+| `--open` | off | Open the generated `index.html` visual report in the browser |
 | `--no-llm` | LLM on (if configured) | Skip the optional component-relabel pass |
 | `--json` | off | Emit one-line JSON to stdout |
 
@@ -80,6 +81,7 @@ parity-migrate/
     sitemap.json        # Phase 2
     capture.json        # Phase 3 (resume checkpoint)
     manifest.json       # FULL tier: complete MigrationBundle (raw HTML + CSS)
+    index.html          # human visual report (theme swatches, screenshots, tables) — `--open`
     index.md            # LEAN tier: theme + assets + component map + notes
     MIGRATION_PROMPT.md # LEAN tier: agent instructions (+ target playbook)
     custom-theme.scss   # --target faststore: brand tokens → --fs-* (starter)

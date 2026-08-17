@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import chalk from "chalk";
+import open from "open";
 import type { Page } from "playwright";
 import { pickPlpFromHomeHtml } from "../checks/plp-pagination.ts";
 import { parseSitemap } from "../diff/sitemap.ts";
@@ -23,6 +24,7 @@ import { browserFetchText } from "../migrate/browser-fetch.ts";
 import { isGlobalRole, planComponentDedup, toMigratedComponent } from "../migrate/bundle.ts";
 import { jsonExporter } from "../migrate/exporters/json.ts";
 import { markdownExporter } from "../migrate/exporters/markdown.ts";
+import { htmlExporter } from "../migrate/exporters/html.ts";
 import { buildMigrationPrompt } from "../migrate/prompt.ts";
 import { buildFastStoreTheme } from "../migrate/targets/faststore.ts";
 import { getTargetPlaybook, TARGET_NAMES } from "../migrate/targets/index.ts";
@@ -62,6 +64,8 @@ export interface MigrateOptions {
   outDir: string;
   target?: string;
   refresh?: boolean;
+  /** Open the generated index.html in the browser when done. */
+  open?: boolean;
   noLlm?: boolean;
   json?: boolean;
 }
@@ -259,6 +263,7 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
     if (format === "json" || format === "both") await jsonExporter.export(bundle, runDir);
     if (format === "md" || format === "both") {
       await markdownExporter.export(bundle, runDir);
+      await htmlExporter.export(bundle, runDir); // human-friendly visual view
       writeFileSync(
         resolve(runDir, "MIGRATION_PROMPT.md"),
         buildMigrationPrompt(bundle, playbook),
@@ -283,6 +288,9 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
       return 0;
     }
     printResults(runDir, bundle);
+    if (opts.open && format !== "json") {
+      await open(resolve(runDir, "index.html")).catch(() => undefined);
+    }
     return 0;
   } finally {
     await browser.close().catch(() => undefined);
