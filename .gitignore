@@ -4,6 +4,12 @@ coverage/
 parity-output/
 parity-baselines/
 .parity-cache/
+# `parity migrate` / `parity extract` scraped-store output — may contain a
+# real store's content/assets; never commit to a public repo (default out dirs).
+parity-migrate/
+parity-migrate*/
+parity-extract/
+parity-extract*/
 
 # Learned selectors are user-specific (may contain host names of tested sites)
 learned-selectors.json
