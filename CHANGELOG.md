@@ -7,8 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-08-17
+
+### Added
+
+* **`parity migrate` — phased, target-agnostic migration capture (new command).** Single-site (no prod×cand) pipeline that produces a token-lean, agent-ready bundle + prompt for migrating a live storefront to a new stack. Three resumable phases: **theme + assets** (color/typography/spacing/radii token election, breakpoints from `@media`, motion tokens, plus brand assets — logo/favicon/apple-touch/OG/manifest/fonts — downloaded **through the browser** to bypass Akamai/CF bot 403s, and an icon inventory); **sitemap** (browser-routed page discovery + classification); **components** (reusing `extract`'s detector, structural dedupe, deterministic **Tailwind IR** + raw-CSS fallback, light interaction hints via CSSOM, and suggested e2e selectors). Token economy is first-class (lean tier vs full `manifest.json`, `×N` collapse, per-component files). (#194)
+* **`--target faststore` playbook + `custom-theme.scss`.** Appends a FastStore v4 playbook (CLI commands, doc links, section/CMS structure, Phosphor icons) and emits a deterministic `custom-theme.scss` mapping brand tokens → `--fs-*` global tokens. FastStore v4 styles with SCSS design tokens + `data-fs-*` (not Tailwind). (#196)
+* **Multi-viewport theme + per-viewport site screenshots** (`--viewports mobile,desktop`). (#197)
+* **VTEX IO block-tree source + deterministic FastStore mapper.** For VTEX IO stores, reads the real declarative block tree from `window.__RUNTIME__` → `blocks.json` + `component-map.json` (`product-summary→ProductCard`, custom blocks → `custom-component`). Verified live on storetheme.vtex.com. (#198)
+* **Platform-aware PDP discovery** for `migrate` — Salesforce Commerce `.html`/`Product-Show` product pages, with an action-endpoint rejection guard (Wishlist-Add/Cart-Add never treated as a PDP). (#200)
+* **`salesforce-commerce` (Demandware) platform detection**, checked before the loose `fs-`/`vtex-` class heuristics (fixes Sephora BR mis-detected as `vtex`). (#199)
+
 ### Fixed
 
+* **403 hardening: `migrate` Phase 2 discovery routes through the browser** instead of a bare node fetch that bot-protected stores 403 (was silently degrading to home-only). (#195)
 * **`--fail-on` now gates the exit code on its own (issue #178).** The blocking-issue exit-1 check was gated behind `--ci`, which had no other effect in the codebase — a run with double-digit criticals exited 0 unless the caller also remembered `--ci`, even though `--fail-on` (default `critical`) was already parsed and ready. The check now always runs; `--ci` has been removed as dead weight (`parity audit` never had it and always gated on `--fail-on` alone, which is the pattern `parity run` now follows too).
 * **`--pages`/`--pages-file` scoping documented, and no longer silently disable visual-diff in no-LLM environments (issue #178).** These flags only ever scoped the visual-diff/vitals-extra-pages passes, never the `flows` crawl — now documented in `--help`/`docs/cli.md`, and `parity run` prints a one-line warning when both an explicit page list and a flows crawl are active. Separately, `applySmartDefaults` (issue #71) used to force `noVisualDiff = true` whenever no LLM provider was configured, even when `--pages`/`--pages-file` was explicitly set — making the flag silently inert. Explicit page selection now still gets the prod/cand screenshot + pixelmatch heatmap capture without an LLM verdict.
 * **`banner-aspect-ratio` no longer double-counts carousel boundary clones (issue #178).** Images marked `aria-hidden="true"` or `data-slider-clone` (or nested inside such a wrapper) — the decorative clones a hydration-safe infinite carousel renders at its boundaries — are now excluded from the banner census in `src/diff/dom.ts`, which previously produced false "candidate has N extra banners" findings.
