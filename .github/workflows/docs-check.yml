@@ -1,0 +1,69 @@
+name: docs-check
+
+# Keeps the docs in sync with the CLI/check surface. If a PR changes the
+# command surface (src/cli.ts, src/commands/**, src/checks/**, the .parityrc
+# parser) but touches no docs/**, a `feat` PR is BLOCKED and a `fix` PR gets a
+# warning. Bypass: check the "Docs not needed" box in the PR body, or add the
+# `skip-docs` label. Re-runs on edit/label so a bypass takes effect immediately.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Docs freshness check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execSync } = require("node:child_process");
+            const pr = context.payload.pull_request;
+            const base = pr.base.ref;
+
+            execSync(`git fetch --no-tags origin ${base}`, { stdio: "inherit" });
+            const changed = execSync(`git diff --name-only origin/${base}...HEAD`, {
+              encoding: "utf8",
+            })
+              .split("\n")
+              .map((s) => s.trim())
+              .filter(Boolean);
+
+            const surfaceRe = /^(src\/cli\.ts|src\/commands\/|src\/checks\/|src\/ignore\/parser\.ts)/;
+            const surfaceChanged = changed.some((f) => surfaceRe.test(f));
+            const docsChanged = changed.some((f) => f.startsWith("docs/"));
+
+            const title = (pr.title || "").trim();
+            const isFeat = /^feat(\(|!|:)/i.test(title);
+            const body = pr.body || "";
+            const checkboxBypass = /- \[x\][^\n]*docs/i.test(body);
+            const labelBypass = (pr.labels || []).some((l) => l.name === "skip-docs");
+            const bypass = checkboxBypass || labelBypass;
+
+            if (!surfaceChanged) {
+              core.info("No CLI/check surface changed — docs check not applicable.");
+              return;
+            }
+            if (docsChanged) {
+              core.info("docs/** updated alongside the surface change — OK.");
+              return;
+            }
+            if (bypass) {
+              core.info("Docs check bypassed (checkbox or skip-docs label).");
+              return;
+            }
+
+            const msg =
+              "This PR changes the parity command/check surface (src/cli.ts, " +
+              "src/commands/**, src/checks/**) but updates no docs/**. Update docs/** " +
+              "(and the Parity section on deco-sites/docs), OR tick “Docs not needed” " +
+              "in the PR body, OR add the `skip-docs` label.";
+
+            if (isFeat) {
+              core.setFailed(`Docs required for a feat change. ${msg}`);
+            } else {
+              core.warning(`Docs may need updating. ${msg}`);
+            }
