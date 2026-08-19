@@ -73,7 +73,12 @@ discovery → reconcile → repo-setup → template-bootstrap → workflows
 
 ### discovery
 Delegate to `scout` with `task: "full-discovery"`. Merge result into state.
-Ask the user: "What is the output target? (tanstack-deco / faststore-v4)"
+Ask the user: "What is the output target? (tanstack-deco / faststore-v4)" — and state
+the tradeoff: **`tanstack-deco` renders standalone from props/loaders (a blind live-only
+migration is viewable end-to-end); `faststore-v4` is coupled to the client's VTEX account
+— it builds from code, but RENDERING needs content synced to the account's headless CMS
+(`faststore cms-sync`, account write access) + the `faststore` custom app.** For a
+no-account/live-only migration, faststore-v4 yields buildable code but not a running site.
 Set `source.prodUrl` if not found automatically.
 
 ### reconcile
@@ -95,13 +100,15 @@ Set `source.prodUrl` if not found automatically.
   each migration inherits the template's latest improvements.
   (Skip this entirely when the source is `deco-fresh` — `deco-migrate` scaffolds
   the target from the original repo in the `migrate-script` phase.)
-- **FastStore v4**: scaffold from the public FastStore template —
-  `gh repo create <owner>/<name> --private --template vtex-sites/starter.store` — then
-  write `discovery.config.js` from the capture: `api.storeId` = the source VTEX account
-  (the `*.vtexassets.com` subdomain in `blocks.json`) and `session.locale/currency/country`
-  (from the DOM/`manifest.json`); the starter ships the demo `newstore`. The starter is BARE — the `cms/`, atoms, i18n, and gate
-  tree get created during porting (see `target-faststore-v4/SKILL.md`). Prefer a
-  richer deco FastStore template if one exists.
+- **FastStore v4**: scaffold by **copying the code** from `deco-sites/storefront-faststore`
+  (the deco FastStore template — ships ui atoms/organisms, sdk, hooks, i18n runtime,
+  section patterns, cms schemas, scripts, gates, so ports compose over real infra). Clone,
+  copy the tree, re-init git, set the new remote. Then set the store via env
+  (`VTEX_STORE_ID`, `VTEX_WORKSPACE`, `CONTENT_SOURCE_PROJECT`) — the source VTEX account is
+  the `*.vtexassets.com` subdomain in `blocks.json`; locale/currency from the DOM. Replace
+  the template's example brand theme + assets. Fall back to bare `vtex-sites/starter.store`
+  only if the template is unavailable (ports come out monolithic). See
+  `target-faststore-v4/SKILL.md`.
 Load skill `skills/target-faststore-v4/SKILL.md` or `skills/target-tanstack-deco/SKILL.md`.
 
 ### workflows

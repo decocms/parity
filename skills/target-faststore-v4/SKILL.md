@@ -10,30 +10,30 @@ if present — it overrides everything here). This skill fills the gap when abse
 
 ## Bootstrapping the target repo
 
-Scaffold from `vtex-sites/starter.store` (public FastStore v4 template repo):
-`gh repo create <owner>/<name> --private --template vtex-sites/starter.store`.
+Scaffold by **copying the code** from **`deco-sites/storefront-faststore`** (the deco
+FastStore v4 template — same model as `deco-sites/storefront-tanstack`). Clone it, copy
+the tree, re-init git, set the new remote. It ships the reusable infra a port needs:
+`src/components/ui/atoms` + `ui/organisms`, `src/sdk`, `src/hooks`, a real `src/i18n`
+runtime (`useTranslation`), worked `src/components/sections/` patterns, `cms/faststore/`
+schemas + whitelists, `scripts/` (sort-cms-whitelists, guards), `docs/` playbooks, and
+`.github/` gates — so ports **compose over shared organisms/atoms instead of reinventing**.
 
-**But the starter is BARE** — it ships only `src/fonts` + `src/themes`. It has NO
-`cms/faststore/`, no `src/components/ui/atoms/`, no i18n message runtime, no
-`docs/*playbooks`, and no `scripts/sort-cms-whitelists.mjs` / `yarn quality:guard`
-gate. This skill's rules assume a MATURE store (like the electrolux-poc). On a fresh
-starter you must CREATE the tree as you port:
-- `src/components/index.tsx` (with the default `CUSTOM_COMPONENTS` map — see below),
-- `cms/faststore/components/` (schemas) + `cms/faststore/pages/` (whitelists),
-- `src/i18n/messages/<locale>.json` (read directly with a local `t()` until a real
-  provider is wired), and reference `@faststore/ui` for `Icon` + global `--fs-*`
-  token scale (`--fs-spacing-*`, `--fs-color-neutral-*`, `--fs-text-*`) — the
-  generated `custom-theme.scss` only carries BRAND tokens.
+Do NOT use the bare `vtex-sites/starter.store` unless the template is unavailable — it
+has none of the above (only `src/fonts` + `src/themes`), so ports come out monolithic
+and can't close the 3-point invariant cleanly (there's no `cms/` tree to write into).
 
-**Config the store**: recover the source VTEX account (the `*.vtexassets.com`
-subdomain in `blocks.json`) + locale/currency (from the DOM/`manifest.json`) and
-write them into `discovery.config.js` (`api.storeId`,
-`session.locale/currency/country`) — the starter ships the demo `newstore`. The build queries the store's PUBLIC catalog, so no client credentials
-are needed. Assets the live site renders via config (e.g. a logo with no `<img>`)
-can't be recovered from the capture — leave them as required CMS fields.
+**Config the store**: recover the source VTEX account (the `*.vtexassets.com` subdomain
+in `blocks.json`) + locale/currency (from the DOM/`manifest.json`) and set them via env
+(`VTEX_STORE_ID`, `VTEX_WORKSPACE`, `CONTENT_SOURCE_PROJECT`) / `discovery.config.js`.
+Replace the template's example brand theme (`src/themes/`) + assets with the store's.
 
-Prefer a reusable **deco FastStore template** (with the conventions pre-baked) once
-one exists — same model as `deco-sites/storefront-tanstack` for TanStack.
+**Rendering needs the account CMS.** FastStore fetches page/global content from the
+store's headless CMS by documentId at runtime (local `CMS_DATA` only maps slugs→ids;
+globals/home/landing re-fetch remotely). So a build is green with just code, but a
+running site needs the captured content SYNCED into the account CMS (`faststore
+cms-sync`, needs account write access) + the `faststore` custom app on the orderForm.
+State this at the target decision: **faststore-v4 needs the client's VTEX account to
+render; tanstack-deco renders standalone.**
 
 ## The 3-point invariant (porting checklist for EVERY section)
 
