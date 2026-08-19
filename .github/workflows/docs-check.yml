@@ -1,8 +1,9 @@
 name: docs-check
 
 # Keeps the docs in sync with the CLI/check surface. If a PR changes the
-# command surface (src/cli.ts, src/commands/**, src/checks/**, the .parityrc
-# parser) but touches no docs/**, a `feat` PR is BLOCKED and a `fix` PR gets a
+# command surface (packages/parity/src/cli.ts, src/commands/**, src/checks/**,
+# the .parityrc parser) but touches no docs/**, a `feat` PR is BLOCKED and a
+# `fix` PR gets a
 # warning. Bypass: check the "Docs not needed" box in the PR body, or add the
 # `skip-docs` label. Re-runs on edit/label so a bypass takes effect immediately.
 on:
@@ -32,9 +33,15 @@ jobs:
               .map((s) => s.trim())
               .filter(Boolean);
 
-            const surfaceRe = /^(src\/cli\.ts|src\/commands\/|src\/checks\/|src\/ignore\/parser\.ts)/;
+            // Paths are relative to the repo root, so they carry the
+            // packages/parity prefix since the monorepo move. Without it both
+            // checks are always false and this gate silently stops working.
+            const PKG = "packages/parity/";
+            const surfaceRe = new RegExp(
+              `^${PKG}(src/cli\\.ts|src/commands/|src/checks/|src/ignore/parser\\.ts)`,
+            );
             const surfaceChanged = changed.some((f) => surfaceRe.test(f));
-            const docsChanged = changed.some((f) => f.startsWith("docs/"));
+            const docsChanged = changed.some((f) => f.startsWith(`${PKG}docs/`));
 
             const title = (pr.title || "").trim();
             const isFeat = /^feat(\(|!|:)/i.test(title);
@@ -57,8 +64,9 @@ jobs:
             }
 
             const msg =
-              "This PR changes the parity command/check surface (src/cli.ts, " +
-              "src/commands/**, src/checks/**) but updates no docs/**. Update docs/** " +
+              "This PR changes the parity command/check surface " +
+              `(${PKG}src/cli.ts, ${PKG}src/commands/**, ${PKG}src/checks/**) but ` +
+              `updates no ${PKG}docs/**. Update ${PKG}docs/** ` +
               "(and the Parity section on deco-sites/docs), OR tick “Docs not needed” " +
               "in the PR body, OR add the `skip-docs` label.";
 

@@ -1,0 +1,731 @@
+import { z } from "zod";
+
+export const Severity = z.enum(["critical", "high", "medium", "low"]);
+export type Severity = z.infer<typeof Severity>;
+
+export const Category = z.enum([
+  "functional",
+  "visual",
+  "performance",
+  "seo",
+  "console",
+  "network",
+]);
+export type Category = z.infer<typeof Category>;
+
+export const Viewport = z.enum(["mobile", "tablet", "desktop"]);
+export type Viewport = z.infer<typeof Viewport>;
+
+export const FlowName = z.enum([
+  "homepage",
+  "plp",
+  "pdp",
+  "purchase-journey",
+  "search",
+  "cart-interactions",
+  "login",
+  "spa-navigation",
+]);
+export type FlowName = z.infer<typeof FlowName>;
+
+export const Side = z.enum(["prod", "cand"]);
+export type Side = z.infer<typeof Side>;
+
+export const WebVitals = z.object({
+  lcp: z.number().nullable(),
+  cls: z.number().nullable(),
+  fcp: z.number().nullable(),
+  ttfb: z.number().nullable(),
+  inp: z.number().nullable(),
+});
+export type WebVitals = z.infer<typeof WebVitals>;
+
+export const WebVitalStat = z.object({
+  median: z.number(),
+  p75: z.number(),
+  min: z.number(),
+  max: z.number(),
+  /** Raw per-run values, in capture order (not sorted) — for debugging jitter. */
+  samples: z.array(z.number()),
+});
+export type WebVitalStat = z.infer<typeof WebVitalStat>;
+
+/**
+ * Per-metric aggregate across repeated navigations (`--runs`, issue #179).
+ * `null` when a metric never resolved on any run (e.g. INP with no
+ * interaction). Only populated when the capture opted into `runs > 1`.
+ */
+export const WebVitalsStats = z.object({
+  lcp: WebVitalStat.nullable(),
+  cls: WebVitalStat.nullable(),
+  fcp: WebVitalStat.nullable(),
+  ttfb: WebVitalStat.nullable(),
+  inp: WebVitalStat.nullable(),
+});
+export type WebVitalsStats = z.infer<typeof WebVitalsStats>;
+
+export const ConsoleEntry = z.object({
+  type: z.enum(["error", "warning", "log", "info", "debug"]),
+  text: z.string(),
+  location: z.string().optional(),
+});
+export type ConsoleEntry = z.infer<typeof ConsoleEntry>;
+
+export const NetworkEntry = z.object({
+  url: z.string(),
+  method: z.string(),
+  status: z.number(),
+  resourceType: z.string(),
+  fromCache: z.boolean(),
+  bytes: z.number().nullable(),
+  durationMs: z.number().nullable(),
+  /**
+   * Request start time in ms relative to the page's navigation start.
+   * Lets the report render a real waterfall. Optional for back-compat with
+   * older report.json files that pre-date this field. Issue #78.
+   */
+  startMs: z.number().nullable().optional(),
+  /** Request end time, paired with `startMs`. Optional for back-compat. Issue #78. */
+  endMs: z.number().nullable().optional(),
+  cacheControl: z.string().nullable(),
+  serverTiming: z.string().nullable(),
+  decoSection: z.string().nullable(),
+});
+export type NetworkEntry = z.infer<typeof NetworkEntry>;
+
+export const PageCapture = z.object({
+  url: z.string(),
+  finalUrl: z.string(),
+  status: z.number(),
+  viewport: Viewport,
+  side: Side,
+  durationMs: z.number(),
+  html: z.string(),
+  /** Representative value per metric — the median across runs when captured with `runs > 1`, else the single sample. */
+  vitals: WebVitals,
+  /** Full per-metric stats (median/p75/min/max + raw samples), present only when captured with `runs > 1`. Issue #179. */
+  vitalsStats: WebVitalsStats.optional(),
+  /**
+   * Second read taken after `scrollFullPage()` finishes, when the capture
+   * actually scrolled (i.e. `scrollToLoad !== false`). Includes LCP/CLS
+   * contamination from scroll-triggered lazy content — a legitimate
+   * "full page including scroll" number, but NOT the one to diff against
+   * Lighthouse. Absent when the page wasn't scrolled (fast/vitals-only
+   * captures, or `scrollToLoad: false`). Issue #185.
+   */
+  vitalsFullPage: WebVitals.optional(),
+  console: z.array(ConsoleEntry),
+  network: z.array(NetworkEntry),
+  screenshotPath: z.string(),
+  harPath: z.string().optional(),
+  tracePath: z.string().optional(),
+  xRobotsTag: z.string().nullable().optional(),
+  /**
+   * Logical pairing key, used instead of the URL pathname when prod and cand
+   * live at DIFFERENT paths. A partial migration routinely has no path parity
+   * — the reference PDP is a product the candidate hasn't ported yet — and
+   * without this every check that calls `pairCaptures` reports two orphans
+   * instead of one comparison. Set by an explicit page pair; absent otherwise.
+   */
+  pairKey: z.string().optional(),
+});
+export type PageCapture = z.infer<typeof PageCapture>;
+
+export const StepCapture = z.object({
+  step: z.number(),
+  name: z.string(),
+  side: Side,
+  viewport: Viewport,
+  status: z.enum(["ok", "skipped", "failed"]),
+  durationMs: z.number(),
+  url: z.string().optional(),
+  screenshotPath: z.string(),
+  note: z.string().optional(),
+  detail: z.record(z.string(), z.unknown()).optional(),
+  /** Selector key that this step used, if applicable (for learned-selectors promotion) */
+  selectorKey: z.string().optional(),
+  /** The actual selector string that worked for this step */
+  usedSelector: z.string().optional(),
+  /** True when the selector came from LLM recovery (so it gets promoted explicitly) */
+  recoveredByLlm: z.boolean().optional(),
+  /** Human-readable description of what was executed (for trace display) */
+  actionDescription: z.string().optional(),
+  /** URL the page was on BEFORE this step ran */
+  beforeUrl: z.string().optional(),
+  /** Screenshot taken BEFORE the action (only for interactive steps) */
+  screenshotBeforePath: z.string().optional(),
+  /** Path to the Playwright trace .zip for this flow */
+  tracePath: z.string().optional(),
+  /** For cart/checkout validation steps: did we find the expected product? */
+  cartValidation: z
+    .object({
+      expectedTitle: z.string(),
+      found: z.boolean(),
+      method: z.enum(["selector", "llm", "none"]).optional(),
+      observedTitles: z.array(z.string()).optional(),
+      reason: z.string().optional(),
+    })
+    .optional(),
+  /** For step 6 (open-minicart): how was the cart UI revealed? */
+  cartOpenMethod: z.enum(["click", "click-navigate", "hover", "already-open", "failed"]).optional(),
+  /**
+   * Intent of the minicart-trigger markup, captured BEFORE we attempt to
+   * interact (issue #12). Lets a downstream check compare prod vs cand
+   * and surface markup divergence (e.g. cand turned a hover-drawer
+   * trigger into a click-navigate link) — a real UX regression that's
+   * separate from "which interaction strategy our harness happened to
+   * use".
+   *  - hover-drawer:          trigger reveals an inline drawer on hover (no click handler / no nav href)
+   *  - click-drawer:          trigger has a click handler that opens an inline drawer
+   *  - click-navigate-checkout: trigger is an <a href="/checkout..."> (or has onclick that navs there)
+   *  - click-navigate-cart:    trigger is an <a href="/cart..."> (or similar)
+   *  - inline-notification:    add-to-cart already opened a drawer/notification; the trigger is dormant
+   *  - unknown:                we couldn't classify (no trigger found, or page closed before probe)
+   */
+  cartRevealMode: z
+    .enum([
+      "hover-drawer",
+      "click-drawer",
+      "click-navigate-checkout",
+      "click-navigate-cart",
+      "inline-notification",
+      "unknown",
+    ])
+    .optional(),
+  /** For search flow steps: captures term, mode, and result/suggestion counts. */
+  searchValidation: z
+    .object({
+      term: z.string(),
+      mode: z.enum(["empty", "autocomplete", "results", "no-results"]),
+      resultCount: z.number().optional(),
+      suggestionCount: z.number().optional(),
+      hasEmptyState: z.boolean().optional(),
+    })
+    .optional(),
+  /** For cart-interactions flow: before/after snapshot of qty + price for the action. */
+  cartItemValidation: z
+    .object({
+      action: z.enum([
+        "increment",
+        "decrement",
+        "remove",
+        "apply-coupon",
+        "apply-valid-coupon",
+        "add-second-item",
+        "validate-multi-item",
+        "verify-persistence",
+      ]),
+      before: z
+        .object({
+          qty: z.number().optional(),
+          price: z.string().optional(),
+          items: z.number().optional(),
+          totalQty: z.number().optional(),
+        })
+        .optional(),
+      after: z
+        .object({
+          qty: z.number().optional(),
+          price: z.string().optional(),
+          items: z.number().optional(),
+          totalQty: z.number().optional(),
+        })
+        .optional(),
+      succeeded: z.boolean(),
+    })
+    .optional(),
+  /** For login flow: stage in the form lifecycle + optional error message captured. */
+  loginValidation: z
+    .object({
+      stage: z.enum(["form-loaded", "submitted", "succeeded", "error-shown"]),
+      errorMessage: z.string().optional(),
+    })
+    .optional(),
+  /**
+   * Structured "why" data for steps that poll for an async UI change (cart
+   * reveal, add-to-cart confirmation) instead of failing on the first check.
+   * Surfaced in the report AND fed to LLM recovery as concrete evidence —
+   * e.g. "selector X is present but stayed hidden for 4000ms" points at a
+   * slow animation/data-gated render, not a wrong/missing selector, which a
+   * human or LLM debugging a false failure needs to know.
+   */
+  diagnostics: z
+    .object({
+      timedOut: z.boolean().optional(),
+      budgetMs: z.number().optional(),
+      elapsedMs: z.number().optional(),
+      pollCount: z.number().optional(),
+      /** Per-selector snapshot taken when the wait gave up: exists in the DOM vs actually visible. */
+      probes: z
+        .array(
+          z.object({
+            selector: z.string(),
+            present: z.boolean(),
+            visible: z.boolean(),
+          }),
+        )
+        .optional(),
+      toastText: z.string().optional(),
+    })
+    .optional(),
+});
+export type StepCapture = z.infer<typeof StepCapture>;
+
+export const FlowCapture = z.object({
+  flow: FlowName,
+  side: Side,
+  viewport: Viewport,
+  pages: z.array(PageCapture),
+  steps: z.array(StepCapture).optional(),
+  totalDurationMs: z.number(),
+});
+export type FlowCapture = z.infer<typeof FlowCapture>;
+
+export const EvidenceRef = z.object({
+  kind: z.enum(["screenshot", "har", "trace", "console", "network", "html"]),
+  path: z.string(),
+  label: z.string().optional(),
+});
+export type EvidenceRef = z.infer<typeof EvidenceRef>;
+
+export const Issue = z.object({
+  id: z.string(),
+  severity: Severity,
+  category: Category,
+  page: z.string().optional(),
+  check: z.string(),
+  summary: z.string(),
+  details: z.string().optional(),
+  evidence: z.array(EvidenceRef).optional(),
+  reproduction: z.string().optional(),
+  suggestedFix: z.string().optional(),
+  /**
+   * Marks issues where the check could not produce a confident verdict —
+   * e.g. one side's heuristic classifier fell back to "unknown" so we
+   * can't tell if the divergence is real or just an unclassified prod
+   * markup. Renderers should de-emphasize these (badge "inconclusive")
+   * and CI gates should treat them as informational. Issue #47.
+   */
+  inconclusive: z.boolean().optional(),
+});
+export type Issue = z.infer<typeof Issue>;
+
+export const CheckResult = z.object({
+  name: z.string(),
+  status: z.enum(["pass", "fail", "warn", "skipped"]),
+  severity: Severity,
+  durationMs: z.number(),
+  summary: z.string(),
+  data: z.record(z.string(), z.unknown()).optional(),
+  issues: z.array(Issue),
+});
+export type CheckResult = z.infer<typeof CheckResult>;
+
+export const VisualDifferenceType = z.enum([
+  "missing-component",
+  "different-component",
+  "extra-component",
+  "layout-shift",
+  "text-changed",
+  "color-style-diff",
+  "image-diff",
+  "cosmetic",
+]);
+export type VisualDifferenceType = z.infer<typeof VisualDifferenceType>;
+
+export const VisualRegion = z.enum([
+  "header",
+  "hero",
+  "navigation",
+  "main",
+  "shelf",
+  "footer",
+  "sidebar",
+  "modal",
+  "minicart",
+  "other",
+]);
+export type VisualRegion = z.infer<typeof VisualRegion>;
+
+export const VisualDifference = z.object({
+  type: VisualDifferenceType,
+  region: VisualRegion,
+  severity: Severity,
+  description: z.string(),
+});
+export type VisualDifference = z.infer<typeof VisualDifference>;
+
+export const VisualDiffPage = z.object({
+  pageKey: z.string(),
+  pagePath: z.string(),
+  pageLabel: z.string(),
+  viewport: Viewport,
+  prodUrl: z.string(),
+  candUrl: z.string(),
+  prodScreenshotPath: z.string(),
+  candScreenshotPath: z.string(),
+  heatmapPath: z.string().optional(),
+  pctDiff: z.number(),
+  verdict: z.enum(["pass", "diffs", "failed"]),
+  prodSections: z.array(z.string()),
+  candSections: z.array(z.string()),
+  sectionsOnlyInProd: z.array(z.string()),
+  sectionsOnlyInCand: z.array(z.string()),
+  differences: z.array(VisualDifference),
+  llmCalled: z.boolean(),
+  llmError: z.string().optional(),
+  /** ISO timestamp when this verdict came from the cross-run cache instead of a fresh LLM call. */
+  cachedAt: z.string().optional(),
+});
+export type VisualDiffPage = z.infer<typeof VisualDiffPage>;
+
+export const VisualDiffSummary = z.object({
+  results: z.array(VisualDiffPage),
+  pagesChecked: z.number(),
+  pagesWithDiffs: z.number(),
+  pagesPassed: z.number(),
+  pagesFailed: z.number(),
+  llmCallsUsed: z.number(),
+  /**
+   * Single binary signal for automation/agent loops. `true` iff every page in
+   * `results` has verdict === "pass". `false` if any page has "diffs" or
+   * "failed". Read this from report.json as the canonical "is parity OK?" flag.
+   */
+  parityOk: z.boolean(),
+  /** How many of the results came straight from the cross-run cache (no LLM hit). */
+  pagesFromCache: z.number(),
+});
+export type VisualDiffSummary = z.infer<typeof VisualDiffSummary>;
+
+/** SEO check — structured result so the report can render a dedicated tab. */
+export const SeoPageMeta = z.object({
+  pageKey: z.string(),
+  pageLabel: z.string(),
+  prodTitle: z.string().nullable(),
+  candTitle: z.string().nullable(),
+  prodDescription: z.string().nullable(),
+  candDescription: z.string().nullable(),
+  prodCanonical: z.string().nullable(),
+  candCanonical: z.string().nullable(),
+  prodRobots: z.string().nullable(),
+  candRobots: z.string().nullable(),
+  prodXRobotsTag: z.string().nullable(),
+  candXRobotsTag: z.string().nullable(),
+  prodJsonLdTypes: z.array(z.string()),
+  candJsonLdTypes: z.array(z.string()),
+  /** Aggregated severity for this page (max of all its issues). null = no issues. */
+  maxSeverity: Severity.nullable(),
+  issueCount: z.number(),
+});
+export type SeoPageMeta = z.infer<typeof SeoPageMeta>;
+
+export const SeoRobotsTxt = z.object({
+  prodPresent: z.boolean(),
+  candPresent: z.boolean(),
+  prodSitemaps: z.array(z.string()),
+  candSitemaps: z.array(z.string()),
+  uaDiffCount: z.number(),
+  raw: z
+    .object({
+      prod: z.string().nullable(),
+      cand: z.string().nullable(),
+    })
+    .optional(),
+});
+export type SeoRobotsTxt = z.infer<typeof SeoRobotsTxt>;
+
+export const SeoSitemap = z.object({
+  prodPresent: z.boolean(),
+  candPresent: z.boolean(),
+  prodCount: z.number(),
+  candCount: z.number(),
+  countDelta: z.number(),
+  countPct: z.number(),
+  onlyProdSample: z.array(z.string()),
+  onlyCandSample: z.array(z.string()),
+});
+export type SeoSitemap = z.infer<typeof SeoSitemap>;
+
+export const SeoSummary = z.object({
+  pages: z.array(SeoPageMeta),
+  robotsTxt: SeoRobotsTxt,
+  sitemap: SeoSitemap,
+  /** Issues raised by the SEO check (mirror of CheckResult.issues, kept here for self-contained tab rendering). */
+  issues: z.array(Issue),
+  /** Count of pages with at least one SEO regression. */
+  pagesWithIssues: z.number(),
+});
+export type SeoSummary = z.infer<typeof SeoSummary>;
+
+export const Verdict = z.object({
+  status: z.enum(["pass", "warn", "fail"]),
+  score: z.number().min(0).max(100),
+  /**
+   * Formula version that produced `score`. Absent/1 = legacy linear
+   * formula (saturated at 0 on real runs); 2 = per-page normalization +
+   * exponential decay. Deltas are only shown between same-version runs.
+   */
+  scoreVersion: z.number().optional(),
+  /** Page-pair count the score was normalized over (score v2). */
+  pagesAnalyzed: z.number().optional(),
+  critical: z.number(),
+  high: z.number(),
+  medium: z.number(),
+  low: z.number(),
+  checksRun: z.number(),
+  checksPassed: z.number(),
+  checksFailed: z.number(),
+  checksSkipped: z.number(),
+  /**
+   * Module names (M3 module selection) that contributed to this verdict's
+   * score — populated when the verdict came from `computeCompositeVerdict`
+   * (i.e. per-module scoring was available). Absent for legacy/no-module
+   * verdicts.
+   */
+  modulesRun: z.array(z.string()).optional(),
+});
+export type Verdict = z.infer<typeof Verdict>;
+
+/**
+ * Per-module verdict (M3 phase B — adaptive scoring). Mirrors `Verdict`'s
+ * shape but scoped to one module's checks/issues; see
+ * `computeModuleVerdicts` in src/engine/verdict.ts.
+ */
+export const ModuleVerdict = z.object({
+  module: z.string(),
+  score: z.number().min(0).max(100),
+  status: z.enum(["pass", "warn", "fail"]),
+  critical: z.number(),
+  high: z.number(),
+  medium: z.number(),
+  low: z.number(),
+  checksRun: z.number(),
+  pagesAnalyzed: z.number(),
+});
+export type ModuleVerdict = z.infer<typeof ModuleVerdict>;
+
+export const Run = z.object({
+  schemaVersion: z.literal("0.1"),
+  id: z.string(),
+  timestamp: z.string(),
+  prodUrl: z.string(),
+  candUrl: z.string(),
+  flows: z.array(FlowName),
+  viewports: z.array(Viewport),
+  cep: z.string(),
+  durationMs: z.number(),
+  verdict: Verdict,
+  /**
+   * Most recent non-partial prior run against the same prod/cand host
+   * pair (and same scoreVersion), so every surface can show the score
+   * trend without re-scanning the runs directory.
+   */
+  previousRun: z
+    .object({
+      id: z.string(),
+      timestamp: z.string(),
+      score: z.number(),
+      scoreDelta: z.number(),
+    })
+    .optional(),
+  topIssues: z.array(Issue),
+  issues: z.array(Issue),
+  checks: z.array(CheckResult),
+  flowCaptures: z.array(FlowCapture),
+  visualDiff: VisualDiffSummary.optional(),
+  seo: SeoSummary.optional(),
+  baseline: z
+    .object({
+      name: z.string(),
+      delta: z.object({
+        resolved: z.array(Issue),
+        new: z.array(Issue),
+        regressions: z.array(Issue),
+      }),
+    })
+    .optional(),
+  /**
+   * True when the run was interrupted (SIGINT, --timeout) and the report
+   * was written before reaching the natural end of the pipeline. Renderers
+   * should show a banner so the user knows the verdict is partial. Issue #56.
+   */
+  partial: z.boolean().optional(),
+  /** Phase where partial=true was set. Useful for triage. */
+  partialReason: z.string().optional(),
+  /**
+   * Per-phase wall-clock timing for the run. Lets users see where the
+   * time actually went (e.g. checks took 60% of the run vs LLM 20%) so
+   * optimization is data-driven. Surfaced in the report header + CLI
+   * summary at end-of-run.
+   */
+  timings: z
+    .object({
+      totalMs: z.number(),
+      phases: z.array(z.object({ phase: z.string(), durationMs: z.number() })),
+    })
+    .optional(),
+  /**
+   * Free-text reason for this run's module scope, passed via `--why`
+   * (M3 module selection). Purely informational — not parsed or used in
+   * scoring. Optional so older reports still validate.
+   */
+  selectionReason: z.string().optional(),
+  /**
+   * Per-module score breakdown (M3 phase B — adaptive scoring), populated
+   * whenever at least one check mapped to a module. Absent on legacy
+   * report.json files. See `computeModuleVerdicts`/`computeCompositeVerdict`
+   * in src/engine/verdict.ts.
+   */
+  moduleVerdicts: z.array(ModuleVerdict).optional(),
+});
+export type Run = z.infer<typeof Run>;
+
+export const Baseline = z.object({
+  name: z.string(),
+  createdAt: z.string(),
+  fromRunId: z.string(),
+  prodUrl: z.string(),
+  candUrl: z.string(),
+  verdict: Verdict,
+  issues: z.array(Issue),
+});
+export type Baseline = z.infer<typeof Baseline>;
+
+export const ParityRc = z.object({
+  cep: z.string().default("01310-100"),
+  plpUrlHint: z.string().optional(),
+  selectors: z
+    .object({
+      categoryLink: z.string().optional(),
+      productCard: z.string().optional(),
+      buyButton: z.string().optional(),
+      minicartTrigger: z.string().optional(),
+      cepInputPdp: z.string().optional(),
+      cepInputCart: z.string().optional(),
+      checkoutButton: z.string().optional(),
+      sizeSwatch: z.string().optional(),
+      colorSwatch: z.string().optional(),
+      variantRow: z.string().optional(),
+      quantityIncrement: z.string().optional(),
+      quantityInput: z.string().optional(),
+      minicartCount: z.string().optional(),
+      cartOpenedIndicator: z.string().optional(),
+      /** Issue #149 — the minicart drawer/panel root when open, for reveal detection. */
+      minicartPanel: z.string().optional(),
+      // Search flow
+      searchTrigger: z.string().optional(),
+      searchInput: z.string().optional(),
+      searchSuggestions: z.string().optional(),
+      // Cart interactions flow
+      cartItemRow: z.string().optional(),
+      cartQuantityIncrement: z.string().optional(),
+      cartQuantityDecrement: z.string().optional(),
+      cartRemoveItem: z.string().optional(),
+      cartCouponInput: z.string().optional(),
+      cartCouponSubmit: z.string().optional(),
+      cartTotalPrice: z.string().optional(),
+      /** VTEX-only: seller-code input in cart/checkout (informational orderForm probe). */
+      sellerCodeInput: z.string().optional(),
+      // PDP gallery + related
+      pdpGalleryThumbnail: z.string().optional(),
+      pdpGalleryMain: z.string().optional(),
+      pdpRelatedShelf: z.string().optional(),
+      // Login flow
+      loginTrigger: z.string().optional(),
+      loginEmailInput: z.string().optional(),
+      loginPasswordInput: z.string().optional(),
+      loginSubmit: z.string().optional(),
+      loginErrorMessage: z.string().optional(),
+      accountMenuTrigger: z.string().optional(),
+      // PLP pagination flow
+      paginationNext: z.string().optional(),
+      loadMoreButton: z.string().optional(),
+    })
+    .default({}),
+  skipSteps: z.array(z.string()).default([]),
+  /** Search flow config — override LLM-discovered terms, customise typing speed. */
+  search: z
+    .object({
+      terms: z.array(z.string()).optional(),
+      noResultsTerm: z.string().optional(),
+      typeDelayMs: z.number().optional(),
+    })
+    .optional(),
+  /** Login flow config — gated by `enabled`. Credentials MUST come from env vars. */
+  login: z
+    .object({
+      enabled: z.boolean().default(false),
+    })
+    .optional(),
+  /** Footer-links-health check config. */
+  footer: z
+    .object({
+      maxLinks: z.number().default(20),
+      followExternal: z.boolean().default(false),
+    })
+    .optional(),
+  /** 404-page-parity check config. */
+  notFound: z
+    .object({
+      testUrl: z.string().optional(),
+    })
+    .optional(),
+  /**
+   * Cart-interactions coupon config. `invalidCode` overrides the hardcoded
+   * default; `validCode` opts into the `apply-valid-coupon` step (skipped
+   * when absent — parity has no way to know a real discount code).
+   */
+  coupon: z
+    .object({
+      invalidCode: z.string().optional(),
+      validCode: z.string().optional(),
+    })
+    .optional(),
+  /**
+   * Issue #54 (3/D) — TanStack's `preload="intent"` fires a `_serverFn`
+   * request per hovered `<Link>`; a PLP with several product cards can
+   * flood the worker with concurrent requests on hover. Configurable
+   * since the exact server-fn URL convention is framework-specific and
+   * we don't want to hardcode a guess that silently never matches.
+   */
+  serverFnFloodBudget: z.number().optional(),
+  /** Regex (string form) matching server-fn request URLs. Defaults to `_serverFn` (TanStack Start's convention) when unset. */
+  serverFnPattern: z.string().optional(),
+  /**
+   * Issue #145 — extra CSS selectors for site-specific blocking overlays
+   * (newsletter/discount modals, region pickers, app-install nags) that
+   * `dismissOverlays` should close before/while interacting. Merged with the
+   * built-in defaults (cookie banners, toasts, alertdialogs), never replacing
+   * them. Structural detection (issue #146) handles unnamed overlays that
+   * actually intercept a click; this list is the explicit fast-path override.
+   */
+  overlaySelectors: z.array(z.string()).optional(),
+  /**
+   * Issue #143 — how long (ms) the purchase-journey/e2e add-to-cart step
+   * polls for a success signal (URL→cart, minicart count increase, drawer
+   * open, success toast) before giving up. Defaults to 3000ms. Tune it to a
+   * site whose success toast is short-lived or whose TTFB/popup overlays
+   * narrow the confirmation window, to avoid a false "no signal" failure on
+   * an add-to-cart that actually worked. Also settable via `--add-to-cart-timeout <ms>`.
+   */
+  addToCartConfirmMs: z.number().optional(),
+  /**
+   * How long (ms) the open-minicart step polls for the drawer to become
+   * visible before giving up. Drawers often reveal asynchronously (CSS
+   * `allow-discrete` transition, data-gated render, slow dev-mode click
+   * handler), so parity polls rather than snapshotting once. Defaults to
+   * 4000ms (8000ms on localhost dev servers). Raise it for a site whose
+   * minicart animates in slowly or waits on a cart API before rendering.
+   */
+  cartRevealTimeoutMs: z.number().optional(),
+});
+export type ParityRc = z.infer<typeof ParityRc>;
+
+export const ParityIgnore = z.object({
+  ignoreSelectorsVisual: z.array(z.string()).default([]),
+  ignoreRequestPatterns: z.array(z.string()).default([]),
+  ignoreConsolePatterns: z.array(z.string()).default([]),
+  ignoreMetaKeys: z.array(z.string()).default([]),
+  toleratedDomDrift: z.record(z.string(), z.number()).default({}),
+});
+export type ParityIgnore = z.infer<typeof ParityIgnore>;
