@@ -139,6 +139,13 @@ export interface MigratedComponent extends ExtractedComponent {
    * only ONE representative is captured. Absent (or 1) when unique.
    */
   repeated?: number;
+  /**
+   * True when this row was NOT captured live: the source repo defines the
+   * component but it never appeared in the DOM snapshot (unused/edge route).
+   * Its html/styles/screenshot are empty — the agent ports it from the source
+   * code, not from a capture.
+   */
+  synthetic?: boolean;
 }
 
 /** One resolved page with its enriched components. */

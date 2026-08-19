@@ -8,7 +8,11 @@
 import { componentDirName } from "../extract/naming.ts";
 import type { MigrationBundle } from "../types/migrate.ts";
 
-export function buildMigrationPrompt(bundle: MigrationBundle, playbook?: string): string {
+export function buildMigrationPrompt(
+  bundle: MigrationBundle,
+  playbook?: string,
+  source?: { playbook?: string; notes?: string[] },
+): string {
   const lines: string[] = [];
   const md = lines.push.bind(lines);
 
@@ -22,6 +26,20 @@ export function buildMigrationPrompt(bundle: MigrationBundle, playbook?: string)
   md(`- **Captured**: ${bundle.timestamp} (${bundle.viewport})`);
   md(`- **Pages**: ${bundle.pages.map((p) => `${p.kind} (${p.path})`).join(", ") || "—"}`);
   md("");
+
+  // Source-side context: what the FROM stack is + gotchas the scan surfaced.
+  // Prepended before the target playbook so the agent frames the port correctly.
+  if (source?.playbook) {
+    md(source.playbook);
+    md("");
+  }
+  if (source?.notes?.length) {
+    md("**Source scan notes:**");
+    md("");
+    for (const n of source.notes) md(`- ${n}`);
+    md("");
+  }
+
   md("## How to work");
   md("");
   md("1. Read `index.md` for the theme tokens and the component map.");
@@ -35,16 +53,18 @@ export function buildMigrationPrompt(bundle: MigrationBundle, playbook?: string)
 
   const globals = bundle.components.filter((c) => c.scope === "global");
   const pageComps = bundle.components.filter((c) => c.scope === "page");
-  const row = (role: string, i: number) =>
-    `- \`${role}\` → components/${componentDirName(role, i + 1)}/README.md`;
+  const row = (c: MigrationBundle["components"][number], i: number) =>
+    `- \`${c.role}\` → components/${componentDirName(c.role, i + 1)}/README.md${
+      c.synthetic ? " _(source-only — no live capture; port from source code)_" : ""
+    }`;
   if (globals.length) {
     md("### Global components");
-    bundle.components.forEach((c, i) => c.scope === "global" && md(row(c.role, i)));
+    bundle.components.forEach((c, i) => c.scope === "global" && md(row(c, i)));
     md("");
   }
   if (pageComps.length) {
     md("### Page components");
-    bundle.components.forEach((c, i) => c.scope === "page" && md(row(c.role, i)));
+    bundle.components.forEach((c, i) => c.scope === "page" && md(row(c, i)));
     md("");
   }
 

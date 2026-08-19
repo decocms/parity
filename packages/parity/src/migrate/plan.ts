@@ -6,8 +6,10 @@
  * what the LIVE capture saw.
  */
 
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { SourceComponent, SourceInventory } from "./sources/types.ts";
-import type { MigrationBundle } from "../types/migrate.ts";
+import type { MigratedComponent, MigrationBundle } from "../types/migrate.ts";
 
 /**
  * Per-component reconciliation of the two inventories:
@@ -18,11 +20,19 @@ import type { MigrationBundle } from "../types/migrate.ts";
  */
 export type ComponentOrigin = "both" | "source-only" | "live-only";
 
+/**
+ * Porting status, owned by the orchestrator (not `parity migrate`). Written as
+ * `"pending"` for every row at creation time; the plugin flips it to `"done"`
+ * or `"skipped"` in-place via {@link savePlan} as it ports each component.
+ */
+export type ComponentStatus = "pending" | "done" | "skipped";
+
 export interface PlanComponent {
   name: string;
   role: string;
   scope: "global" | "page" | null;
   origin: ComponentOrigin;
+  status: ComponentStatus;
   /** Repo-relative source file, when the code defines it. */
   file: string | null;
 }
@@ -63,13 +73,21 @@ export function buildMigrationPlan(input: {
       role: c.role,
       scope: c.scope,
       origin: liveByKey.has(k) ? "both" : "source-only",
+      status: "pending",
       file: c.file,
     });
   }
   // Live-only rows: seen in the DOM but with no source file.
   for (const [k, c] of liveByKey) {
     if (srcByKey.has(k)) continue;
-    components.push({ name: c.role, role: c.role, scope: c.scope, origin: "live-only", file: null });
+    components.push({
+      name: c.role,
+      role: c.role,
+      scope: c.scope,
+      origin: "live-only",
+      status: "pending",
+      file: null,
+    });
   }
 
   return {
@@ -80,4 +98,43 @@ export function buildMigrationPlan(input: {
     pages: bundle.pages.map((p) => ({ path: p.path, kind: p.kind })),
     components,
   };
+}
+
+const PLAN_FILE = "migration-plan.json";
+
+/** Read `migration-plan.json` from a run dir, or null when absent. */
+export function loadPlan(dir: string): MigrationPlan | null {
+  const p = join(dir, PLAN_FILE);
+  if (!existsSync(p)) return null;
+  return JSON.parse(readFileSync(p, "utf8")) as MigrationPlan;
+}
+
+/** Write `migration-plan.json` to a run dir (the orchestrator updates it in-place). */
+export function savePlan(dir: string, plan: MigrationPlan): void {
+  writeFileSync(join(dir, PLAN_FILE), `${JSON.stringify(plan, null, 2)}\n`, "utf8");
+}
+
+/**
+ * Source-only components as synthetic `MigratedComponent`s — defined in the
+ * code but never seen live, so their capture fields are empty. Merged into the
+ * bundle so the exporters and MIGRATION_PROMPT.md list them for porting (they'd
+ * otherwise be invisible to an agent reading only the live capture).
+ */
+export function syntheticSourceComponents(plan: MigrationPlan): MigratedComponent[] {
+  return plan.components
+    .filter((c) => c.origin === "source-only")
+    .map((c) => ({
+      role: c.name,
+      selector: "",
+      html: "",
+      computedStyles: null,
+      screenshotPath: "",
+      assets: { images: [], backgroundImages: [], fonts: [] },
+      links: [],
+      textContent: [],
+      tailwind: [],
+      interactions: [],
+      scope: c.scope ?? "page",
+      synthetic: true,
+    }));
 }
