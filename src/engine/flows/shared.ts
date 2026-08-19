@@ -34,14 +34,22 @@ export async function captureInpSnapshot(page: Page, cap: PageCapture): Promise<
  */
 export async function screenshotStable(
   page: Page,
-  opts: { path: string; fullPage?: boolean },
+  opts: { path: string; fullPage?: boolean; quality?: number },
 ): Promise<void> {
   await Promise.race([
     stabilizeCarousels(page).catch(() => undefined),
     new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
   ]);
+  // `quality` only applies to JPEG output (Playwright throws if it's passed for
+  // a .png path) — gate on the extension so callers can keep shrinking big
+  // full-page captures without special-casing at every call site.
+  const isJpeg = /\.jpe?g$/i.test(opts.path);
   await page
-    .screenshot({ path: opts.path, fullPage: opts.fullPage ?? false })
+    .screenshot({
+      path: opts.path,
+      fullPage: opts.fullPage ?? false,
+      ...(isJpeg && opts.quality != null ? { quality: opts.quality } : {}),
+    })
     .catch(() => undefined);
 }
 
@@ -477,7 +485,13 @@ export async function attemptRecovery(
   } catch {
     return null;
   }
-  const suggestion = await suggestRecovery({ stepName, intendedAction, html, alreadyTried, diagnostics });
+  const suggestion = await suggestRecovery({
+    stepName,
+    intendedAction,
+    html,
+    alreadyTried,
+    diagnostics,
+  });
   if (!suggestion) return null;
   try {
     const el = page.locator(suggestion.selector).first();
@@ -960,7 +974,13 @@ export async function dismissBlockingOverlay(
 
   // 2. Close-like button anywhere on the page (fallback, broadened selectors).
   const closer = page.locator(CLOSE_BUTTON_SELECTOR).first();
-  if (await withCap(closer.isVisible({ timeout: 300 }).catch(() => false), 500, false)) {
+  if (
+    await withCap(
+      closer.isVisible({ timeout: 300 }).catch(() => false),
+      500,
+      false,
+    )
+  ) {
     await closer.click({ timeout: 1_500 }).catch(() => undefined);
     await page.waitForTimeout(300);
     if (await cleared()) {
@@ -1046,12 +1066,29 @@ export async function dismissOverlays(page: Page, ctx: FlowContext): Promise<Ove
       // Skip the isVisible probe entirely when count is 0.
       const cnt = await withCap(overlay.count(), OVERLAY_PROBE_CAP_MS, 0);
       if (cnt === 0) continue;
-      if (!(await withCap(overlay.isVisible({ timeout: OVERLAY_PROBE_CAP_MS }).catch(() => false), OVERLAY_PROBE_CAP_MS, false)))
+      if (
+        !(await withCap(
+          overlay.isVisible({ timeout: OVERLAY_PROBE_CAP_MS }).catch(() => false),
+          OVERLAY_PROBE_CAP_MS,
+          false,
+        ))
+      )
         continue;
       const closer = overlay.locator(CLOSE_BUTTON_SELECTOR).first();
-      if (await withCap(closer.isVisible({ timeout: OVERLAY_PROBE_CAP_MS }).catch(() => false), OVERLAY_PROBE_CAP_MS, false)) {
+      if (
+        await withCap(
+          closer.isVisible({ timeout: OVERLAY_PROBE_CAP_MS }).catch(() => false),
+          OVERLAY_PROBE_CAP_MS,
+          false,
+        )
+      ) {
         await closer.click({ timeout: 1_500 }).catch(() => undefined);
-        dismissals.push({ reason: "selector-match", tag: sel, method: "close-button", dismissed: true });
+        dismissals.push({
+          reason: "selector-match",
+          tag: sel,
+          method: "close-button",
+          dismissed: true,
+        });
         continue;
       }
       await page.keyboard.press("Escape").catch(() => undefined);

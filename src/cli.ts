@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { auditCommand } from "./commands/audit.ts";
 import { baselineList, baselineSet, baselineUnset } from "./commands/baseline.ts";
+import { benchmarkCommand } from "./commands/benchmark.ts";
 import { cacheCommand } from "./commands/cache.ts";
 import { checkCommand } from "./commands/check.ts";
 import { compareCommand } from "./commands/compare.ts";
@@ -462,6 +463,42 @@ program
   });
 
 program
+  .command("benchmark")
+  .description(
+    [
+      "User Navigation Benchmark: warm before/after story for a Fresh→TanStack migration.",
+      "Simulates a real journey (home → PLP → scroll/paginate → PDP → switch variant) on",
+      "both sites, hovering to prefetch and warming caches first, times each phase, records",
+      "a HAR, measures Web Vitals with Lighthouse, and emits ONE self-contained HTML report",
+      "(PT/EN toggle) you can share with a client.",
+    ].join("\n"),
+  )
+  .requiredOption("--prod <url>", "Production URL (Fresh — the 'before')")
+  .requiredOption("--cand <url>", "Candidate URL (TanStack — the 'after')")
+  .option("--viewports <list>", "mobile,desktop (pick one or both)", "mobile,desktop")
+  .option("--warmup-runs <n>", "Journey passes to warm caches before measuring", "2")
+  .option("--measured-runs <n>", "Measured passes per side (median, kills variance)", "3")
+  .option("--paginations <n>", "How many times to scroll/paginate the PLP", "3")
+  .option(
+    "--plp <path>",
+    "Pin the PLP path (skip auto-discovery), e.g. /roupas — useful to force a clothing category with real color variants",
+  )
+  .option("--cep <cep>", "CEP (kept for overlay/region dismissal parity)", "01310-100")
+  .option("--output <dir>", "Output directory for runs/<id>/", "./parity-output")
+  .option("--no-vitals", "Skip the Lighthouse web-vitals pass (faster iteration)")
+  .option("--no-auto-selectors", "Skip LLM-based selector discovery")
+  .option("--lang <pt|en>", "Default report language (toggle switches live)", "pt")
+  .option("--open", "Open the HTML report when done", false)
+  .option("--pt", "Tell the LLM to respond in Brazilian Portuguese. Issue #67.")
+  .action(async (opts) => {
+    if (opts.pt) {
+      const { setLlmLanguage } = await import("./llm/client.ts");
+      setLlmLanguage("pt");
+    }
+    process.exit(await benchmarkCommand(opts));
+  });
+
+program
   .command("prompt")
   .argument("<runId>", "Run ID")
   .description("Generate a Markdown prompt of ranked issues ready to paste into any LLM")
@@ -745,7 +782,11 @@ program
     "Comma-separated role allowlist, e.g. header,footer,nav,shelf,minicart. Default: all detected.",
   )
   .option("--target <name>", "Target playbook to append to the prompt (e.g. faststore)")
-  .option("--viewport <viewport>", "Primary viewport for component capture: mobile | desktop | tablet", "mobile")
+  .option(
+    "--viewport <viewport>",
+    "Primary viewport for component capture: mobile | desktop | tablet",
+    "mobile",
+  )
   .option(
     "--viewports <list>",
     "Comma-separated viewports for theme + site screenshots (e.g. mobile,desktop). Default: --viewport only.",

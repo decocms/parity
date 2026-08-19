@@ -8,6 +8,7 @@
 | `parity e2e` | Single-site functional end-to-end: all flows + all checks |
 | `parity journey` | CI-friendly: only the purchase journey, with JUnit / GitHub annotations |
 | `parity vitals` | Crawl N pages, compare Web Vitals prod vs cand |
+| `parity benchmark` | User Navigation Benchmark: warm before/after story (home → PLP → paginate → PDP → shelf), single shareable HTML |
 | `parity cache` | CDN cache analysis, opportunities, request categorization |
 | `parity serve` | Local HTTP server with iframe proxy so side-by-side tab works for any site |
 | `parity report` | Reopen a saved run's HTML report. With `--section <name>`: extract one tab to stdout |
@@ -223,3 +224,42 @@ Tune the add-to-cart confirmation window with `--add-to-cart-timeout <ms>` (defa
 **Use `parity e2e` when** you want to validate "does this site actually work end-to-end?" — pre-launch, post-deploy, partner sites, or an agent-in-loop validating a migrated build in CI/PR where there's no prod baseline to compare against (issue #141). **Use `parity run` when** you need to detect *regressions* between two versions.
 
 > `parity run` requires both `--prod` and `--cand` (it's a prod↔cand diff). Running it with a single site (`--prod X --cand X`) is wasteful and produces a degenerate self-comparison — omit `--prod` and the CLI will point you at `parity e2e` instead.
+
+## `parity benchmark` — User Navigation Benchmark
+
+A client-facing before/after story for a Fresh→TanStack migration. It simulates a
+real returning visitor and times each step of a shopping journey on **both** sites,
+emitting a **single self-contained HTML** report (PT/EN toggle, mobile/desktop tabs,
+scrollable full-page prints, links to every tested page).
+
+```bash
+parity benchmark --prod https://www.farmrio.com.br --cand https://farmrio-tanstack.deco.site
+parity benchmark --prod ... --cand ... --plp /novidades --viewports mobile,desktop --open
+```
+
+**How it works.** A *scout* validates, in the browser, a category (PLP) and a product
+(PDP) that actually work on **both** sites (render products, no error) and pins the
+same pages for both. Then, as a returning visitor, each side warms the edge **and the
+browser cache** (`--warmup-runs`, default 2) and is measured `--measured-runs` times
+(default 3, median). Each navigation is timed by **wall-clock from the click to the
+first product image rendering** (not `networkidle`, not the HAR). Steps: home load,
+home→PLP (hamburger menu), pagination (per page × per technology), PDP entry, product→
+product SPA shelf hop, and — only when the product has a colour variant — variant switch.
+Web Vitals come from Lighthouse (cold first visit) per viewport. A full HAR of the
+session is saved as `user-navigation-benchmark-<viewport>-<side>.har`.
+
+| Flag | What it does |
+| --- | --- |
+| `--prod <url>` / `--cand <url>` | Fresh ("before") and TanStack ("after") URLs (required) |
+| `--viewports <list>` | `mobile,desktop` (default) — pick one or both |
+| `--warmup-runs <n>` | Warmup passes before measuring (default 2) |
+| `--measured-runs <n>` | Measured passes per side, reported as the median (default 3) |
+| `--paginations <n>` | How many times to scroll/paginate the PLP (default 3) |
+| `--plp <path>` | Pin the PLP path (skip auto-discovery), e.g. `/novidades` |
+| `--no-vitals` | Skip the Lighthouse Web-Vitals pass (faster) |
+| `--no-auto-selectors` | Skip LLM selector discovery (defaults + learned only) |
+| `--lang <pt\|en>` | Default report language (the toggle switches live) |
+| `--open` | Open the HTML report when done |
+
+Broken steps (a route the candidate doesn't have, pagination that didn't advance) are
+flagged red and listed in a warning banner instead of being reported as a fake win.

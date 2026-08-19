@@ -36,11 +36,14 @@
 //
 // Findings and full per-run data from actually running this against FARM
 // Rio: see the linked issues above and the reports referenced from them.
-import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { launchBrowser, newContext } from "../src/engine/browser.ts";
 import { capturePage, installVitalsCollector } from "../src/engine/collect.ts";
+// Productized form of this spike: `parity benchmark --prod <url> --cand <url>`
+// (src/commands/benchmark.ts) — a parameterized user-navigation benchmark that
+// reuses this same Lighthouse runner.
+import { type LhSample, measureLighthouse } from "../src/engine/lighthouse.ts";
 
 const SMOKE = process.env.SMOKE === "1";
 const RUNS = SMOKE ? 1 : process.env.RUNS ? Number(process.env.RUNS) : 5;
@@ -77,14 +80,6 @@ interface VitalsSample {
   inp: number | null;
   status: number;
   durationMs: number;
-}
-
-interface LhSample {
-  lcp: number | null;
-  cls: number | null;
-  fcp: number | null;
-  ttfb: number | null;
-  tbt: number | null;
 }
 
 interface ResultRow {
@@ -178,112 +173,6 @@ async function measureParity(
   }
 }
 
-const MAX_LH_ATTEMPTS = 3;
-
-async function measureLighthouse(
-  host: (typeof HOSTS)[number],
-  path: string,
-  run: number,
-): Promise<LhSample | { error: string }> {
-  let last: LhSample | { error: string } = { error: "never attempted" };
-  for (let attempt = 1; attempt <= MAX_LH_ATTEMPTS; attempt++) {
-    last = await measureLighthouseOnce(host, path, run, attempt);
-    if (!("error" in last)) return last;
-    log(
-      `  lighthouse attempt ${attempt}/${MAX_LH_ATTEMPTS} failed (${last.error}) — ${attempt < MAX_LH_ATTEMPTS ? "retrying" : "giving up"}`,
-    );
-  }
-  return last;
-}
-
-/**
- * A real headless-Chrome + 4x-CPU-throttling failure mode, not a bug: on
- * heavier pages the render genuinely doesn't complete inside Lighthouse's
- * internal FCP-wait window, and it reports NO_FCP with no usable metrics.
- * ~1/3 of runs hit this against the heaviest, uncached pages in one
- * benchmark. Retried by the caller rather than silently dropped — a page
- * ending up with 1 of 3 "valid" samples instead of 3 is a bigger problem
- * than the extra ~90s a retry costs.
- */
-async function measureLighthouseOnce(
-  host: (typeof HOSTS)[number],
-  path: string,
-  run: number,
-  attempt: number,
-): Promise<LhSample | { error: string }> {
-  // Short id, not the full slug: long product-slug paths pushed combined
-  // output-path + chrome-launcher's own nested profile-temp path past
-  // Windows' MAX_PATH, causing silent ENOENT on some product pages.
-  const safe = `p${ALL_PATHS.indexOf(path)}`;
-  const outPath = join(OUT_DIR, "lighthouse", `${host.name}-${safe}-run${run}-a${attempt}.json`);
-  // chrome-launcher's default user-data-dir lands under the shared system
-  // Temp dir and can hit EPERM there (Windows AV/ACL flakiness) — give this
-  // run its own writable TEMP so chrome-launcher's tmp dir creation lands
-  // somewhere uncontended instead of fighting --chrome-flags quoting.
-  const runTemp = join(OUT_DIR, "lighthouse", `.tmp-${host.name}-${safe}-${run}-a${attempt}`);
-  mkdirSync(runTemp, { recursive: true });
-  const args = [
-    "--yes",
-    "lighthouse",
-    new URL(path, host.base).toString(),
-    "--output=json",
-    `--output-path=${outPath}`,
-    "--only-categories=performance",
-    "--form-factor=mobile",
-    "--throttling-method=devtools",
-    "--chrome-flags=--headless=new",
-    "--quiet",
-    "--max-wait-for-load=90000",
-  ];
-  const { code, stderr } = await new Promise<{ code: number; stderr: string }>((resolve) => {
-    const proc = spawn("npx", args, {
-      shell: true,
-      stdio: ["ignore", "ignore", "pipe"],
-      env: { ...process.env, TEMP: runTemp, TMP: runTemp },
-    });
-    let stderrBuf = "";
-    proc.stderr.on("data", (chunk) => {
-      stderrBuf += chunk.toString();
-    });
-    proc.on("close", (exitCode) => resolve({ code: exitCode ?? 1, stderr: stderrBuf }));
-    proc.on("error", (err) => resolve({ code: 1, stderr: err.message }));
-  });
-  let report: {
-    audits: Record<string, { numericValue?: number }>;
-    runtimeError?: { code: string; message: string };
-  };
-  try {
-    report = JSON.parse(readFileSync(outPath, "utf-8"));
-  } catch (err) {
-    // chrome-launcher on Windows frequently fails its own post-run tmp-dir
-    // cleanup (EPERM: a Chrome child process hasn't released a file handle
-    // yet) and exits 1 even though the report was already written fine —
-    // that case never reaches here since the file parses fine. This catch
-    // is for the case where the file is genuinely missing/corrupt.
-    return {
-      error:
-        code !== 0
-          ? `lighthouse exit ${code}: ${stderr.slice(0, 200)}`
-          : `parse failed: ${(err as Error).message}`,
-    };
-  }
-  if (report.runtimeError) {
-    return { error: `${report.runtimeError.code}: ${report.runtimeError.message.slice(0, 150)}` };
-  }
-  const audits = report.audits;
-  const lcp = audits["largest-contentful-paint"]?.numericValue ?? null;
-  if (lcp === null) {
-    return { error: "no LCP value despite no runtimeError" };
-  }
-  return {
-    lcp,
-    cls: audits["cumulative-layout-shift"]?.numericValue ?? null,
-    fcp: audits["first-contentful-paint"]?.numericValue ?? null,
-    ttfb: audits["server-response-time"]?.numericValue ?? null,
-    tbt: audits["total-blocking-time"]?.numericValue ?? null,
-  };
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -326,7 +215,13 @@ async function main(): Promise<void> {
             parity = await measureParity(browser, host, path);
           }
           log(`measuring ${host.name}${path} [lighthouse run ${run}/${RUNS}]`);
-          const lighthouse = await measureLighthouse(host, path, run);
+          // Short id, not the full slug: long product-slug paths pushed the
+          // combined output-path past Windows' MAX_PATH (silent ENOENT).
+          const lighthouse = await measureLighthouse(new URL(path, host.base).toString(), {
+            outDir: join(OUT_DIR, "lighthouse"),
+            id: `${host.name}-p${ALL_PATHS.indexOf(path)}-run${run}`,
+            formFactor: "mobile",
+          });
           rows.push({ host: host.name, path, run, parity, lighthouse });
           await sleep(500);
         }
