@@ -1,8 +1,8 @@
 // Reusable Lighthouse runner — a fresh `npx lighthouse` process per page with
 // real (not simulated) mobile throttling (Slow 4G + 4x CPU) via
-// `--throttling-method=devtools`. Extracted from
-// `scripts/farmrio-vitals-check.ts` so both that spike and the `parity
-// benchmark` command share one hardened implementation.
+// `--throttling-method=devtools`. Used by `parity benchmark` for the cold
+// first-visit Web Vitals pass (originally extracted from the FARM Rio vitals
+// spike, since removed).
 //
 // The hardening here is load-bearing and was earned against real failures:
 //   - NO_FCP on heavy/uncached pages under 4x CPU throttling (~1/3 of runs on
