@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-08-19
+
+### Added
+
+* **`parity benchmark` — User Navigation Benchmark.** A client-facing before/after story for a Fresh→TanStack migration: a scout validates a PLP + PDP that work on **both** sites, each side warms the edge + browser cache (returning-visitor model), then a real journey (home → hamburger menu → PLP → paginate → PDP → product→product SPA shelf hop → optional colour-variant switch) is measured N× (median), timed by wall-clock from the click to the first product image rendering. Emits **one self-contained HTML report** (PT/EN, mobile/desktop tabs, per-page/per-technology pagination, scrollable full-page prints, an `(i)` methodology panel, and an error banner for broken steps) plus Lighthouse Web Vitals and a full HAR per side. (#219)
+* **Reusable Lighthouse runner** (`src/engine/lighthouse.ts`) — real mobile/desktop devtools throttling with NO_FCP retry, extracted from the FARM Rio vitals spike. (#219)
+
 ## [0.21.0] — 2026-08-17
 
 ### Added
