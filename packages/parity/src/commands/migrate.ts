@@ -26,8 +26,17 @@ import { jsonExporter } from "../migrate/exporters/json.ts";
 import { markdownExporter } from "../migrate/exporters/markdown.ts";
 import { htmlExporter } from "../migrate/exporters/html.ts";
 import { buildMigrationPrompt } from "../migrate/prompt.ts";
-import { buildFastStoreTheme } from "../migrate/targets/faststore.ts";
+import { buildMigrationPlan } from "../migrate/plan.ts";
+import { buildFastStoreTheme } from "../migrate/targets/faststore-v4.ts";
 import { getTargetPlaybook, TARGET_NAMES } from "../migrate/targets/index.ts";
+import {
+  detectSource,
+  getSource,
+  liveOnly,
+  SOURCE_KINDS,
+  type Source,
+  type SourceInventory,
+} from "../migrate/sources/index.ts";
 import { aggregateTheme, mergeRawThemeSamples, scrapeThemeSamples } from "../migrate/theme.ts";
 import {
   collectImageRefs,
@@ -76,6 +85,10 @@ export interface MigrateOptions {
   format: string;
   outDir: string;
   target?: string;
+  /** Path to the source repo. When set, the inventory is read from CODE and the source is detected on disk. */
+  source?: string;
+  /** Override source detection, e.g. "vtex-io" | "deco-fresh" | "live-only". */
+  sourceKind?: string;
   refresh?: boolean;
   /** Open the generated index.html in the browser when done. */
   open?: boolean;
@@ -125,6 +138,36 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
     }
   }
   const allowlist = parseAllowlist(opts.components);
+
+  // Resolve the SOURCE (input) — the mirror of --target (output). With --source
+  // pointing at the repo, the component inventory comes from the code and the
+  // VTEX-IO runtime scrape is gated on the source actually being VTEX IO;
+  // without it, everything stays live-only (the original behaviour).
+  let source: Source = liveOnly;
+  let sourceInventory: SourceInventory = liveOnly.inventory("");
+  if (opts.sourceKind) {
+    const s = getSource(opts.sourceKind);
+    if (!s) {
+      console.error(
+        chalk.red(`--source-kind inválido: ${opts.sourceKind} (disponíveis: ${SOURCE_KINDS.join(", ")})`),
+      );
+      return 2;
+    }
+    source = s;
+  }
+  if (opts.source) {
+    if (!existsSync(opts.source)) {
+      console.error(chalk.red(`--source não encontrado: ${opts.source}`));
+      return 2;
+    }
+    if (!opts.sourceKind) source = detectSource(opts.source);
+    sourceInventory = source.inventory(opts.source);
+    console.log(
+      chalk.dim(
+        `  source: ${source.label} — ${sourceInventory.components.length} component(s) from code`,
+      ),
+    );
+  }
 
   const host = safeHost(opts.url);
   const runDir = resolve(opts.outDir, host);
@@ -294,7 +337,17 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
         primaryViewport,
         resolvedPages,
         theme,
-        { allowlist, llm: !opts.noLlm, runDir, baseUrl: opts.url },
+        {
+          allowlist,
+          llm: !opts.noLlm,
+          runDir,
+          baseUrl: opts.url,
+          // The VTEX-IO runtime scrape is meaningful only for a VTEX-IO source.
+          // With an explicit non-VTEX source we skip it; otherwise (live-only or
+          // no --source) we keep the self-gating scrape (`readVtexBlockTree`
+          // returns null off VTEX IO), preserving the original behaviour.
+          vtexScrape: opts.source ? source.kind === "vtex-io" : true,
+        },
       ));
       writeFileSync(
         capturePath,
@@ -325,6 +378,16 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
       pages,
       components,
     };
+
+    // migration-plan.json — the contract the orchestration phases read (source
+    // + target + reconciled component list). Always emitted, regardless of
+    // --format, since it's machine input, not a human report.
+    const plan = buildMigrationPlan({
+      bundle,
+      source: { kind: source.kind, label: source.label, dir: opts.source ?? null },
+      inventory: sourceInventory,
+    });
+    writeFileSync(resolve(runDir, "migration-plan.json"), `${JSON.stringify(plan, null, 2)}\n`, "utf8");
 
     // ── Emit ────────────────────────────────────────────────────────
     if (format === "json" || format === "both") await jsonExporter.export(bundle, runDir);
@@ -373,7 +436,14 @@ async function capturePages(
   viewport: Viewport,
   resolvedPages: ResolvedPage[],
   theme: ThemeBundle,
-  cfg: { allowlist: Set<string> | null; llm: boolean; runDir: string; baseUrl: string },
+  cfg: {
+    allowlist: Set<string> | null;
+    llm: boolean;
+    runDir: string;
+    baseUrl: string;
+    /** Read the VTEX-IO `window.__RUNTIME__` block tree. Default true (self-gates off VTEX). */
+    vtexScrape: boolean;
+  },
 ): Promise<{
   pages: MigratedPage[];
   components: MigratedComponent[];
@@ -444,7 +514,7 @@ async function capturePages(
       pages.push({ url: target.url, path: target.path, kind: target.kind, components: pageComponents });
 
       // VTEX IO block tree + content for THIS page (merged across pages).
-      const pageBlocks = await readVtexBlockTree(page);
+      const pageBlocks = cfg.vtexScrape ? await readVtexBlockTree(page) : null;
       if (pageBlocks) {
         const refMap = collectImageRefs(pageBlocks, cfg.baseUrl);
         for (const b of rewriteBlockUrls(pageBlocks, refMap)) {

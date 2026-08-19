@@ -2,10 +2,14 @@
  * Target playbook registry. Add a target = add a `.ts` string here.
  * `--target <name>` resolves by key — no other code changes.
  */
-import { faststore } from "./faststore.ts";
+import { faststore as faststoreV4 } from "./faststore-v4.ts";
+import { tanstackDeco } from "./tanstack-deco.ts";
 
 export const TARGETS: Record<string, string> = {
-  faststore,
+  faststore: faststoreV4,
+  "faststore-v4": faststoreV4,
+  tanstack: tanstackDeco,
+  "tanstack-deco": tanstackDeco,
 };
 
 export function getTargetPlaybook(name: string): string | undefined {

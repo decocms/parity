@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFastStoreTheme, pickBreakpointTiers } from "../../src/migrate/targets/faststore.ts";
+import { buildFastStoreTheme, pickBreakpointTiers } from "../../src/migrate/targets/faststore-v4.ts";
 import type { ThemeBundle } from "../../src/types/migrate.ts";
 
 function theme(overrides: Partial<ThemeBundle> = {}): ThemeBundle {

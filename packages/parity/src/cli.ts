@@ -806,6 +806,14 @@ program
     "Extra pages to sample from the sitemap by kind, e.g. 'plp=2,pdp=2,other=3,search=1' (other = institutional). Default samples a few of each incl. institutional pages.",
   )
   .option("--format <fmt>", "md | json | both", "both")
+  .option(
+    "--source <dir>",
+    "Path to the source repo. When set, the component inventory is read from CODE (exhaustive, exact names) and the VTEX-IO runtime scrape is gated on the source actually being VTEX IO. Without it, everything comes from the live capture (original behaviour).",
+  )
+  .option(
+    "--source-kind <kind>",
+    "Override source auto-detection: deco-fresh | vtex-io | live-only. Only needed when detection fails.",
+  )
   .option("--out <dir>", "Output directory (stable per host, for resume)", "./parity-migrate")
   .option("--refresh", "Re-run all phases even if cached artifacts exist", false)
   .option("--open", "Open the generated index.html visual report in the browser", false)
@@ -821,6 +829,8 @@ program
         pages: opts.pages,
         components: opts.components,
         target: opts.target,
+        source: opts.source,
+        sourceKind: opts.sourceKind,
         viewport: opts.viewport,
         viewports: opts.viewports,
         sample: opts.sample,
