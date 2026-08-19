@@ -32,6 +32,12 @@ the whole directory. Each entry: path | when to load.
 | `skills/knowledge/perf/n-plus-1.md` | N+1 API calls in loaders, batching |
 | `skills/knowledge/perf/variant-selection.md` | Variant change performance, replaceState |
 
+## Parity
+
+| Path | When to load |
+|---|---|
+| `skills/knowledge/parity/commands.md` | Choosing/running a parity command (run vs e2e, section, benchmark, vitals, cache, audit) — flags + score reading |
+
 ## Source
 
 These files are vendorized from upstream repos. Run `scripts/sync-skills.ts --check`
