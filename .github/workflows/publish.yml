@@ -23,6 +23,13 @@ name: Publish
 #     write` (for tags/releases) and we use OIDC trusted publishing
 #     for npm — no extra secrets, no PAT, no token rotation.
 #
+# Monorepo note: the publishable package lives in `packages/parity`, so the
+# `paths` filter, the version probe and every npm step below are scoped there.
+# The repo root is a private workspace with no version — it must never publish.
+# DO NOT RENAME THIS FILE: the npm trusted-publisher rule below is bound to the
+# workflow *filename*, so renaming it breaks publishing (a working-directory
+# change is fine — npm does not match on the package directory).
+#
 # OIDC trusted publishing prerequisites (one-time setup, already done):
 #   1. Trusted Publisher rule on npmjs.com → @decocms/parity → Access:
 #        Organization or user: decocms
@@ -47,7 +54,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "package.json"
+      - "packages/parity/package.json"
   workflow_dispatch:
 
 # Workflow-level permissions intentionally MINIMAL. The publish job
@@ -99,8 +106,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PKG_NAME=$(node -p "require('./package.json').name")
-          PKG_VERSION=$(node -p "require('./package.json').version")
+          PKG_NAME=$(node -p "require('./packages/parity/package.json').name")
+          PKG_VERSION=$(node -p "require('./packages/parity/package.json').version")
           echo "package: $PKG_NAME"
           echo "local version: $PKG_VERSION"
           echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
@@ -158,10 +165,14 @@ jobs:
 
       - name: Build
         if: steps.check.outputs.changed == 'true'
+        working-directory: packages/parity
         run: bun run build
 
       - name: Publish to npm
         if: steps.check.outputs.changed == 'true'
+        # MUST run from the package dir: `npm publish` at the repo root would
+        # target the private workspace wrapper, not @decocms/parity.
+        working-directory: packages/parity
         # Per https://docs.npmjs.com/trusted-publishers: when trusted
         # publishing is correctly configured, `--access` and `--provenance`
         # flags are NOT needed — `publishConfig.access` in package.json

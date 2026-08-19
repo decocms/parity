@@ -26,8 +26,12 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # `--changed` resolves paths against the vitest root, which after the
+      # monorepo move is packages/parity. Running this from the repo root would
+      # find no test files at all.
       - name: Test (changed only)
         if: github.event_name == 'pull_request'
+        working-directory: packages/parity
         run: bunx vitest run --changed origin/${{ github.base_ref }}
 
       - name: Test (all)

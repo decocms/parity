@@ -72,9 +72,6 @@
     "prettier": "^3.8.3",
     "zod": "^4.0.0"
   },
-  "overrides": {
-    "encoding-sniffer": "^1.0.0"
-  },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "cheerio": "^1.0.0",
@@ -89,8 +86,5 @@
   },
   "publishConfig": {
     "access": "public"
-  },
-  "trustedDependencies": [
-    "@biomejs/biome"
-  ]
+  }
 }

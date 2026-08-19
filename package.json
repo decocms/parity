@@ -1,0 +1,24 @@
+{
+  "name": "decocms-parity",
+  "private": true,
+  "type": "module",
+  "description": "Monorepo: the parity CLI (validation + migration capture) and the Claude Code plugin that orchestrates migrations with it.",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "bun run --filter='./packages/*' build",
+    "check": "bun run --filter='./packages/*' check",
+    "test": "bun run --filter='./packages/*' test",
+    "lint": "bun run --filter='./packages/*' lint",
+    "fmt": "bun run --filter='./packages/*' fmt",
+    "deadcode": "bun run --filter='./packages/*' deadcode"
+  },
+  "engines": {
+    "node": ">=20",
+    "bun": ">=1.1"
+  },
+  "//": "bun reads `overrides` and `trustedDependencies` ONLY from the install root, so these must live here — in packages/parity they would be silently inert.",
+  "overrides": {
+    "encoding-sniffer": "^1.0.0"
+  },
+  "trustedDependencies": ["@biomejs/biome"]
+}
