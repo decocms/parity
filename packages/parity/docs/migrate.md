@@ -61,6 +61,8 @@ phase whose artifact already exists. Pass `--refresh` to redo every phase.
 | `--pages <list>` | `/,category-auto,pdp-auto` | Literal paths/URLs and/or `category-auto`/`pdp-auto` |
 | `--components <list>` | all detected | Role allowlist (exact role or `<name>-*`) |
 | `--target <name>` | none | Appends a target playbook to the prompt (e.g. `faststore`) |
+| `--source <dir>` | none | Path to the source repo. Reads the component inventory from CODE and prepends the source playbook to the prompt |
+| `--source-kind <kind>` | auto-detect | Force the source: `deco-fresh` \| `vtex-io` \| `live-only` |
 | `--viewport <viewport>` | `mobile` | `mobile` \| `desktop` \| `tablet` |
 | `--format <fmt>` | `both` | `md` \| `json` \| `both` |
 | `--out <dir>` | `./parity-migrate` | Output directory (stable per host) |
@@ -86,7 +88,8 @@ parity-migrate/
     report.html         # SAME report, fully self-contained (images inlined) — shareable single file; `--open` opens this
     assets/fonts/       # downloaded web-font files (.woff2/.woff)
     index.md            # LEAN tier: theme + assets + component map + notes
-    MIGRATION_PROMPT.md # LEAN tier: agent instructions (+ target playbook)
+    MIGRATION_PROMPT.md # LEAN tier: agent instructions (+ source & target playbooks)
+    migration-plan.json # machine contract: source/target + reconciled components
     custom-theme.scss   # --target faststore: brand tokens → --fs-* (starter)
     blocks.json         # VTEX IO only: raw block tree from window.__RUNTIME__
     component-map.json  # VTEX IO only: block → FastStore component (+ custom-component)
@@ -126,6 +129,32 @@ v4 styles with **SCSS design tokens + `data-fs-*` attributes** and **Phosphor
 icons**. For those, the extracted **theme tokens** map to the target's design
 tokens and the **raw computed styles** (in `manifest.json`) are the exact-value
 source of truth; the `faststore` playbook spells this out.
+
+## Source & the migration plan
+
+`--source <dir>` points at the original repo (the input mirror of `--target`).
+The source is sniffed on disk — `deco-fresh` (a `deno.json` importing `@deco/deco`
++ `fresh.gen.ts`), `vtex-io` (a `manifest.json` with a `store` builder /
+`vtex.store*` dep), or `live-only` (the fallback when `--source` is omitted or
+nothing matches). Override with `--source-kind`. When a source repo is present,
+the component inventory comes from **code** (exhaustive, exact names) instead of
+DOM heuristics, and the source's **playbook** (framework gotchas) is prepended to
+`MIGRATION_PROMPT.md` ahead of the target playbook.
+
+`migration-plan.json` is the machine contract every orchestration phase reads
+(instead of re-parsing `manifest.json`). It carries the source/target decision,
+the page list, and one row per component reconciling code against the live
+capture:
+
+- `origin` — `both` (in code and seen live), `source-only` (in code, not
+  observed live), or `live-only` (seen live, no source file).
+- `status` — `pending` \| `done` \| `skipped`, all `pending` at creation; an
+  orchestrator flips it in-place as it ports.
+- `file` — repo-relative source path when the code defines the component.
+
+`source-only` components also join the lean artifact as **synthetic** entries
+(empty capture, flagged in the component's README and prompt row) so an agent
+reading only the capture still sees them and ports them from the source code.
 
 ## VTEX IO stores (block tree)
 
