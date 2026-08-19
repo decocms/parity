@@ -112,10 +112,7 @@ export async function launchBrowser(opts: LaunchOptions = {}): Promise<Browser> 
         ],
       }),
       new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("Chromium launch timeout (35 s)")),
-          35_000,
-        ),
+        setTimeout(() => reject(new Error("Chromium launch timeout (35 s)")), 35_000),
       ),
     ]);
   try {
@@ -249,6 +246,22 @@ export interface ContextOptions {
    * approximate the cold-visit numbers those tools report. See issue #186.
    */
   noCache?: boolean;
+  /**
+   * Disable ONLY the browser's own disk/memory HTTP cache (CDP
+   * `Network.setCacheDisabled`), WITHOUT sending `Cache-Control: no-cache`.
+   * Every asset is refetched over the network, but the CDN/edge (e.g.
+   * Cloudflare) still serves its warm cache — exactly the "returning visitor
+   * hits a warm edge, cold local cache" scenario a production user sees. This
+   * is the benchmark's cache model. Distinct from `noCache`, which also sends
+   * the revalidation header and thus bypasses the edge too.
+   */
+  diskCacheDisabled?: boolean;
+  /**
+   * Override the preset device-scale-factor. The mobile preset renders at retina
+   * DSF (~2.6), which makes full-page screenshots enormous. Set to 1 for report
+   * captures — same layout/viewport, ~7× smaller images.
+   */
+  deviceScaleFactor?: number;
 }
 
 /**
@@ -275,7 +288,12 @@ export async function newContext(browser: Browser, opts: ContextOptions): Promis
   const baseContext = VIEWPORT_PRESETS[opts.viewport];
   const ctx = await browser.newContext({
     ...baseContext,
-    recordHar: opts.harPath ? { path: opts.harPath, mode: "minimal" } : undefined,
+    ...(opts.deviceScaleFactor != null ? { deviceScaleFactor: opts.deviceScaleFactor } : {}),
+    // `full` (not `minimal`) so the downloaded HAR carries the complete
+    // request waterfall + per-entry `timings` a HAR viewer/DevTools needs to
+    // "validate the time of each thing"; `content: "omit"` drops response
+    // bodies so the artifact stays shareable (timings/sizes/headers kept).
+    recordHar: opts.harPath ? { path: opts.harPath, mode: "full", content: "omit" } : undefined,
     bypassCSP: true,
     ignoreHTTPSErrors: true,
     extraHTTPHeaders: opts.noCache
@@ -283,12 +301,13 @@ export async function newContext(browser: Browser, opts: ContextOptions): Promis
       : undefined,
   });
 
-  if (opts.noCache) {
+  if (opts.noCache || opts.diskCacheDisabled) {
     // Every call site across the codebase creates pages via `ctx.newPage()`
     // (there's no other choke point), so wrap it here rather than threading
     // a duplicate noCache flag through every capture call site — this way
     // the CDP cache-disable is guaranteed to run, and to finish, before the
-    // caller can reach `page.goto()`.
+    // caller can reach `page.goto()`. (`diskCacheDisabled` reuses the same CDP
+    // path but skips the no-cache request header so the edge cache still serves.)
     const rawNewPage = ctx.newPage.bind(ctx);
     ctx.newPage = (async () => {
       const page = await rawNewPage();
