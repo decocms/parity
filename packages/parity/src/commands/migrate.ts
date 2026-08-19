@@ -25,6 +25,7 @@ import { isGlobalRole, planComponentDedup, toMigratedComponent } from "../migrat
 import { jsonExporter } from "../migrate/exporters/json.ts";
 import { markdownExporter } from "../migrate/exporters/markdown.ts";
 import { htmlExporter } from "../migrate/exporters/html.ts";
+import { classifyLiveStack, describeStack, type StackSignals } from "../migrate/sources/classify.ts";
 import { buildMigrationPrompt } from "../migrate/prompt.ts";
 import { buildMigrationPlan } from "../migrate/plan.ts";
 import { buildFastStoreTheme } from "../migrate/targets/faststore-v4.ts";
@@ -180,12 +181,14 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
     const assetsPath = resolve(runDir, "assets.json");
     type Phase1Meta = {
       platform: Platform;
+      stack: StackSignals | null;
       assets: SiteAssets;
       screenshots: { viewport: string; path: string }[];
     };
     const blocksPath = resolve(runDir, "blocks.json");
     let theme: ThemeBundle;
     let platform: Platform;
+    let stack: StackSignals | null = null;
     let assets: SiteAssets;
     let screenshots: { viewport: string; path: string }[];
     // VTEX blocks + content are produced in Phase 3 (read per captured page).
@@ -195,6 +198,7 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
       theme = readJson<ThemeBundle>(themePath)!;
       const meta = readJson<Phase1Meta>(assetsPath)!;
       platform = meta.platform;
+      stack = meta.stack ?? null;
       assets = meta.assets;
       screenshots = meta.screenshots ?? [];
       console.log(chalk.dim("  phase 1 theme+assets: cached"));
@@ -227,7 +231,16 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
             .then(() => screenshots.push({ viewport: vp, path: `screenshots/${vp}.png` }))
             .catch(() => undefined);
           if (!assetsResolved) {
-            platformSeen = detectPlatform({ url: opts.url, html: await page.content().catch(() => "") });
+            const pageHtml = await page.content().catch(() => "");
+            platformSeen = detectPlatform({ url: opts.url, html: pageHtml });
+            // Sharp stack verdict (frontend + htmx + commerce) — drives the
+            // orchestrator's path. Custom-domain deco sites are caught here.
+            const cookieNames = await ctx
+              .cookies()
+              .then((cs) => cs.map((c) => c.name).join("; "))
+              .catch(() => "");
+            stack = classifyLiveStack(pageHtml, cookieNames);
+            console.log(chalk.dim(`  stack: ${describeStack(stack)}`));
             const rawAssets = await collectSiteAssets(page);
             const fetchBytes = async (url: string) =>
               (await browserFetchBytes(page, url)) ?? (await nodeFetchBytes(url));
@@ -261,7 +274,7 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
       writeFileSync(themePath, `${JSON.stringify(theme, null, 2)}\n`, "utf8");
       writeFileSync(
         assetsPath,
-        `${JSON.stringify({ platform, assets, screenshots } satisfies Phase1Meta, null, 2)}\n`,
+        `${JSON.stringify({ platform, stack, assets, screenshots } satisfies Phase1Meta, null, 2)}\n`,
         "utf8",
       );
     }
@@ -371,6 +384,7 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
       viewports,
       screenshots,
       platform,
+      stack,
       target: opts.target,
       theme,
       assets,

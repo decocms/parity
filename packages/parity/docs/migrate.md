@@ -98,6 +98,21 @@ parity-migrate/
         screenshot.png
 ```
 
+## Stack detection
+
+Phase 1 classifies **what the site is built with** — the verdict that drives a
+migration's path — and logs it (`stack: deco-fresh + htmx, commerce: vtex`). It's
+stored in `assets.json` and on the bundle (`bundle.stack`):
+
+- `frontend`: `deco-fresh` | `vtex-io` | `faststore` | `salesforce-commerce` | `unknown`
+  — a deco frontend on a **custom domain** is detected from markup, not the URL.
+- `htmx`: deco-fresh only — `true` when the HTMX plugin is in use (`hx-*` attrs /
+  `htmx.org`), the signal that a port needs an extra `hx-*` → React refactor pass.
+- `commerce`: the backend the ported components keep calling (`vtex` can sit
+  behind a `deco-fresh` frontend).
+
+Markers are calibrated against real stores; see `src/migrate/sources/classify.ts`.
+
 ## Token economy
 
 The artifact an agent reads (`index.md` + `components/*/README.md` +

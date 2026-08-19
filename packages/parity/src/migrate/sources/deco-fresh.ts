@@ -60,5 +60,11 @@ CMS block; its exported \`Props\` interface is the schema. Islands in \`islands/
 are the client-interactive parts; loaders in \`loaders/\` are server data
 functions. Porting notes: signals → your target's state model, \`useSection\`/
 HTMX partials → the target's navigation, and Deno-only imports (\`$fresh/\`,
-\`jsr:\`, \`https://\` URLs) have no place in a Node/Vite target.`,
+\`jsr:\`, \`https://\` URLs) have no place in a Node/Vite target.
+**HTMX plugin:** if the live capture flagged \`htmx\` (or you find \`hx-get\`/
+\`hx-post\`/\`hx-swap\`/\`hx-target\` attributes or \`useScript\` with inline JS in
+sections/islands), there is an extra refactor pass beyond \`deco-migrate\`: each
+\`hx-*\` interaction and inline \`useScript\` handler becomes a React
+event-handler + state (or a TanStack navigation), since the target has no HTMX
+runtime. Grep the ported files for these and convert them one component at a time.`,
 };
