@@ -12,6 +12,7 @@
 
 import type { PageKind } from "../engine/sitemap-discover.ts";
 import type { Platform } from "../learned/platform.ts";
+import type { StackSignals } from "../migrate/sources/classify.ts";
 import type { BlockMapping } from "../migrate/vtex/faststore-map.ts";
 import type { VtexBlock } from "../migrate/vtex/runtime.ts";
 import type { ExtractedComponent } from "./extract.ts";
@@ -161,8 +162,10 @@ export interface MigrationBundle {
   url: string;
   timestamp: string;
   viewport: string;
-  /** Detected source platform (vtex, vtex-fs, shopify, …). */
+  /** Detected commerce platform (vtex, vtex-fs, shopify, …). */
   platform: Platform;
+  /** Sharp stack verdict: frontend to migrate FROM + htmx + commerce backend. */
+  stack?: StackSignals | null;
   /** Selected target playbook name, when `--target` was passed. */
   target?: string;
   /** Viewports captured for the theme + site screenshots. */
