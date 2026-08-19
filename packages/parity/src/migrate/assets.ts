@@ -78,17 +78,36 @@ export async function collectSiteAssets(page: Page): Promise<RawSiteAssets> {
     }
     const fonts = [...fontUrls].slice(0, 20);
 
-    // Logo: an <img>/<svg> in the header/banner whose alt/class/href hints logo,
-    // else the header's home link image, else the first header image.
+    // Logo: an <img>/<svg> in the header whose alt/class/id/src hints logo, else
+    // the home-link image, else the first *logo-shaped* image near the top. A
+    // logo is small and high on the page — reject full-width banners / promo /
+    // newsletter imagery that a bare "first image" fallback would grab.
     const header =
-      document.querySelector("header, [role='banner']") || document.body;
+      document.querySelector("header, [role='banner'], nav") || document.body;
     let logo: { type: "img"; url: string } | { type: "svg"; markup: string } | null = null;
     if (header) {
-      const hinted = Array.from(header.querySelectorAll("img, svg")).find((el) => {
-        const bag = `${el.getAttribute("alt") ?? ""} ${el.getAttribute("class") ?? ""} ${el.getAttribute("aria-label") ?? ""} ${el.closest("a")?.getAttribute("href") ?? ""}`.toLowerCase();
+      const isLogoShaped = (el: Element): boolean => {
+        const r = el.getBoundingClientRect();
+        return (
+          r.width > 0 &&
+          r.height > 0 &&
+          r.top < 260 && // near the top
+          r.width <= 400 &&
+          r.height <= 160 && // small — not a hero/banner/form
+          r.width >= r.height // wider than tall (typical wordmark) or square-ish
+        );
+      };
+      const hints = (el: Element): boolean => {
+        const bag = `${el.getAttribute("alt") ?? ""} ${el.getAttribute("class") ?? ""} ${el.getAttribute("id") ?? ""} ${el.getAttribute("aria-label") ?? ""} ${el.getAttribute("src") ?? ""} ${el.closest("a")?.getAttribute("href") ?? ""}`.toLowerCase();
         return bag.includes("logo") || bag.includes("brand");
-      });
-      const el = hinted ?? header.querySelector("a[href='/'] img, a[href='/'] svg") ?? header.querySelector("img, svg");
+      };
+      const candidates = Array.from(header.querySelectorAll("img, svg"));
+      const el =
+        candidates.find((c) => hints(c) && isLogoShaped(c)) ??
+        candidates.find((c) => hints(c)) ??
+        (header.querySelector("a[href='/'] img, a[href='/'] svg") as Element | null) ??
+        candidates.find(isLogoShaped) ??
+        null;
       if (el) {
         // Mark it so the command can screenshot the rendered element — robust
         // against sprite `<use>` logos (which are blank when saved as markup).
