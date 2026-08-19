@@ -116,6 +116,12 @@ stored in `assets.json` and on the bundle (`bundle.stack`):
 
 Markers are calibrated against real stores; see `src/migrate/sources/classify.ts`.
 
+The HTML report header surfaces this verdict (`deco-fresh + htmx · commerce: vtex`)
+plus the paired source (`--source` repo or `live capture (no repo)`) instead of the
+bare platform. Full-page screenshots render in a scrollable phone/desktop frame,
+and logo detection rejects full-width banners/forms (picks the top, logo-shaped
+image), preferring the downloaded `<img>` over a rendered-element screenshot.
+
 ## Token economy
 
 The artifact an agent reads (`index.md` + `components/*/README.md` +

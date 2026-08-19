@@ -166,6 +166,8 @@ export interface MigrationBundle {
   platform: Platform;
   /** Sharp stack verdict: frontend to migrate FROM + htmx + commerce backend. */
   stack?: StackSignals | null;
+  /** Source repo the capture was paired with (`--source`), or live-only. */
+  source?: { kind: string; label: string; dir: string | null };
   /** Selected target playbook name, when `--target` was passed. */
   target?: string;
   /** Viewports captured for the theme + site screenshots. */

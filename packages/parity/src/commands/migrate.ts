@@ -245,10 +245,12 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
             const fetchBytes = async (url: string) =>
               (await browserFetchBytes(page, url)) ?? (await nodeFetchBytes(url));
             assetsResolved = await downloadSiteAssets(rawAssets, runDir, fetchBytes);
-            // Logo: screenshot the rendered element (robust against sprite
-            // `<use>` logos that save blank as markup). `collectSiteAssets`
-            // tagged it with `data-parity-logo`.
-            if (rawAssets.logo) {
+            // Logo: for a real <img> logo the DOWNLOADED file is the source of
+            // truth (downloadSiteAssets already saved it). Only screenshot the
+            // rendered element for sprite `<use>`/inline SVG logos, which save
+            // blank as markup. Avoids a mis-tagged element leaking a wrong
+            // screenshot over a perfectly good <img> logo.
+            if (rawAssets.logo?.type === "svg" || (rawAssets.logo && !assetsResolved.logo)) {
               const logoPng = resolve(runDir, "assets", "logo.png");
               const ok = await page
                 .locator("[data-parity-logo]")
@@ -385,6 +387,7 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
       screenshots,
       platform,
       stack,
+      source: { kind: source.kind, label: source.label, dir: opts.source ?? null },
       target: opts.target,
       theme,
       assets,

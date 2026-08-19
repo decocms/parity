@@ -78,12 +78,37 @@ function chips(items: string[]): string {
   return items.length ? items.map((i) => `<code>${esc(i)}</code>`).join(" ") : "<em>none</em>";
 }
 
+/** Header verdict: the sharp stack (deco-fresh + htmx · commerce) over the coarse platform. */
+function stackMeta(b: MigrationBundle): string {
+  const s = b.stack;
+  if (!s || s.frontend === "unknown") return `<code>${esc(b.platform)}</code>`;
+  const fe = `<code>${esc(s.frontend)}${s.htmx ? " + htmx" : ""}</code>`;
+  const commerce =
+    s.commerce !== "unknown" && s.commerce !== s.frontend
+      ? ` · commerce: <code>${esc(s.commerce)}</code>`
+      : "";
+  return fe + commerce;
+}
+
+/** What the capture was paired with — the repo (`--source`) or a live-only scrape. */
+function sourceMeta(b: MigrationBundle): string {
+  const src = b.source;
+  if (!src || src.kind === "live-only")
+    return `source: <code>live capture</code> <span class="dim">(no repo)</span>`;
+  return `source: <code>${esc(src.kind)}</code>${src.dir ? ` <code>${esc(src.dir)}</code>` : ""}`;
+}
+
 function renderHtml(b: MigrationBundle, embed: Embed): string {
   const t = b.theme;
   const shots = (b.screenshots ?? [])
     .map((s) => {
       const src = embed(s.path);
-      return src ? `<figure><figcaption>${esc(s.viewport)}</figcaption><img src="${esc(src)}" alt="${esc(s.viewport)}"></figure>` : "";
+      // Full-page capture shown inside a scrollable device frame (the whole
+      // page is tall — the frame keeps it phone-sized and scrollable in place).
+      const mobile = /mobile|phone/i.test(s.viewport);
+      return src
+        ? `<figure><figcaption>${esc(s.viewport)}</figcaption><div class="device ${mobile ? "phone" : "wide"}"><img src="${esc(src)}" alt="${esc(s.viewport)}"></div></figure>`
+        : "";
     })
     .join("");
 
@@ -154,7 +179,13 @@ ${favSrc ? `<link rel="icon" href="${esc(favSrc)}">` : ""}
   figure { margin:0; } figure img { max-width:100%; border:1px solid var(--card); border-radius:12px; display:block;
     box-shadow:0 1px 2px rgba(40,37,36,0.04),0 12px 34px rgba(40,37,36,0.08); }
   figcaption { color:var(--muted); font-size:12px; margin-bottom:6px; text-transform:capitalize; }
-  .shots { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; }
+  .shots { display:flex; flex-wrap:wrap; gap:20px; }
+  .device { overflow:auto; background:#fff; border:9px solid #1c1c1c; border-radius:30px;
+    box-shadow:0 10px 30px rgba(40,37,36,0.14); }
+  .device::-webkit-scrollbar { width:8px; } .device::-webkit-scrollbar-thumb { background:#cfccc8; border-radius:8px; }
+  .device.phone { width:340px; height:640px; }
+  .device.wide { width:520px; height:640px; }
+  .device img { width:100%; display:block; border:0; border-radius:0; box-shadow:none; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
   th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
@@ -175,7 +206,8 @@ ${favSrc ? `<link rel="icon" href="${esc(favSrc)}">` : ""}
     <h1>${esc(domainOf(b.url))}</h1>
     <div class="meta">
       <code>${esc(b.url)}</code> ·
-      <code>${esc(b.platform)}</code>${b.target ? ` → <code>${esc(b.target)}</code>` : ""}
+      ${stackMeta(b)}${b.target ? ` → <code>${esc(b.target)}</code>` : ""}
+      · ${sourceMeta(b)}
       · viewports: <code>${esc((b.viewports ?? [b.viewport]).join(", "))}</code>
       · pages: ${b.pages.map((p) => `<code>${esc(p.kind)}</code>`).join(" ") || "—"}
       · <span class="dim">${esc(b.timestamp)}</span>
@@ -185,7 +217,7 @@ ${favSrc ? `<link rel="icon" href="${esc(favSrc)}">` : ""}
 <main>
 
   <section class="card">
-    <h2>Theme</h2>
+    <h2>Theme <span class="dim" style="text-transform:none;letter-spacing:0;font-weight:400">· extracted from the live page</span></h2>
     <div class="swatches">
       ${swatch("primary", t.colors.primary)}
       ${swatch("secondary", t.colors.secondary)}
@@ -216,7 +248,7 @@ ${favSrc ? `<link rel="icon" href="${esc(favSrc)}">` : ""}
 
   ${b.vtex ? `<section class="card"><h2>VTEX IO → FastStore blocks</h2><p class="dim">${b.vtex.blocks.length} block instances from the store runtime · ${b.vtex.blocks.filter((x) => x.props).length} carry CMS content (props), ${countContentImages(b.vtex.blocks)} content images downloaded to <code>assets/content/</code> (URLs rewritten in <code>blocks.json</code>). <b>confidence</b> = how sure the deterministic mapper is (0–1).</p><table><tr><th>VTEX block</th><th>→ FastStore</th><th>confidence</th><th>count</th></tr>${vtexRows}</table></section>` : ""}
 
-  <section class="card"><h2>Components (${b.components.length}) — by page</h2></section>
+  <section class="card"><h2>Components (${b.components.length})</h2><p class="dim">${globalComps.length} global · ${b.components.length - globalComps.length} page-specific, grouped by page below.</p></section>
   ${componentsByPage}
 
   <section class="card links">

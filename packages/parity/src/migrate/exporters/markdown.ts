@@ -52,7 +52,14 @@ function renderIndex(bundle: MigrationBundle, notes: string[]): string {
   md("## Site");
   md("");
   md(`- **URL**: ${bundle.url}`);
+  if (bundle.stack && bundle.stack.frontend !== "unknown") {
+    const s = bundle.stack;
+    const commerce = s.commerce !== "unknown" && s.commerce !== s.frontend ? ` · commerce \`${s.commerce}\`` : "";
+    md(`- **Stack**: \`${s.frontend}${s.htmx ? " + htmx" : ""}\`${commerce}`);
+  }
   md(`- **Source platform**: ${bundle.platform}`);
+  if (bundle.source && bundle.source.kind !== "live-only")
+    md(`- **Source repo**: \`${bundle.source.kind}\`${bundle.source.dir ? ` \`${bundle.source.dir}\`` : ""}`);
   if (bundle.target) md(`- **Target**: ${bundle.target} (see MIGRATION_PROMPT.md)`);
   md(`- **Captured**: ${bundle.timestamp} (${bundle.viewport})`);
   md(`- **Pages**: ${bundle.pages.map((p) => `${p.kind} \`${p.path}\``).join(", ") || "—"}`);
