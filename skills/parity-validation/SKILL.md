@@ -9,6 +9,8 @@ description: How to run parity correctly for each case in a migration. Load when
 
 Always ask `parity-specialist` for the exact command. Never guess flags —
 the `prod->cand` pair syntax and `--cand-selector` only exist since v0.22.
+Full command surface (run vs e2e, section, benchmark, vitals, cache, audit) with
+flags and when to use each: `skills/knowledge/parity/commands.md`.
 
 ## Reading the score
 
