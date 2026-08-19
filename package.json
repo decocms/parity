@@ -10,7 +10,9 @@
     "test": "bun run --filter='./packages/*' test",
     "lint": "bun run --filter='./packages/*' lint",
     "fmt": "bun run --filter='./packages/*' fmt",
-    "deadcode": "bun run --filter='./packages/*' deadcode"
+    "deadcode": "bun run --filter='./packages/*' deadcode",
+    "sync-skills": "bun run scripts/sync-skills.ts",
+    "sync-skills:check": "bun run scripts/sync-skills.ts --check"
   },
   "engines": {
     "node": ">=20",
