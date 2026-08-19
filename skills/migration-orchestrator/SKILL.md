@@ -95,8 +95,13 @@ Set `source.prodUrl` if not found automatically.
   each migration inherits the template's latest improvements.
   (Skip this entirely when the source is `deco-fresh` — `deco-migrate` scaffolds
   the target from the original repo in the `migrate-script` phase.)
-- **FastStore v4**: user must provide the repo (created via VTEX Onboarding).
-  Ask for the repo path / URL. Clone it locally.
+- **FastStore v4**: scaffold from the public FastStore template —
+  `gh repo create <owner>/<name> --private --template vtex-sites/starter.store` — then
+  write `discovery.config.js` from the capture: `api.storeId` = the source VTEX account
+  (the `*.vtexassets.com` subdomain in `blocks.json`) and `session.locale/currency/country`
+  (from the DOM/`manifest.json`); the starter ships the demo `newstore`. The starter is BARE — the `cms/`, atoms, i18n, and gate
+  tree get created during porting (see `target-faststore-v4/SKILL.md`). Prefer a
+  richer deco FastStore template if one exists.
 Load skill `skills/target-faststore-v4/SKILL.md` or `skills/target-tanstack-deco/SKILL.md`.
 
 ### workflows

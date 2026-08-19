@@ -27,7 +27,10 @@ Return JSON: `{"ok": true, "files": ["<rel path>", ...], "gates": "pass|fail", "
 2. **Obey `conventions.rules` exactly.** For FastStore: only `--fs-*` tokens,
    never `:global()` in `.module.scss`, always mobile-first, i18n for every
    visible string, close the 3-point invariant (index.tsx + CMS schema +
-   whitelist). For TanStack: Tailwind utilities, export in index.tsx + schema.
+   whitelist). **`src/components/index.tsx` MUST `export default` the
+   `CUSTOM_COMPONENTS` map** (keyed by `$componentKey`), not only named exports —
+   FastStore default-imports it and the build fails otherwise. For TanStack:
+   Tailwind utilities, export in index.tsx + schema.
 3. **Never touch `.faststore/`** (FastStore read-only override dir).
 4. **Do not invent content** — use what the capture provides. Mark missing
    content as `// TODO: fill from CMS`.
