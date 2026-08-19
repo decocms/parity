@@ -408,6 +408,7 @@ export function renderBenchmarkHtml(report: BenchmarkReport, opts: { lang: strin
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>User Navigation Benchmark — ${esc(domainOf(report.candUrl))}</title>
+${report.favicon ? `<link rel="icon" href="${esc(report.favicon)}"/>` : ""}
 <style>
   :root{
     --bg:${DECK.bg};--ink:${DECK.ink};--muted:${DECK.muted};--faint:${DECK.faint};
@@ -428,9 +429,11 @@ export function renderBenchmarkHtml(report: BenchmarkReport, opts: { lang: strin
   .topbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:14px;
     padding:16px 0;background:rgba(255,255,255,0.9);backdrop-filter:blur(8px);
     border-bottom:1px solid var(--border);margin-bottom:8px}
+  .topbar .fav{width:34px;height:34px;border-radius:9px;border:1px solid var(--card);background:#fff;padding:5px;object-fit:contain}
   .topbar .brand{display:flex;flex-direction:column}
   .topbar .brand b{font-size:15px}
   .topbar .brand small{color:var(--muted);font-size:12px}
+  .cover-logo{max-height:48px;max-width:200px;object-fit:contain;margin-bottom:6px}
   .topbar .spacer{flex:1}
   .lang-toggle{border:1px solid rgba(40,37,36,0.18);background:#fff;border-radius:999px;
     padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;color:var(--ink)}
@@ -559,6 +562,7 @@ export function renderBenchmarkHtml(report: BenchmarkReport, opts: { lang: strin
 </head>
 <body>
   <div class="topbar">
+    ${report.favicon ? `<img class="fav" src="${esc(report.favicon)}" alt=""/>` : ""}
     <div class="brand"><b>User Navigation Benchmark</b><small>${esc(domainOf(report.prodUrl))} → ${esc(domainOf(report.candUrl))} · ${esc(stamp)}</small></div>
     <div class="spacer"></div>
     <button class="info-btn" id="infoBtn" type="button" aria-label="Como é medido">i</button>
@@ -568,6 +572,7 @@ export function renderBenchmarkHtml(report: BenchmarkReport, opts: { lang: strin
   ${methodologyModal(report, lang)}
 
   <header class="cover">
+    ${report.logo ? `<img class="cover-logo" src="${esc(report.logo)}" alt=""/>` : ""}
     <div class="eyebrow">${L("RELATÓRIO DE PERFORMANCE", "PERFORMANCE REPORT", lang)}</div>
     <h1>${L("A navegação, medida passo a passo — antes e depois.", "The journey, measured step by step — before and after.", lang)}</h1>
     <div class="kicker">${L("Home → listagem → paginação → produto → variante. Cache aquecido e prefetch por hover nos dois sites.", "Home → listing → pagination → product → variant. Warm cache and hover-prefetch on both sites.", lang)}</div>

@@ -20,6 +20,7 @@ import type { Browser } from "playwright";
 import type { Platform } from "../learned/platform.ts";
 import type { LearnedSelectors } from "../learned/repo.ts";
 import { isLlmAvailable } from "../llm/client.ts";
+import { browserFetchBytes, collectSiteAssets } from "../migrate/assets.ts";
 import type { ParityRc, Side, Viewport } from "../types/schema.ts";
 import { newContext } from "./browser.ts";
 import { selectVariant } from "./flows/purchase-journey.ts";
@@ -82,6 +83,9 @@ export interface BenchmarkReport {
   measuredRuns: number;
   paginations: number;
   runVitals: boolean;
+  /** Site favicon + logo (base64 data URIs) for the report cover, if captured. */
+  favicon?: string | null;
+  logo?: string | null;
   /** One entry per (viewport × side). Pair by viewport in the report. */
   sides: SideBenchmark[];
 }
@@ -1177,6 +1181,32 @@ async function plpCandidatePaths(
  * benchmark from ever measuring a broken page (e.g. a category route the
  * candidate doesn't have). Returns null if nothing validates on both.
  */
+/** Site favicon + logo as base64 data URIs, for the report cover (brand-level,
+ * identical on prod/cand, so grabbed once from whichever home is already open). */
+export interface Brand {
+  favicon: string | null;
+  logo: string | null;
+}
+
+async function captureBrand(page: import("playwright").Page): Promise<Brand> {
+  const dataUri = async (url: string | null): Promise<string | null> => {
+    if (!url) return null;
+    const got = await browserFetchBytes(page, url);
+    return got ? `data:${got.contentType ?? "image/png"};base64,${got.buf.toString("base64")}` : null;
+  };
+  try {
+    const a = await collectSiteAssets(page);
+    const favicon = await dataUri(a.favicon);
+    let logo: string | null = null;
+    if (a.logo?.type === "img") logo = await dataUri(a.logo.url);
+    else if (a.logo?.type === "svg")
+      logo = `data:image/svg+xml;base64,${Buffer.from(a.logo.markup).toString("base64")}`;
+    return { favicon, logo };
+  } catch {
+    return { favicon: null, logo: null };
+  }
+}
+
 export async function resolveTargetPaths(opts: {
   browser: Browser;
   prodBase: string;
@@ -1187,7 +1217,7 @@ export async function resolveTargetPaths(opts: {
   platform?: Platform;
   outDir: string;
   onEvent?: (msg: string) => void;
-}): Promise<TargetPaths | null> {
+}): Promise<(TargetPaths & Brand) | null> {
   const mk = (base: string) =>
     newContext(opts.browser, {
       viewport: opts.viewport,
@@ -1217,6 +1247,9 @@ export async function resolveTargetPaths(opts: {
       .catch(() => undefined);
     await waitReady(prod.page);
     await dismissAll(prod.page, prod.flow);
+
+    // Brand assets (favicon/logo) for the report cover — home is loaded now.
+    const brand = await captureBrand(prod.page);
 
     const catPaths = await plpCandidatePaths(prod.page, prod.flow);
     for (const catPath of catPaths.slice(0, 8)) {
@@ -1267,7 +1300,7 @@ export async function resolveTargetPaths(opts: {
         )
           continue;
         opts.onEvent?.(`  ✓ PLP ${catPath} + PDP ${pPath} funcionam nos dois`);
-        return { categoryPath: catPath, productPath: pPath };
+        return { categoryPath: catPath, productPath: pPath, ...brand };
       }
     }
     return null;

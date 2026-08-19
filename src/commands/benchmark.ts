@@ -98,6 +98,8 @@ export async function benchmarkCommand(opts: BenchmarkOptions): Promise<number> 
 
   const spinner = ora("Lançando browser…").start();
   const sides: SideBenchmark[] = [];
+  let favicon: string | null = null;
+  let logo: string | null = null;
   const browser = await launchBrowser({ headless: true });
   spinner.succeed("Browser pronto");
 
@@ -130,6 +132,8 @@ export async function benchmarkCommand(opts: BenchmarkOptions): Promise<number> 
         return 2;
       }
       onEvent(`PLP: ${targetPaths.categoryPath} · PDP: ${targetPaths.productPath}`);
+      favicon ??= targetPaths.favicon;
+      logo ??= targetPaths.logo;
 
       const runOne = (side: Side, base: string) =>
         runSideBenchmark({
@@ -171,6 +175,8 @@ export async function benchmarkCommand(opts: BenchmarkOptions): Promise<number> 
     measuredRuns,
     paginations,
     runVitals,
+    favicon,
+    logo,
     sides,
   };
 

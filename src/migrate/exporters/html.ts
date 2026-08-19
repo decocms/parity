@@ -65,6 +65,15 @@ function swatch(label: string, value: string | null): string {
   return `<div class="sw"><div class="chip" style="background:${esc(value)}"></div><b>${label}</b><span>${esc(value)}</span></div>`;
 }
 
+/** Domain shown in the cover, from the crawled URL. */
+function domainOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
 function chips(items: string[]): string {
   return items.length ? items.map((i) => `<code>${esc(i)}</code>`).join(" ") : "<em>none</em>";
 }
@@ -110,48 +119,67 @@ function renderHtml(b: MigrationBundle, embed: Embed): string {
     ? b.assets.icons.slice(0, 40).map((ic) => `<tr><td>${esc(ic.kind)}</td><td><code>${esc(ic.id)}</code></td><td>${ic.count}</td></tr>`).join("")
     : "";
 
+  const favSrc = embed(b.assets.favicon);
+  const logoSrc = embed(b.assets.logo);
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>parity migrate — ${esc(b.url)}</title>
+<title>parity migrate — ${esc(domainOf(b.url))}</title>
+${favSrc ? `<link rel="icon" href="${esc(favSrc)}">` : ""}
 <style>
-  :root { --bg:#0d1117; --card:#161b22; --line:#30363d; --fg:#e6edf3; --dim:#8b949e; --accent:#2f81f7; }
+  :root { --bg:#ffffff; --ink:#282524; --muted:#78726e; --faint:#a6a09d;
+    --border:rgba(40,37,36,0.09); --card:rgba(40,37,36,0.06); --soft:#8caa25; --forest:#07401a; }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
-  header { padding:24px 32px; border-bottom:1px solid var(--line); }
-  h1 { margin:0 0 6px; font-size:20px; }
-  h2 { font-size:15px; text-transform:uppercase; letter-spacing:.04em; color:var(--dim); margin:0 0 12px; }
-  .meta { color:var(--dim); font-size:13px; }
-  .meta code { color:var(--fg); }
-  main { padding:24px 32px; max-width:1100px; margin:0 auto; display:grid; gap:24px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:20px; }
+  html { background:#e9e7e3; }
+  body { margin:0; color:var(--ink); background:var(--bg);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; max-width:1080px; margin:0 auto; }
+  .num { font-family:Georgia,"Times New Roman",serif; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; }
+  .eyebrow { font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--soft); }
+  header { padding:44px 20px 26px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:20px; }
+  header .brand-logo { max-height:52px; max-width:200px; background:#fff; border:1px solid var(--card);
+    border-radius:10px; padding:8px 12px; object-fit:contain; }
+  header .brand-fav { width:38px; height:38px; border-radius:9px; border:1px solid var(--card); background:#fff; padding:5px; object-fit:contain; }
+  header .htxt { display:flex; flex-direction:column; gap:6px; }
+  h1 { margin:0; font-size:clamp(1.6rem,4vw,2.2rem); font-weight:400; letter-spacing:-0.02em; }
+  h2 { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--soft); margin:0 0 14px; }
+  .meta { color:var(--muted); font-size:13px; }
+  .meta code { color:var(--ink); }
+  main { padding:24px 20px 80px; display:grid; gap:20px; }
+  .card { background:#fff; border:1px solid var(--card); border-radius:16px; padding:24px; }
   .swatches { display:flex; gap:20px; flex-wrap:wrap; }
   .sw { display:flex; flex-direction:column; gap:4px; }
-  .sw b { font-size:12px; } .sw span { color:var(--dim); font-size:12px; font-family:monospace; }
-  .chip { width:64px; height:64px; border-radius:8px; border:1px solid var(--line); }
-  .chip.empty { background:repeating-linear-gradient(45deg,#222,#222 6px,#333 6px,#333 12px); }
-  figure { margin:0; } figure img { max-width:100%; border:1px solid var(--line); border-radius:8px; display:block; }
-  figcaption { color:var(--dim); font-size:12px; margin-bottom:6px; text-transform:capitalize; }
+  .sw b { font-size:12px; } .sw span { color:var(--muted); font-size:12px; font-family:monospace; }
+  .chip { width:64px; height:64px; border-radius:10px; border:1px solid var(--border); }
+  .chip.empty { background:repeating-linear-gradient(45deg,#f4f2ef,#f4f2ef 6px,#e9e7e3 6px,#e9e7e3 12px); }
+  figure { margin:0; } figure img { max-width:100%; border:1px solid var(--card); border-radius:12px; display:block;
+    box-shadow:0 1px 2px rgba(40,37,36,0.04),0 12px 34px rgba(40,37,36,0.08); }
+  figcaption { color:var(--muted); font-size:12px; margin-bottom:6px; text-transform:capitalize; }
   .shots { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
-  th,td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { color:var(--dim); font-weight:600; }
-  code { background:#0b0f14; padding:1px 5px; border-radius:4px; font-size:12px; }
-  a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
-  .badge { background:#1f6feb33; color:#79c0ff; padding:0 6px; border-radius:10px; font-size:11px; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  code { background:#f4f2ef; padding:1px 6px; border-radius:5px; font-size:12px; color:var(--ink); }
+  a { color:var(--forest); text-decoration:none; } a:hover { text-decoration:underline; }
+  .badge { background:var(--soft); color:#fff; padding:0 7px; border-radius:999px; font-size:11px; font-weight:600; }
   .assets { display:flex; gap:24px; align-items:center; flex-wrap:wrap; }
-  .assets img { max-height:48px; max-width:200px; background:#fff; padding:6px; border-radius:6px; }
+  .assets img { max-height:48px; max-width:200px; background:#fff; padding:6px; border-radius:8px; border:1px solid var(--card); }
   ul.kv { list-style:none; padding:0; margin:0; display:grid; gap:6px; }
   .links a { margin-right:16px; }
-  .dim { color:var(--dim); }
+  .dim { color:var(--muted); }
 </style></head>
 <body>
 <header>
-  <h1>parity migrate — ${esc(b.url)}</h1>
-  <div class="meta">
-    <code>${esc(b.platform)}</code>${b.target ? ` → <code>${esc(b.target)}</code>` : ""}
-    · viewports: <code>${esc((b.viewports ?? [b.viewport]).join(", "))}</code>
-    · pages: ${b.pages.map((p) => `<code>${esc(p.kind)}</code>`).join(" ") || "—"}
-    · <span class="dim">${esc(b.timestamp)}</span>
+  ${logoSrc ? `<img class="brand-logo" src="${esc(logoSrc)}" alt="logo">` : favSrc ? `<img class="brand-fav" src="${esc(favSrc)}" alt="favicon">` : ""}
+  <div class="htxt">
+    <span class="eyebrow">Parity · Migration</span>
+    <h1>${esc(domainOf(b.url))}</h1>
+    <div class="meta">
+      <code>${esc(b.url)}</code> ·
+      <code>${esc(b.platform)}</code>${b.target ? ` → <code>${esc(b.target)}</code>` : ""}
+      · viewports: <code>${esc((b.viewports ?? [b.viewport]).join(", "))}</code>
+      · pages: ${b.pages.map((p) => `<code>${esc(p.kind)}</code>`).join(" ") || "—"}
+      · <span class="dim">${esc(b.timestamp)}</span>
+    </div>
   </div>
 </header>
 <main>
