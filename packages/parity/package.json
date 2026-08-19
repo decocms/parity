@@ -52,7 +52,9 @@
     "lint": "biome lint .",
     "fmt": "biome format --write .",
     "prepublishOnly": "bun run check && bun run build",
-    "postinstall": "node scripts/postinstall.cjs"
+    "postinstall": "node scripts/postinstall.cjs",
+    "sync-skills": "bun run ../../scripts/sync-skills.ts",
+    "sync-skills:check": "bun run ../../scripts/sync-skills.ts --check"
   },
   "engines": {
     "node": ">=20",
