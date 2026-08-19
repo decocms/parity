@@ -5,9 +5,29 @@ description: Orchestrates a full site migration end-to-end. Load when the user a
 
 # Migration Orchestrator
 
-Drives the migration lifecycle from first capture to benchmark sign-off. State
-lives in `.parity/migration.json` in the TARGET repo. Every bash call goes
-through the `runner` agent — never run commands directly.
+Drives the migration lifecycle from first capture to benchmark sign-off. Every
+bash call goes through the `runner` agent — never run commands directly.
+
+## State file location
+
+State lives in `.parity/migration.json` **in the TARGET repo**, not wherever the
+command was invoked (the user often runs `/parity:migrate` from the parity repo
+itself). Resolve it once, at the start of every turn:
+
+1. If `state.target.dir` is already set, use `<target.dir>/.parity/migration.json`.
+2. Otherwise walk **up** from `cwd` looking for a `package.json` whose `name` (or
+   git remote) matches `state.target.repo`; the `.parity/` dir sits beside it.
+3. If neither resolves (first run, no target yet), keep state in memory and write
+   it only after `repo-setup` establishes `target.dir`. Never scatter a
+   `.parity/` into the parity repo or an unrelated cwd.
+
+## Reading a `runner` reply
+
+The `runner` is a subagent — its reply is **prose that ends with a JSON line**,
+not a raw JSON payload. Parse it defensively: take the **last** `{…}` block in
+the reply and `JSON.parse` it. If there is no parseable object, re-dispatch the
+same `cmd` once (the runner is told to return only the object). Never assume the
+whole message is JSON.
 
 ## Phase machine
 
@@ -84,12 +104,23 @@ Via `runner`: `bun run predev && npx -p @decocms/blocks-cli deco-migrate --verbo
 After: advance to `build-green`.
 
 ### porting (vtex-io / live-only)
-For each `pending` component in `components` (parallel where safe, sequential
-when the component has a `global` scope dependency):
-1. Spawn a `porter` with the component name + migration-plan entry + target conventions.
-2. Porter signals done → update `status: "done"`.
-3. When all globals done, start page components.
-After all done: advance to `build-green`.
+Order is fixed by scope — globals are shared, so page components can reference
+them:
+
+1. **Globals first, sequentially.** For each `pending` component with
+   `scope: "global"` (header, footer, minicart), spawn ONE `porter` at a time.
+   Sequential because they define the shared shell + tokens the pages build on,
+   and a parallel porter editing the same theme/layout files would collide.
+2. **Then page components, in parallel, capped at 4 concurrent.** Once every
+   global is `done`, spawn porters for the `scope: "page"` components in batches
+   of ≤4 (page components are independent — different files, no shared globals to
+   race on).
+
+Each porter gets the component name + its `migration-plan.json` entry + target
+conventions. When a porter signals done, set that component's `status: "done"`
+in `migration-plan.json` (in place). `source-only` (synthetic) components are
+ported from their source `file`, not a live capture.
+After all `pending` are `done`: advance to `build-green`.
 
 ### build-green
 Via `runner`: run the target's build command. If it fails, spawn a `builder`.
@@ -104,10 +135,19 @@ Advance to `fix`.
 
 ### fix
 For each open `parity-migrate` issue (up to 5 per round):
-- Spawn `fixer` with the issue body.
-- Fixer creates a commit + PR.
-After each fixer, run `runner` with the build command to catch regressions.
-Increment `round`. Advance to `parity`.
+1. Spawn `fixer` with the issue body → it creates a commit + PR.
+2. Run `runner` with the build command to catch regressions.
+3. **Review gate.** Spawn `reviewer` with the PR number + conventions. If
+   `approved: false`, re-spawn the `fixer` with the `blockers` and repeat (max 2
+   review cycles per issue, then escalate the issue to the user).
+4. **Merge gate.** Only a reviewer-approved PR merges:
+   - `gh pr merge <pr> --squash --auto` when auto-merge is enabled.
+   - If branch protection blocks auto-merge, **pause and ask the user to merge**
+     — do NOT continue to `parity` against an unmerged fix (the dev server would
+     still be running the unpatched code).
+5. After the merge, pull the target so the running dev server picks up the fix.
+
+Increment `round`. Advance to `parity` only once this round's fixes are merged.
 
 ### parity
 Load skill `skills/parity-validation/SKILL.md`.
