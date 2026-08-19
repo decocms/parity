@@ -26,7 +26,7 @@ import { jsonExporter } from "../migrate/exporters/json.ts";
 import { markdownExporter } from "../migrate/exporters/markdown.ts";
 import { htmlExporter } from "../migrate/exporters/html.ts";
 import { buildMigrationPrompt } from "../migrate/prompt.ts";
-import { buildMigrationPlan } from "../migrate/plan.ts";
+import { buildMigrationPlan, savePlan, syntheticSourceComponents } from "../migrate/plan.ts";
 import { buildFastStoreTheme } from "../migrate/targets/faststore-v4.ts";
 import { getTargetPlaybook, TARGET_NAMES } from "../migrate/targets/index.ts";
 import {
@@ -387,7 +387,10 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
       source: { kind: source.kind, label: source.label, dir: opts.source ?? null },
       inventory: sourceInventory,
     });
-    writeFileSync(resolve(runDir, "migration-plan.json"), `${JSON.stringify(plan, null, 2)}\n`, "utf8");
+    savePlan(runDir, plan);
+    // Source-only components (in code, never seen live) join the bundle as
+    // synthetic rows so the exporters + MIGRATION_PROMPT list them for porting.
+    bundle.components.push(...syntheticSourceComponents(plan));
 
     // ── Emit ────────────────────────────────────────────────────────
     if (format === "json" || format === "both") await jsonExporter.export(bundle, runDir);
@@ -396,7 +399,10 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
       await htmlExporter.export(bundle, runDir); // human-friendly visual view
       writeFileSync(
         resolve(runDir, "MIGRATION_PROMPT.md"),
-        buildMigrationPrompt(bundle, playbook),
+        buildMigrationPrompt(bundle, playbook, {
+          playbook: source.playbook,
+          notes: sourceInventory.notes,
+        }),
         "utf8",
       );
     }

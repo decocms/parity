@@ -183,8 +183,12 @@ function renderComponentReadme(url: string, c: MigratedComponent, compactHtml: s
     md("");
   }
   md(`- **Site**: ${url}`);
-  md(`- **Selector**: \`${c.selector}\``);
-  md(`- **Screenshot**: ![${c.role}](screenshot.png)`);
+  if (c.synthetic) {
+    md("- **Origin**: source code only — not captured live; port from the source file.");
+  } else {
+    md(`- **Selector**: \`${c.selector}\``);
+    md(`- **Screenshot**: ![${c.role}](screenshot.png)`);
+  }
   md("");
 
   md("## Tailwind (suggested)");
