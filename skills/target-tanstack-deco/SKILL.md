@@ -5,8 +5,16 @@ description: Target playbook for TanStack Start + Deco CMS (@decocms/*). Load wh
 
 # Target: TanStack Start + Deco CMS
 
-Source of truth: `decocms/tanstack-storefront` + `decocms/blocks` `.agents/skills/`.
-This skill is a SHORT summary; load references for deep detail.
+Source of truth: **`deco-sites/storefront-tanstack`** (public) + `decocms/blocks`
+`.agents/skills/`. This skill is a SHORT summary; load references for deep detail.
+
+## Scaffolding — COPY the template, don't fork it
+
+Bootstrap a new candidate by **copying the code** from `deco-sites/storefront-tanstack`
+into the target repo (clone it, copy the tree, re-init git / point it at the new
+remote). Do **not** use `gh repo create --template` — the template keeps
+improving, and each new migration should pick up those improvements by copying
+its current `main`, not forking a point-in-time snapshot.
 
 ## Section contract (3 things must be in sync)
 
