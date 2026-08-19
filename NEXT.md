@@ -165,10 +165,139 @@ These two knowledge files were listed in `knowledge/INDEX.md` but not written
 
 ---
 
+## 8. Source playbook never wired into MIGRATION_PROMPT.md
+
+**Why it matters:** Each source (`deco-fresh`, `vtex-io`, `live-only`) has a
+`.playbook` string defined in `src/migrate/sources/*.ts` (e.g. "Fresh/Deno
+sections are Preact + signals; don't copy `$fresh/` imports"). This is exactly
+the context a migration agent needs at the top of the prompt. But
+`buildMigrationPrompt` in `src/migrate/prompt.ts` only appends the TARGET
+playbook (`--target faststore` → appends `faststore-v4.ts` string). The source
+playbook is never passed in.
+
+**Fix:** In `src/commands/migrate.ts`, after resolving `source`, pass
+`source.playbook` to `buildMigrationPrompt`. In `prompt.ts`, accept an optional
+`sourcePlaybook` param and prepend it before the target section. Also: the
+`sourceInventory.notes` are logged to the terminal but never included in the
+prompt — append them too.
+
+---
+
+## 9. `PlanComponent.status` not updateable by the orchestrator
+
+**Why it matters:** `migration-plan.json` is written once by `parity migrate`
+with all components as `origin: "both" | "source-only" | "live-only"` but NO
+`status` field. The orchestrator skill says it marks components `status: "done"`
+after porting, but there's no field for it in the schema (`src/migrate/plan.ts`).
+The reconcile phase's "mark matching components done" instruction is unimplementable
+without this field.
+
+**Fix:** Add `status: "pending" | "done" | "skipped"` to `PlanComponent` in
+`src/migrate/plan.ts`. Default all to `"pending"` at creation time. The
+orchestrator updates the file in-place as components are ported. Add a helper
+`loadPlan(dir)` / `savePlan(dir, plan)` that reads/writes `migration-plan.json`.
+
+---
+
+## 10. `reviewer` agent not written
+
+**Why it matters:** The plan table included a `reviewer` agent (Sonnet, read-only,
+gates auto-merge before the benchmark phase). The orchestrator skill references it
+in the `fix` phase ("gate of review before merge"). The agent file `agents/reviewer.md`
+doesn't exist.
+
+**Fix:** Write `agents/reviewer.md`. It receives a PR number + branch diff, checks
+for: (a) no new `:global()` in `.module.scss`, (b) no hardcoded hex/px in FastStore
+CSS, (c) no edits to `.faststore/` or `*.gen.ts`, (d) all gates listed in
+`conventions.gates` have a passing status in the PR checks. Returns
+`{"approved": bool, "blockers": [...]}`.
+
+---
+
+## 11. `commands/resume.md` not written
+
+**Why it matters:** The plan listed four commands: migrate, status, validate,
+resume. `resume.md` was never created, so `/parity:resume` doesn't exist.
+
+**Fix:** Write `commands/resume.md`. It reads `.parity/migration.json`, finds the
+last completed phase, and re-enters the orchestrator from the NEXT phase. Useful
+when a session is interrupted mid-run (the most common case, as migrations take
+many turns).
+
+---
+
+## 12. Root `AGENTS.md` / `CLAUDE.md` missing
+
+**Why it matters:** Claude Code reads `AGENTS.md` / `CLAUDE.md` at the repo root
+to orient itself. After the monorepo move the root has none — so any agent working
+in this repo starts cold, not knowing the `packages/parity` structure or the
+plugin layout. The `packages/parity/AGENTS.md` only covers the CLI.
+
+**Fix:** Write a root `AGENTS.md` (≤ 60 lines) covering: where the parity CLI
+lives (`packages/parity/`), where the plugin lives (root-level `skills/`,
+`agents/`, `commands/`, `.claude-plugin/`), that `bun run check/test` delegates
+via `--filter`, and that `scripts/sync-skills.ts --check` validates vendorized
+knowledge files.
+
+---
+
+## 13. `decocms/tanstack-storefront` is private — bootstrap needs a plan B
+
+**Why it matters:** `target-tanstack-deco/SKILL.md` says scaffold from
+`decocms/tanstack-storefront`. That repo exists but is **private** (`visibility:
+PRIVATE`, last pushed 2026-02-27). An external user running the plugin won't
+have access. The orchestrator's `template-bootstrap` phase would silently fail
+at `gh repo clone`.
+
+**Fix options (pick one before shipping the plugin publicly):**
+- Make the template public.
+- Point to `decocms/blocks examples/tanstack-smoke` as a minimal starting point.
+- Document an alternative: `bun create tanstack` + manual wiring of `@decocms/*`
+  packages (there may be a published create template — check).
+- Gate the TanStack target on the user confirming they have template access.
+
+---
+
+## 14. `sourceInventory.components` not merged into `MigrationBundle`
+
+**Why it matters:** The plan says "with `--source`, the inventory comes from CODE
+and complements the scrape". In the implementation, `sourceInventory` goes into
+`migration-plan.json` but the `MigrationBundle` (and thus the markdown/HTML
+exporters) still only contain live-captured components. An agent reading
+`bundle.json` / `MIGRATION_PROMPT.md` doesn't see source-only components (those
+that exist in code but weren't in the DOM snapshot).
+
+**Fix:** After building the plan, merge `source-only` components into the bundle's
+`components` array with a synthetic `MigratedComponent` (empty HTML/styles/tailwind,
+role from `SourceComponent.role`, scope from `SourceComponent.scope`). Tag them
+with a `synthetic: true` flag so exporters can render them differently (e.g. "from
+source code, not captured live").
+
+---
+
+## 15. `sync-skills` not in root workspace scripts
+
+**Why it matters:** `sync-skills` and `sync-skills:check` were added to
+`packages/parity/package.json` but not to the root `package.json`'s scripts. From
+the repo root, `bun run sync-skills:check` doesn't work — you have to `cd
+packages/parity` first, which is easy to forget.
+
+**Fix:** Add to root `package.json`:
+```json
+"sync-skills": "bun run scripts/sync-skills.ts",
+"sync-skills:check": "bun run scripts/sync-skills.ts --check"
+```
+
+---
+
 ## Priority order for a follow-up PR
 
-1. Tests (4a + 4b) — they're pure unit tests, fast to add, catch real bugs.
-2. Agent fixes (2) — the JSON contract issue with `runner` is a silent failure risk.
-3. Orchestrator gaps 3b + 3c — parallelism and PR merge gate, needed for any real run.
-4. Real dry-run (5) — reveals everything else.
-5. Everything else in any order.
+1. **9 + 14** (plan status field + component merge) — unimplementable orchestrator flow without these.
+2. **8** (source playbook wiring) — one-line fix, high value.
+3. **10 + 11** (reviewer agent + resume command) — completes the agent table and command surface.
+4. **12** (root AGENTS.md) — orientation for any agent working in the repo.
+5. **13** (template bootstrap plan B) — blocks public release of the plugin.
+6. **Tests 4a–4d** — catch regressions in the new code.
+7. **15** (sync-skills at root) — convenience, low risk.
+8. **Agent benchmark dry-run (5)** — validates everything end-to-end.
+9. **Everything else** in any order.
