@@ -35,6 +35,21 @@ can't be recovered from the capture — leave them as required CMS fields.
 Prefer a reusable **deco FastStore template** (with the conventions pre-baked) once
 one exists — same model as `deco-sites/storefront-tanstack` for TanStack.
 
+**Gitignore build output**: `faststore build` copies `.faststore/{public,.next,
+lighthouserc.js}` into the repo root. The starter's `.gitignore` misses `public/`
+— add `/public/` (and confirm `/.next/`, `/.faststore`) so generated assets don't
+leak into every migration commit.
+
+## Cart / Minicart is a UI OVERRIDE, not a CMS section
+
+The cart drawer is NOT a page section — do NOT add it to `CUSTOM_COMPONENTS` or give
+it a CMS schema/whitelist. FastStore ships `.faststore/src/components/cart/CartSidebar/
+CartSidebar.tsx` (built on `@faststore/ui` `CartSidebar`/`CartSidebarList`/
+`CartSidebarFooter` + `useCart`/`useUI`/`useCheckoutButton`). Override it by copying
+to `src/components/cart/CartSidebar/` and feeding live `useCart` data — reuse the
+captured visual/structure for styling only. A standalone presentational Minicart is
+fine as an interim, but wire it through the CartSidebar override, not a section.
+
 ## The 3-point invariant (porting checklist for EVERY section)
 
 Every section must have ALL THREE or the CMS will silently drop it:
@@ -69,6 +84,8 @@ Every section must have ALL THREE or the CMS will silently drop it:
 - **`.faststore/` is READ-ONLY**: override by copying to `src/` — never edit in-place.
 - **i18n for every visible string**: no hardcoded user-facing text.
 - **Icons**: Phosphor via the `Icon` atom only. No alternative icon libraries.
+  ⚠️ FastStore's `icons.svg` sprite spells the delete glyph **`Thrash`** (their typo),
+  not `Trash` — use `Thrash` or the icon renders blank.
 - **`color-contrast`**: NEVER decide a color for contrast. Add `// TODO: verify with Design`.
 - **Atoms DS-aligned**: `Button`, `Icon`, `IconButton`, `LinkButton` from `src/components/ui/atoms/`.
   Never `ButtonBase`, `IconButtonBase`, `LinkButtonBase` (removed).
