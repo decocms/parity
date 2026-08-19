@@ -27,6 +27,12 @@ import type { HeatmapAnalysis } from "./heatmap-regions.ts";
 export interface BundleInputs {
   /** CSS selector for the section under review. */
   selector: string;
+  /**
+   * Candidate-side selector, when it differs from `selector`. Present only for
+   * a cross-selector comparison — the LLM must not assume both sides of the
+   * HTML diff were matched by the same selector.
+   */
+  candSelector?: string;
   /** Pair-key like `/::mobile` if available. */
   pageKey?: string;
   /** Viewport label. */
@@ -107,6 +113,7 @@ export function assembleSectionDiffBundle(input: BundleInputs): BundleOutput {
   const styleDeltas = buildStyleDeltas(input);
   const json = {
     selector: input.selector,
+    candSelector: input.candSelector ?? null,
     pageKey: input.pageKey ?? null,
     viewport: input.viewport,
     prodUrl: input.prodUrl,
@@ -182,7 +189,17 @@ function renderMarkdownBundle(input: BundleInputs, deltas: StyleDelta[]): string
   md("to make `cand` match `prod` for this section.");
   md("");
   md("## Section identification");
-  md(`- **Selector**: \`${input.selector}\``);
+  if (input.candSelector && input.candSelector !== input.selector) {
+    md(`- **Selector (prod)**: \`${input.selector}\``);
+    md(`- **Selector (cand)**: \`${input.candSelector}\``);
+    md(
+      "  (the two sides were matched by DIFFERENT selectors — the candidate is a " +
+        "port, so class names/attributes are expected to differ. Compare rendered " +
+        "output and computed styles, NOT selector or class names.)",
+    );
+  } else {
+    md(`- **Selector**: \`${input.selector}\``);
+  }
   if (input.pageKey) md(`- **Page**: \`${input.pageKey}\``);
   md(`- **Viewport**: ${input.viewport}`);
   md(`- **prod URL**: ${input.prodUrl}`);

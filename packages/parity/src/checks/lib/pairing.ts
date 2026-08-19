@@ -43,7 +43,14 @@ export function pairCaptures(
   return { pairs, orphansProd, orphansCand: [...candByKey.values()] };
 }
 
+/**
+ * Pairing identity of a capture. Prefers an explicit `pairKey` so prod and cand
+ * still pair when they sit at different paths (a partial migration where the
+ * reference PDP isn't the ported one); falls back to the URL pathname, which is
+ * the right key whenever both sides share a route.
+ */
 export function captureKey(c: PageCapture): string {
+  if (c.pairKey) return `${c.pairKey}::${c.viewport}`;
   let path = "";
   try {
     path = new URL(c.url).pathname || "/";

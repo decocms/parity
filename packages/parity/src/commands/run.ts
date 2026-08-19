@@ -1151,10 +1151,10 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         baseText: visualSpinnerBaseText,
       });
       try {
-        const visualPaths =
+        const visualPaths: PagePathPair[] =
           explicitPaths ??
           (await discoverPagesFromSitemap(opts.prod, { sampleSize: visualPagesLimit })).all.map(
-            (p) => p.path,
+            (p) => ({ prod: p.path, cand: p.path }),
           );
         // Always (re-)capture visual-diff pages with the visual-diff capture
         // settings (4s settleMs, 45s timeoutMs, scrollToLoad: true), even when
@@ -1167,11 +1167,23 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
         // keys by path::viewport and keeps the last one wins, so the
         // visual-diff capture (pushed after flows) is the one the check uses.
 
-        const tasks: Array<{ path: string; viewport: Viewport; side: Side }> = [];
+        // `pairKey` is the prod path for BOTH sides, so a pinned pair still
+        // lands in one `pairCaptures` bucket instead of two orphans.
+        const tasks: Array<{
+          path: string;
+          pairKey: string;
+          viewport: Viewport;
+          side: Side;
+        }> = [];
         for (const viewport of viewports) {
-          for (const path of visualPaths) {
+          for (const pair of visualPaths) {
             for (const side of ["prod", "cand"] as Side[]) {
-              tasks.push({ path, viewport, side });
+              tasks.push({
+                path: side === "prod" ? pair.prod : pair.cand,
+                pairKey: pair.prod,
+                viewport,
+                side,
+              });
             }
           }
         }
@@ -1187,6 +1199,8 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
           await runWithConcurrency(tasks, 4, async (task) => {
             const baseUrl = task.side === "prod" ? opts.prod : opts.cand;
             const fullUrl = new URL(task.path, baseUrl).toString();
+            // Name the file after the side's OWN path — a pinned pair has two
+            // different paths and must not collide on one screenshot filename.
             const safePath = task.path.replace(/[/?&=]+/g, "_") || "_root";
             const screenshotPath = `${paths.screenshotsDir}/visual-${safePath}-${task.viewport}-${task.side}.png`;
             try {
@@ -1215,6 +1229,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
                   settleMs: 4_000,
                   timeoutMs: 90_000,
                   scrollToLoad: true,
+                  pairKey: task.pairKey,
                 });
                 allPageCaptures.push(cap);
               } finally {
@@ -1512,21 +1527,54 @@ function buildPartialRun(args: {
 }
 
 /**
- * Resolve the list of paths the user wants to visually compare.
- *  - `--pages-file` (when present) wins over `--pages`. One path per line,
+ * One page to compare. `prod` and `cand` are the same path in the common case;
+ * they differ when the caller pinned an explicit pair.
+ */
+export interface PagePathPair {
+  prod: string;
+  cand: string;
+}
+
+/**
+ * Parse one page entry into a prod/cand pair.
+ *
+ * `"/a"`        → both sides at `/a` (the common case).
+ * `"/a->/b"`    → prod at `/a`, cand at `/b`.
+ *
+ * The arrow form exists because a partially-migrated site often has no path
+ * parity: the reference PDP is a product the candidate hasn't ported, so
+ * comparing `/encimera.../p` against `/ar-condicionado.../p` is the only way to
+ * diff a PDP at all. `->` rather than `prod=…,cand=…` so the same syntax works
+ * inside the comma-separated `--pages` list, not just one-per-line in a file.
+ */
+export function parsePagePair(entry: string): PagePathPair {
+  const arrow = entry.indexOf("->");
+  if (arrow === -1) {
+    const p = normalizePath(entry.trim());
+    return { prod: p, cand: p };
+  }
+  const prod = normalizePath(entry.slice(0, arrow).trim());
+  const cand = normalizePath(entry.slice(arrow + 2).trim());
+  return { prod, cand };
+}
+
+/**
+ * Resolve the list of pages the user wants to visually compare.
+ *  - `--pages-file` (when present) wins over `--pages`. One entry per line,
  *    `#` starts a comment, empty lines are ignored.
  *  - `--pages` is a comma-separated list.
+ *  - Either form accepts the `prod->cand` pair syntax (see `parsePagePair`).
  *  - Returns `null` when neither flag is set (caller falls back to sitemap
  *    sampling).
  *
- * Paths are normalized: leading whitespace trimmed, missing leading "/"
- * prepended. We DO NOT validate against the prod site here — invalid paths
- * just yield 404 captures and surface as obvious diffs later.
+ * Paths are normalized: whitespace trimmed, missing leading "/" prepended. We
+ * DO NOT validate against the prod site here — invalid paths just yield 404
+ * captures and surface as obvious diffs later.
  */
 function resolveExplicitPages(
   pagesFile: string | undefined,
   pagesList: string | undefined,
-): string[] | null {
+): PagePathPair[] | null {
   if (pagesFile) {
     if (!existsSync(pagesFile)) {
       throw new Error(`--pages-file não encontrado: ${pagesFile}`);
@@ -1536,7 +1584,7 @@ function resolveExplicitPages(
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter((l) => l.length > 0 && !l.startsWith("#"));
-    return lines.map(normalizePath);
+    return lines.map(parsePagePair);
   }
   if (pagesList) {
     const parts = pagesList
@@ -1544,7 +1592,7 @@ function resolveExplicitPages(
       .map((s) => s.trim())
       .filter(Boolean);
     if (parts.length === 0) return null;
-    return parts.map(normalizePath);
+    return parts.map(parsePagePair);
   }
   return null;
 }

@@ -27,6 +27,14 @@ export interface SectionOptions {
   prod: string;
   cand: string;
   selector: string;
+  /**
+   * Selector for the CANDIDATE side, when it differs from `selector`. A ported
+   * component rarely keeps the source's selector — VTEX IO class names become
+   * hashed CSS Modules, `data-fs-*` attributes replace utility classes — so
+   * without this the cand side just reports "not found" and the comparison is
+   * unusable exactly when it matters. Defaults to `selector`.
+   */
+  candSelector?: string;
   outputHtml?: boolean;
   screenshot?: boolean;
   computedStyles?: boolean;
@@ -88,6 +96,7 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
     console.error(chalk.red("--prod ou --cand inválido"));
     return 2;
   }
+  const candSelector = opts.candSelector?.trim() || opts.selector;
   // Default behaviour: if user passed NONE of the facet flags, enable all.
   // The bundle/heatmap/css-source/prompt/llm-summary flags are ADDITIVE — they
   // never count as "facets asked"; without them the command stays identical
@@ -134,7 +143,7 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
         url: opts.cand,
         viewport,
         waitMs,
-        selector: opts.selector,
+        selector: candSelector,
         wantScreenshot: want.screenshot,
         wantStyles: want.styles,
         wantHtml: want.html,
@@ -151,6 +160,7 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
       ? await buildPromptBundle({
           opts,
           viewport,
+          candSelector,
           prodSide,
           candSide,
           screenshotPaths,
@@ -175,6 +185,7 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
           prod: opts.prod,
           cand: opts.cand,
           selector: opts.selector,
+          candSelector,
           viewport,
           prodSide,
           candSide,
@@ -187,7 +198,7 @@ export async function sectionCommand(opts: SectionOptions): Promise<number> {
       );
       return verdict(prodSide, candSide);
     }
-    await printResults({ opts, viewport, prodSide, candSide, screenshotPaths, want });
+    await printResults({ opts, viewport, candSelector, prodSide, candSide, screenshotPaths, want });
     if (heatmap) printHeatmap(heatmap, heatmapPath);
     if (bundlePaths) printBundlePaths(bundlePaths);
     if (llmSummary) printLlmSummary(llmSummary);
@@ -355,21 +366,34 @@ export function verdict(prod: SideData, cand: SideData): number {
 async function printResults(args: {
   opts: SectionOptions;
   viewport: Viewport;
+  candSelector: string;
   prodSide: SideData;
   candSide: SideData;
   screenshotPaths: { prod: string; cand: string };
   want: { html: boolean; screenshot: boolean; styles: boolean };
 }): Promise<void> {
-  const { opts, viewport, prodSide, candSide, screenshotPaths, want } = args;
+  const { opts, viewport, candSelector, prodSide, candSide, screenshotPaths, want } = args;
+  const crossSelector = candSelector !== opts.selector;
 
   console.log(chalk.bold("\n  parity section"));
-  console.log(chalk.dim(`  selector: ${opts.selector}`));
+  if (crossSelector) {
+    console.log(chalk.dim(`  selector: ${opts.selector} (prod)`));
+    console.log(chalk.dim(`            ${candSelector} (cand)`));
+  } else {
+    console.log(chalk.dim(`  selector: ${opts.selector}`));
+  }
   console.log(chalk.dim(`  viewport: ${viewport}`));
   console.log(chalk.dim(`  prod:     ${opts.prod}`));
   console.log(chalk.dim(`  cand:     ${opts.cand}`));
   console.log("");
 
-  if (want.html) await printHtmlDiff(prodSide, candSide, opts.selector);
+  if (want.html) {
+    await printHtmlDiff(
+      prodSide,
+      candSide,
+      crossSelector ? `${opts.selector} → ${candSelector}` : opts.selector,
+    );
+  }
   if (want.styles) printStylesDiff(prodSide, candSide);
   if (want.screenshot) printScreenshotPaths(prodSide, candSide, screenshotPaths);
 }
@@ -533,6 +557,7 @@ function computeHeatmap(
 async function buildPromptBundle(args: {
   opts: SectionOptions;
   viewport: Viewport;
+  candSelector: string;
   prodSide: SideData;
   candSide: SideData;
   screenshotPaths: { prod: string; cand: string };
@@ -540,8 +565,17 @@ async function buildPromptBundle(args: {
   heatmap?: ReturnType<typeof analyzeHeatmapRegions>;
   filePrefix: string;
 }): Promise<{ jsonPath: string; markdownPath: string; summary: string }> {
-  const { opts, viewport, prodSide, candSide, screenshotPaths, heatmapPath, heatmap, filePrefix } =
-    args;
+  const {
+    opts,
+    viewport,
+    candSelector,
+    prodSide,
+    candSide,
+    screenshotPaths,
+    heatmapPath,
+    heatmap,
+    filePrefix,
+  } = args;
 
   let htmlBundle: { prod: string; cand: string; diffPatch: string } | undefined;
   if (prodSide.html && candSide.html) {
@@ -574,6 +608,7 @@ async function buildPromptBundle(args: {
 
   return assembleSectionDiffBundle({
     selector: opts.selector,
+    candSelector,
     pageKey: `${new URL(opts.prod).pathname}::${viewport}`,
     viewport,
     prodUrl: opts.prod,

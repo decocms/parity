@@ -209,6 +209,35 @@ describe("assembleSectionDiffBundle", () => {
     expect(out.summary).toMatch(/no diffs detected/);
   });
 
+  /**
+   * A ported component almost never keeps the source selector — VTEX IO class
+   * names become hashed CSS Modules, `data-fs-*` attributes replace utility
+   * classes. When the two sides were matched by DIFFERENT selectors the prompt
+   * has to say so, otherwise the LLM reads the class-name divergence in the
+   * HTML diff as the bug to fix instead of expected port noise.
+   */
+  it("mostra os dois seletores + o aviso de port quando cand difere", () => {
+    const inputs = makeInputs({
+      selector: ".vtex-store-components-3-x-container",
+      candSelector: "[data-fs-product-shelf]",
+    });
+    const out = assembleSectionDiffBundle(inputs);
+    const md = readFileSync(out.markdownPath, "utf8");
+    expect(md).toContain("**Selector (prod)**: `.vtex-store-components-3-x-container`");
+    expect(md).toContain("**Selector (cand)**: `[data-fs-product-shelf]`");
+    expect(md).toMatch(/DIFFERENT selectors/);
+    const json = JSON.parse(readFileSync(out.jsonPath, "utf8"));
+    expect(json.candSelector).toBe("[data-fs-product-shelf]");
+  });
+
+  it("mantém uma linha só de selector quando os dois lados são iguais", () => {
+    const out = assembleSectionDiffBundle(makeInputs({ candSelector: "header" }));
+    const md = readFileSync(out.markdownPath, "utf8");
+    expect(md).toContain("**Selector**: `header`");
+    expect(md).not.toMatch(/Selector \(prod\)/);
+    expect(md).not.toMatch(/DIFFERENT selectors/);
+  });
+
   it("trunca HTML diff quando muito longo (cap de 200 linhas no markdown)", () => {
     const longDiff = Array.from({ length: 500 }, (_, i) => `-line${i}`).join("\n");
     const inputs = makeInputs({

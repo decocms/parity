@@ -102,11 +102,11 @@ program
   )
   .option(
     "--pages <list>",
-    'Comma-separated paths to compare visually (overrides sitemap discovery). E.g. "/,/account,/p/some-product". Use this when you want deterministic coverage instead of sampled. Scopes the visual-diff + vitals-extra-pages passes ONLY — the flows crawl (--flows, default purchase-journey) discovers its own target pages independently and ignores this flag. To scope which page(s) a flow visits, use --flows to pick a lighter flow and/or set the matching *UrlHint (e.g. plpUrlHint) in .parityrc.json. Issue #178.',
+    'Comma-separated paths to compare visually (overrides sitemap discovery). E.g. "/,/account,/p/some-product". Use "prod->cand" for a page that lives at DIFFERENT paths on each side (partial migration), e.g. "/encimera-gc60/p->/ar-condicionado-12k/p". Use this when you want deterministic coverage instead of sampled. Scopes the visual-diff + vitals-extra-pages passes ONLY — the flows crawl (--flows, default purchase-journey) discovers its own target pages independently and ignores this flag. To scope which page(s) a flow visits, use --flows to pick a lighter flow and/or set the matching *UrlHint (e.g. plpUrlHint) in .parityrc.json. Issue #178.',
   )
   .option(
     "--pages-file <path>",
-    "Read paths to compare visually from a text file (one path per line). Lines starting with # are ignored. Overrides --pages when both are present. Same visual-diff/vitals-only scope as --pages — see that flag's help. Issue #178.",
+    'Read paths to compare visually from a text file (one entry per line). Lines starting with # are ignored. Accepts the same "prod->cand" pair syntax as --pages. Overrides --pages when both are present. Same visual-diff/vitals-only scope as --pages — see that flag\'s help. Issue #178.',
   )
   .option("--no-visual-diff", "Skip the visual diff capture pass entirely")
   .option(
@@ -643,6 +643,10 @@ program
   .requiredOption("--cand <url>", "Candidate URL (base, e.g. https://example.deco-cx.workers.dev)")
   .requiredOption("--selector <sel>", "CSS selector for the section to compare")
   .option(
+    "--cand-selector <sel>",
+    "CSS selector on the CANDIDATE side, when the ported component no longer matches --selector (VTEX IO class names → hashed CSS Modules, data-fs-* attributes, …). Defaults to --selector.",
+  )
+  .option(
     "--output-html",
     "Include the HTML diff facet (default: on if no facet flag passed)",
     false,
@@ -679,6 +683,7 @@ program
         prod: opts.prod,
         cand: opts.cand,
         selector: opts.selector,
+        candSelector: opts.candSelector,
         outputHtml: opts.outputHtml,
         screenshot: opts.screenshot,
         computedStyles: opts.computedStyles,
@@ -702,6 +707,10 @@ program
   .requiredOption("--prod <url>", "Production URL (source of truth)")
   .requiredOption("--cand <url>", "Candidate URL (migrated)")
   .requiredOption("--selector <sel>", "CSS selector for the section to fix")
+  .option(
+    "--cand-selector <sel>",
+    "CSS selector on the CANDIDATE side, when the ported component no longer matches --selector. Defaults to --selector.",
+  )
   .option("--viewport <viewport>", "mobile | desktop | tablet", "mobile")
   .option("--wait <ms>", "Extra ms after networkidle so hydration settles", "2000")
   .option("--out-dir <dir>", "Where to write the bundle + screenshots", "./parity-output/sections")
@@ -721,6 +730,7 @@ program
         prod: opts.prod,
         cand: opts.cand,
         selector: opts.selector,
+        candSelector: opts.candSelector,
         viewport: opts.viewport,
         wait: opts.wait,
         outDir: opts.outDir,

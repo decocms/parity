@@ -594,6 +594,12 @@ export interface CaptureOptions {
   side: Side;
   viewport: Viewport;
   screenshotPath: string;
+  /**
+   * Logical key this capture pairs on, when prod and cand sit at different
+   * paths. Pass the SAME value for both sides. Omit when the paths match —
+   * pairing then falls back to the URL pathname.
+   */
+  pairKey?: string;
   harPath?: string;
   tracePath?: string;
   /** Settle delay after networkidle, in ms. Default 2500 to let hydration finish. */
@@ -667,6 +673,7 @@ export async function capturePage(page: Page, opts: CaptureOptions): Promise<Pag
     harPath: opts.harPath,
     tracePath: opts.tracePath,
     xRobotsTag,
+    pairKey: opts.pairKey,
   });
 
   let response: Response | null = null;

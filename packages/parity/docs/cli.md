@@ -62,12 +62,32 @@ Run any command with `--help` for the full flag list.
 | `--clear-cache` | Wipe the visual-diff verdict cache before running |
 | `--no-visual-diff` | Skip the visual-diff capture/analysis pass entirely |
 | `--max-viewport-concurrency <n>` | How many viewports run in parallel (default 2) — lower this on resource-constrained machines if a full run stalls |
-| `--pages <list>` | Comma-separated paths for deterministic visual-diff coverage instead of sampled sitemap pages. **Scopes the visual-diff + vitals-extra-pages passes only** — see warning below |
-| `--pages-file <path>` | Same as `--pages`, read from a text file (one path per line, `#` comments). Overrides `--pages` when both are set |
+| `--pages <list>` | Comma-separated paths for deterministic visual-diff coverage instead of sampled sitemap pages. Accepts `prod->cand` pairs — see below. **Scopes the visual-diff + vitals-extra-pages passes only** — see warning below |
+| `--pages-file <path>` | Same as `--pages`, read from a text file (one entry per line, `#` comments). Overrides `--pages` when both are set |
 | `--accept-prod-quirks` | Demote prod-side cart-empty journey failures (VTEX session quirk) from failed to skipped — see issue #12 |
 | `--json <path\|->` | Stream JSONL progress (one line per check/metadata) to a file or stdout (`-`) for agents/scripts |
 | `--pt` | Tell the LLM to respond in Brazilian Portuguese |
 | `--no-interactive` | Disable the interactive selector/module prompts that auto-fire in a TTY |
+
+### Comparing pages that live at different paths (`prod->cand`)
+
+A partially-migrated site usually has no path parity: the reference PDP on prod
+is a product the candidate hasn't ported yet. Both `--pages` and `--pages-file`
+accept an arrow to pin the two sides explicitly:
+
+```bash
+parity run --prod https://www.electrolux.com.ec --cand http://localhost:3000 \
+  --pages "/,/encimeraagaselectroluxgc60m60cm/p->/ar-condicionado-split-inverter-12k-2003379/p"
+```
+
+`/` compares `/` on both sides; the second entry navigates prod and cand to
+their own path but keeps them in **one** comparison bucket. Without the arrow,
+the two captures pair on their (different) pathnames and every check that pairs
+pages — visual diff, vitals, http-status, banner aspect ratio — reports two
+orphans instead of one comparison.
+
+The pairing key is the prod path, so `report.json` keys stay stable across runs
+even if the candidate's path changes again later.
 
 ### `--pages`/`--pages-file` scoping gap (issue #178)
 
@@ -197,6 +217,25 @@ Writes (under `./parity-output/sections/`):
 - `section-<hash>-prompt.md` — paste-ready Markdown with embedded images, computed-style deltas, CSS source per property, HTML diff, and an opinionated "summarize what you understand first, no code yet" instruction
 
 If `ANTHROPIC_API_KEY` is set, the LLM is invoked automatically and prints a one-paragraph diagnosis to stdout (uses Claude Vision on the screenshots). Pass `--no-llm` to stay offline.
+
+### When the ported component has a different selector (`--cand-selector`)
+
+A ported component rarely keeps the source's selector: VTEX IO class names
+become hashed CSS Modules, `data-fs-*` attributes replace utility classes. Pass
+the candidate's own selector so the cand side resolves at all:
+
+```bash
+parity fix \
+  --prod https://www.electrolux.com.ec \
+  --cand http://localhost:3000 \
+  --selector '.vtex-store-components-3-x-container' \
+  --cand-selector '[data-fs-product-shelf]'
+```
+
+Both `parity section` and `parity fix` accept it; it defaults to `--selector`.
+When the two differ, the generated prompt states both selectors and tells the
+LLM to compare rendered output and computed styles rather than class names —
+otherwise it reads the expected port divergence as the bug to fix.
 
 ## `parity e2e` — single-site functional run
 

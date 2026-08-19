@@ -4,6 +4,8 @@ export interface FixOptions {
   prod: string;
   cand: string;
   selector: string;
+  /** Candidate-side selector when the port no longer matches `selector`. */
+  candSelector?: string;
   viewport: string;
   wait: string;
   outDir: string;
@@ -33,6 +35,7 @@ export async function fixCommand(opts: FixOptions): Promise<number> {
     prod: opts.prod,
     cand: opts.cand,
     selector: opts.selector,
+    candSelector: opts.candSelector,
     viewport: opts.viewport,
     wait: opts.wait,
     outDir: opts.outDir,

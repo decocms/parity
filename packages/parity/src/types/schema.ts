@@ -120,6 +120,14 @@ export const PageCapture = z.object({
   harPath: z.string().optional(),
   tracePath: z.string().optional(),
   xRobotsTag: z.string().nullable().optional(),
+  /**
+   * Logical pairing key, used instead of the URL pathname when prod and cand
+   * live at DIFFERENT paths. A partial migration routinely has no path parity
+   * — the reference PDP is a product the candidate hasn't ported yet — and
+   * without this every check that calls `pairCaptures` reports two orphans
+   * instead of one comparison. Set by an explicit page pair; absent otherwise.
+   */
+  pairKey: z.string().optional(),
 });
 export type PageCapture = z.infer<typeof PageCapture>;
 
