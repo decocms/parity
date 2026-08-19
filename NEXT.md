@@ -241,20 +241,15 @@ knowledge files.
 
 ---
 
-## 13. `decocms/tanstack-storefront` is private — bootstrap needs a plan B
+## 13. TanStack template — RESOLVED
 
-**Why it matters:** `target-tanstack-deco/SKILL.md` says scaffold from
-`decocms/tanstack-storefront`. That repo exists but is **private** (`visibility:
-PRIVATE`, last pushed 2026-02-27). An external user running the plugin won't
-have access. The orchestrator's `template-bootstrap` phase would silently fail
-at `gh repo clone`.
-
-**Fix options (pick one before shipping the plugin publicly):**
-- Make the template public.
-- Point to `decocms/blocks examples/tanstack-smoke` as a minimal starting point.
-- Document an alternative: `bun create tanstack` + manual wiring of `@decocms/*`
-  packages (there may be a published create template — check).
-- Gate the TanStack target on the user confirming they have template access.
+The canonical template is **`deco-sites/storefront-tanstack`** (public), not the
+private `decocms/tanstack-storefront`. `template-bootstrap` **copies its code**
+into the new repo (clone → copy tree → re-init) rather than `gh repo create
+--template`, so each migration inherits the template's latest improvements.
+Workflows: `deco-fresh` gets them from `deco-migrate` (the `migrate-script`
+phase); the template scaffold carries `deploy.yml` + Cloudflare Workers Builds.
+See `skills/target-tanstack-deco/SKILL.md` + the orchestrator `workflows` phase.
 
 ---
 

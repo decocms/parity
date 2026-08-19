@@ -69,15 +69,35 @@ Set `source.prodUrl` if not found automatically.
 6. `pendingComponents` = components where `status === "pending"`.
 
 ### repo-setup / template-bootstrap
-- **TanStack**: `gh repo create <name> --template decocms/tanstack-storefront`
+- **TanStack**: scaffold by **copying the code** from `deco-sites/storefront-tanstack`
+  (public) into the new repo — `git clone` it, copy the tree, re-init git and set
+  the new remote. NOT `gh repo create --template`: copying its current `main` means
+  each migration inherits the template's latest improvements.
+  (Skip this entirely when the source is `deco-fresh` — `deco-migrate` scaffolds
+  the target from the original repo in the `migrate-script` phase.)
 - **FastStore v4**: user must provide the repo (created via VTEX Onboarding).
   Ask for the repo path / URL. Clone it locally.
 Load skill `skills/target-faststore-v4/SKILL.md` or `skills/target-tanstack-deco/SKILL.md`.
 
 ### workflows
-Read `.github/workflows/` in the target. If CI is absent or minimal, copy the
-workflow templates from the source's `.github/` (for deco-fresh) or use the
-FastStore release workflow pattern.
+The target repo should be **born with CI/CD**. Where it comes from depends on the path:
+
+- **deco-fresh → TanStack**: `deco-migrate` (the `migrate-script` phase) already
+  scaffolds the CI workflows — `ci`, `parity`, `perf`, `playwright`, `react-doctor`,
+  `lockfile-check`, `main-push-guard` (rendered from
+  `decocms/blocks` `packages/blocks-cli/scripts/migrate/templates/*-yml.ts`). Here the
+  `workflows` phase only **verifies** `.github/workflows/` has them and doesn't
+  re-create.
+- **template scaffold (vtex-io / live-only → TanStack)**: the copied
+  `deco-sites/storefront-tanstack` carries its deploy setup (`deploy.yml` on push to
+  `main` + Cloudflare **Workers Builds** GitHub App for per-PR previews; see its
+  `.github/workflows/README.md`). Confirm the required secrets
+  (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) are set. If the richer CI
+  (parity/perf/playwright) is wanted, pull those yml from the same blocks-cli
+  migrate templates.
+- **FastStore v4**: use the FastStore release workflow pattern.
+
+Never leave the repo without a deploy workflow — a migration that can't ship isn't done.
 
 ### migrate-script (deco-fresh only)
 Via `runner`: `bun run predev && npx -p @decocms/blocks-cli deco-migrate --verbose 2>&1 | tail -100`
