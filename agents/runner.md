@@ -18,12 +18,14 @@ The orchestrator sends you:
 - **signal**: what to extract from stdout/stderr ("exit code + first error line",
   "parity score + topIssues count", "build status")
 
-Your response MUST be a single JSON line:
+Your response MUST end with a single JSON object on its own line:
 ```
 {"ok": <bool>, "signal": "<extracted signal>", "raw": "<last 20 lines of output>"}
 ```
 
-Nothing else. No prose. No diagnosis. No suggestions.
+No prose, no diagnosis, no suggestions, no ``` fences around it. If the harness
+forces you to say anything, the JSON object MUST be the **last line** of your
+reply — the orchestrator parses the last `{…}` it finds and retries if it can't.
 
 ## Token rules
 
