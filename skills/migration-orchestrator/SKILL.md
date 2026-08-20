@@ -80,11 +80,21 @@ whole message is JSON.
 discovery → reconcile → repo-setup → template-bootstrap → workflows
 → [migrate-script | porting] → build-green → nav-strategy → triage → fix → parity
 → [loop back to triage if score < target] → benchmark → done
+
+  fix, when budget.stackPrs → stack-review → done   (nothing merged; user lands the stack)
 ```
 
 **Decision at porting fork:**
 - Source is `deco-fresh` → `migrate-script` (runs `deco-migrate`)
 - Source is `vtex-io` or `live-only` → `porting` (one `porter` per component)
+
+**PR mode** (set at `discovery`, `budget.stackPrs`):
+- **merge** (default) — independent PRs off `main`, merged one at a time; the
+  `fix → parity` loop re-scores after each round.
+- **stack** — fixes chained (each PR based on the previous), nothing merged; the
+  top PR's preview shows every fix together. `fix → stack-review → done`. Choose
+  this when the user asks to stack fixes / get one preview with all fixes / not
+  auto-merge.
 
 ## State schema (`.parity/migration.json`)
 
@@ -110,7 +120,8 @@ discovery → reconcile → repo-setup → template-bootstrap → workflows
   "pagePairs": [],                // [{prod, cand, kind}] for cross-path pairing
   // components + their porting status live in <target.dir>/.parity/migration-plan.json,
   // NOT here. Flip status via `parity plan set-status` (see "Plan file" above).
-  "budget": { "fixRounds": 6, "used": 0 },
+  "budget": { "fixRounds": 6, "used": 0, "stackPrs": false },
+  "stack": [],                    // stack mode only: [{issue, pr, branch, base}] bottom→top
   "parity": { "lastScore": null, "target": 97, "reportPath": null }
 }
 ```
@@ -126,6 +137,11 @@ migration is viewable end-to-end); `faststore-v4` is coupled to the client's VTE
 (`faststore cms-sync`, account write access) + the `faststore` custom app.** For a
 no-account/live-only migration, faststore-v4 yields buildable code but not a running site.
 Set `source.prodUrl` if not found automatically.
+
+**PR mode.** If the user asked to stack fixes, review one combined preview, or
+not auto-merge, set `budget.stackPrs: true` (see `fix` / `stack-review`).
+Otherwise leave it `false` (merge mode). When unsure and the user mentioned
+"preview with all fixes" or "don't merge", pick stack.
 
 ### reconcile
 **First: is the target already a scaffolded storefront?** When `scout` classified
@@ -293,8 +309,14 @@ title already exists — check with `gh issue list --label parity-migrate`).
 Advance to `fix`.
 
 ### fix
-For each open `parity-migrate` issue (up to 5 per round):
-1. Spawn `fixer` with the issue body → it creates a commit + PR.
+Two modes, chosen by `budget.stackPrs` (see "PR mode" below). Default is **merge
+mode**. In both, the review gate is identical — only the base branch and the
+merge step differ.
+
+**Merge mode (`budget.stackPrs: false`, default).** Independent PRs off `main`,
+merged one at a time. For each open `parity-migrate` issue (up to 5 per round):
+1. Spawn `fixer` with the issue body and `base_branch: <target default branch>`
+   → it creates a commit + PR off `main`.
 2. Run `runner` with the build command to catch regressions.
 3. **Review gate.** Spawn `reviewer` with the PR number + conventions. If
    `approved: false`, re-spawn the `fixer` with the `blockers` and repeat (max 2
@@ -307,6 +329,39 @@ For each open `parity-migrate` issue (up to 5 per round):
 5. After the merge, pull the target so the running dev server picks up the fix.
 
 Increment `round`. Advance to `parity` only once this round's fixes are merged.
+
+**Stack mode (`budget.stackPrs: true`).** Nothing is merged — each fix PR is
+based on the PREVIOUS fix's branch, so the **top of the stack accumulates every
+fix and its preview deploy shows all fixes together**. Process issues
+**sequentially** (a stack is a chain; no parallel batch). Maintain
+`state.stack = [{issue, pr, branch, base}]`.
+1. `base` for the first issue = the target's default branch; for issue *k* = the
+   `branch` returned by issue *k-1*'s fixer.
+2. Spawn `fixer` with the issue body and `base_branch: <base>` → commit + PR
+   **based on `<base>`** (the fixer passes `--base`). Append `{issue, pr, branch,
+   base}` to `state.stack`.
+3. Build check + **review gate** exactly as merge mode (reviewer sees only the
+   incremental diff against `<base>` — the right unit to review).
+4. **No merge gate.** Leave the PR open. Do NOT merge, do NOT delete branches.
+5. Do NOT restore HEAD to `main` between issues — the next fixer branches off the
+   previous fix branch to continue the chain.
+
+After the last issue, go to **stack-review** (below) instead of `parity`. Never
+interleave stack mode with the merge-gated `parity` loop — with nothing merged,
+a re-score would measure unpatched code.
+
+### stack-review  *(stack mode only)*
+The top branch (`state.stack[last].branch`) is the cumulative candidate. Report
+to the user:
+- The ordered stack (issue → PR → branch), bottom to top.
+- The **top PR's preview URL** — that deploy contains ALL the fixes together
+  (Cloudflare Workers Builds / the platform's per-PR preview). This is the "one
+  preview with everything" the stack exists for.
+- How to land it: **merge bottom-up** (PR #1 into `main` first, then retarget/
+  merge #2, …). Do NOT `--delete-branch` mid-stack — deleting a base branch
+  closes its child PR. Delete branches only after the whole stack is merged.
+
+Then stop and hand off — landing the stack is the user's call.
 
 ### parity
 Load skill `skills/parity-validation/SKILL.md`.
