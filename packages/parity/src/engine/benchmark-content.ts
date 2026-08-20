@@ -22,6 +22,7 @@ import {
   aggregatePhase,
   dismissAll,
   navigateWithHover,
+  openMenu,
   pageLooksBroken,
   waitReady,
 } from "./benchmark.ts";
@@ -211,6 +212,13 @@ async function contentPass(
   for (const path of paths) {
     const key = stepKeyForPath(path);
     const target = new URL(path, base).toString();
+    // On mobile the nav links live behind the hamburger — open it first (UNTIMED
+    // prep) so the anchor is visible and navigateWithHover takes the hover path
+    // (which triggers the SPA/speculation-rules prefetch) instead of the cold
+    // goto fallback. Mirrors the real flow: open menu → tap link.
+    const sel = `a[href="${path}"], a[href^="${path}?"]`;
+    const linkVisible = await page.locator(sel).first().isVisible({ timeout: 800 }).catch(() => false);
+    if (!linkVisible) await openMenu(page).catch(() => undefined);
     const { ok, navMs } = await navigateWithHover(page, target, false);
     steps.push({ step: key, ms: navMs, url: page.url(), ok, note: path });
     // Capture the arrived page BEFORE returning home, so the report shows the

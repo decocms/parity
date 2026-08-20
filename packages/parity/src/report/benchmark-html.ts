@@ -90,6 +90,28 @@ export function speedup(prodMs: number, candMs: number): number {
   return candMs > 0 ? prodMs / candMs : 0;
 }
 
+/**
+ * Headline verdict. A "×" multiplier only reads well at a real gap (≥2×); a "1.3×"
+ * is confusing, so between ~parity and 2× we express it as a percentage of time
+ * saved/added. Roughly even (within ±5%) reads as "same speed".
+ */
+export function heroVerdict(
+  prodMs: number,
+  candMs: number,
+  lang: string,
+): { big: string; suffix: string } {
+  const su = speedup(prodMs, candMs);
+  if (!Number.isFinite(su) || su <= 0) return { big: "—", suffix: "" };
+  if (su >= 2) return { big: `${su.toFixed(1)}×`, suffix: L("mais rápido", "faster", lang) };
+  if (su >= 1.05) {
+    const pct = Math.round(((prodMs - candMs) / prodMs) * 100); // time saved
+    return { big: `${pct}%`, suffix: L("mais rápido", "faster", lang) };
+  }
+  if (su > 0.95) return { big: "≈", suffix: L("mesma velocidade", "about the same", lang) };
+  const pct = Math.round(((candMs - prodMs) / prodMs) * 100); // time added
+  return { big: `${pct}%`, suffix: L("mais lento", "slower", lang) };
+}
+
 /** tone for a "lower is better" comparison of cand vs prod */
 export function deltaTone(prodMs: number, candMs: number): string {
   if (prodMs <= 0 || candMs <= 0) return DECK.muted;
@@ -267,8 +289,7 @@ function renderViewport(report: BenchmarkReport, viewport: string, lang: string)
   const cand = report.sides.find((s) => s.viewport === viewport && s.side === "cand");
   if (!prod || !cand) return "";
 
-  const su = speedup(prod.totalMs, cand.totalMs);
-  const suLabel = su >= 1 ? `${su.toFixed(1)}×` : `${su.toFixed(2)}×`;
+  const verdict = heroVerdict(prod.totalMs, cand.totalMs, lang);
 
   // Drop the "not applicable" variant step entirely (e.g. single-colour product)
   // — the user doesn't want a dead tile/section when there's nothing to switch.
@@ -301,7 +322,7 @@ function renderViewport(report: BenchmarkReport, viewport: string, lang: string)
           <span class="ht-arrow">→</span>
           <div class="ht-side"><span class="ht-num" style="color:${DECK.soft}">${fmtMs(cand.totalMs)}</span><span class="ht-cap">TanStack</span></div>
         </div>
-        <div class="hero-speedup"><span class="hs-big">${suLabel}</span> ${L("mais rápido", "faster", lang)}</div>
+        <div class="hero-speedup"><span class="hs-big">${verdict.big}</span> ${verdict.suffix}</div>
       </div>
       ${figure(cand.screenshots.home, "TanStack", DECK.soft, cand.base, true)}
     </div>

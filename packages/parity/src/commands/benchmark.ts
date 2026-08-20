@@ -241,9 +241,16 @@ function printSummary(report: BenchmarkReport): void {
     if (!prod || !cand) continue;
     console.log("");
     console.log(chalk.bold(`  [${viewport}] tempo total da jornada`));
-    const speedup = cand.totalMs > 0 ? prod.totalMs / cand.totalMs : 0;
+    const su = cand.totalMs > 0 ? prod.totalMs / cand.totalMs : 0;
+    // Same rule as the HTML hero: ≥2× reads as "N×"; 1.05–2× as "% faster"
+    // (a "1.3×" is confusing); ~parity as "≈ same"; slower as "% slower".
+    let verdict: string;
+    if (su >= 2) verdict = chalk.green(`${su.toFixed(1)}× mais rápido`);
+    else if (su >= 1.05) verdict = chalk.green(`${Math.round(((prod.totalMs - cand.totalMs) / prod.totalMs) * 100)}% mais rápido`);
+    else if (su > 0.95) verdict = chalk.yellow("≈ mesma velocidade");
+    else verdict = chalk.red(`${Math.round(((cand.totalMs - prod.totalMs) / prod.totalMs) * 100)}% mais lento`);
     console.log(
-      `    Fresh ${chalk.cyan(fmt(prod.totalMs))} → TanStack ${chalk.magenta(fmt(cand.totalMs))}  ${speedup >= 1 ? chalk.green(`${speedup.toFixed(1)}× mais rápido`) : chalk.yellow(`${speedup.toFixed(2)}×`)}`,
+      `    Fresh ${chalk.cyan(fmt(prod.totalMs))} → TanStack ${chalk.magenta(fmt(cand.totalMs))}  ${verdict}`,
     );
     for (const cs of cand.steps) {
       const ps = prod.steps.find((s) => s.step === cs.step);

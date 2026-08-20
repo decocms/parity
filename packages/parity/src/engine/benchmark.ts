@@ -307,7 +307,7 @@ export async function scrollToTop(page: import("playwright").Page): Promise<void
 }
 
 /** Open the mobile hamburger menu. Returns true if a trigger was clicked. */
-async function openMenu(page: import("playwright").Page): Promise<boolean> {
+export async function openMenu(page: import("playwright").Page): Promise<boolean> {
   for (const sel of HAMBURGER_SELECTORS) {
     const btn = page.locator(sel).first();
     if (await btn.isVisible({ timeout: 500 }).catch(() => false)) {
