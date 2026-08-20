@@ -160,16 +160,48 @@ The target repo should be **born with CI/CD**. Where it comes from depends on th
   `decocms/blocks` `packages/blocks-cli/scripts/migrate/templates/*-yml.ts`). Here the
   `workflows` phase only **verifies** `.github/workflows/` has them and doesn't
   re-create.
-- **template scaffold (vtex-io / live-only → TanStack)**: the copied
-  `deco-sites/storefront-tanstack` carries its deploy setup (`deploy.yml` on push to
-  `main` + Cloudflare **Workers Builds** GitHub App for per-PR previews; see its
-  `.github/workflows/README.md`). Confirm the required secrets
-  (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) are set. If the richer CI
-  (parity/perf/playwright) is wanted, pull those yml from the same blocks-cli
-  migrate templates.
+- **template scaffold (vtex-io / live-only → TanStack)**:
+  ⚠️ **NEVER create a deploy workflow for `tanstack-deco`.** Deploys are handled
+  exclusively by the **Cloudflare Workers Builds GitHub App** — no workflow files
+  needed. If a `deploy.yml` (or similar) exists in `.github/workflows/`, **delete
+  it** before the first PR via runner:
+  ```
+  rm .github/workflows/deploy.yml
+  git commit -am "remove: deploy workflow (CF Workers Builds handles this)"
+  git push
+  ```
+  The app detects pushes to `main` and posts per-PR preview links via the
+  `cloudflare-workers-and-pages` bot.
+
+  **Verify the app is active:**
+  1. Via runner: open the first PR.
+  2. Wait ~3 minutes.
+  3. Via runner: `gh pr view <pr> --json comments --jq '.comments[].author.login' | grep cloudflare`
+  4. **Bot commented** → CF Workers Builds is active. Verify secrets via
+     `gh secret list` (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`). Phase done.
+  5. **Bot did not comment after 3 min** → app not installed. Guide the user:
+
+     > Cloudflare Workers Builds is not connected to this repository.
+     > To enable automatic deploys (PR preview links + push-to-main deploy):
+     >
+     > 1. Go to https://dash.cloudflare.com → **Workers & Pages**
+     > 2. Click **Create application** → **Connect to Git**
+     > 3. Select the repository `<owner/repo>`
+     > 4. Set build settings (framework: None, build command: empty, output dir: empty)
+     > 5. Click **Save and Deploy**
+     >
+     > Confirm when done to continue the migration.
+
+  6. After user confirms: run `gh secret list` to verify `CLOUDFLARE_API_TOKEN` and
+     `CLOUDFLARE_ACCOUNT_ID`. If missing, ask the user to add them.
+
+  If richer CI (parity/perf/playwright) is wanted, import those yml from the
+  blocks-cli migrate templates separately.
+
 - **FastStore v4**: use the FastStore release workflow pattern.
 
-Never leave the repo without a deploy workflow — a migration that can't ship isn't done.
+⚠️ The "never create a deploy workflow / delete if present" rule is EXCLUSIVE to
+`tanstack-deco`. FastStore v4 uses the CLI and has its own process.
 
 ### migrate-script (deco-fresh only)
 Via `runner` (run in SOURCE repo dir — deco-migrate transforms it in-place):
