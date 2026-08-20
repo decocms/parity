@@ -250,7 +250,17 @@ Only scaffold when creating a brand-new target repo from a source/live capture.
   the template's example brand theme + assets. Fall back to bare `vtex-sites/starter.store`
   only if the template is unavailable (ports come out monolithic). See
   `target-faststore-v4/SKILL.md`.
-Load skill `skills/target-faststore-v4/SKILL.md` or `skills/target-tanstack-deco/SKILL.md`.
+- **FastStore Next**: scaffold by **copying the code** from
+  `deco-sites/faststore-next-template` (Next.js App Router on `@faststore/api`/
+  `sdk`/`ui`, no `@faststore/cli`/`core` — Deco CMS decofiles as the content
+  source). Clone, copy the tree, re-init git, set the new remote. Then set
+  `discovery.config.js`'s `api.storeId` (public, client-bundled — not a
+  secret) to the source VTEX account. See `target-faststore-next/SKILL.md`
+  for the full bootstrap, including the ADR on when this target applies vs
+  `faststore-v4` — **don't guess between the two**, it's a discovery-time
+  decision, not a migration-time one.
+Load skill `skills/target-faststore-v4/SKILL.md`, `skills/target-faststore-next/SKILL.md`,
+or `skills/target-tanstack-deco/SKILL.md`.
 
 ### workflows
 The target repo should be **born with CI/CD**. Where it comes from depends on the path:
@@ -300,9 +310,23 @@ The target repo should be **born with CI/CD**. Where it comes from depends on th
   blocks-cli migrate templates separately.
 
 - **FastStore v4**: use the FastStore release workflow pattern.
+- **FastStore Next**: no deploy workflow either, but for a different reason
+  than `tanstack-deco` — WebOps builds straight from `discovery.config.js` +
+  `package.json` scripts (`next build`), no CLI, no GitHub App. Do NOT add a
+  `deploy.yml`. Two accommodations WebOps needs that look wrong to a generic
+  Node reviewer but are load-bearing — do not "fix" them: (1) build-time
+  tooling (`tsx`, `@decocms/blocks-cli`, `@graphql-codegen/cli`, `prettier`,
+  `@types/react`) sits in `dependencies`, not `devDependencies`, because
+  WebOps production installs skip devDependencies; (2) branch names must not
+  contain a second `/` (dependabot.yml's `separator: "-"` exists for this).
+  Staging validation happens on the WebOps-provisioned preview domain;
+  `src/proxy.ts`'s reverse-proxy pattern (see `target-faststore-next/SKILL.md`)
+  supports a route-by-route cutover instead of an all-or-nothing DNS switch.
 
 ⚠️ The "never create a deploy workflow / delete if present" rule is EXCLUSIVE to
-`tanstack-deco`. FastStore v4 uses the CLI and has its own process.
+`tanstack-deco`. FastStore v4 uses the CLI and has its own process; FastStore
+Next uses WebOps and has its own (see above) — neither needs a workflow file,
+but for unrelated reasons, so don't merge the two rationales.
 
 ### migrate-script (deco-fresh only)
 Via `runner` (run in SOURCE repo dir — deco-migrate transforms it in-place):

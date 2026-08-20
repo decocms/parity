@@ -5,6 +5,12 @@ description: Target playbook for VTEX FastStore v4 (@faststore/cli). Load when p
 
 # Target: VTEX FastStore v4
 
+> A second FastStore target, `target-faststore-next/SKILL.md`, exists for
+> clients who want the Deco CMS/Studio as their content source instead of
+> the VTEX Headless CMS this skill scaffolds. The two are not a legacy/
+> current pair — which one applies is a per-client discovery decision (see
+> the ADR in `decocms/context`), not something to switch mid-migration.
+
 Source of truth: `docs/ai-playbooks.md` in the target repo (ALWAYS read it first
 if present — it overrides everything here). This skill fills the gap when absent.
 
