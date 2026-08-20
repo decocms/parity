@@ -491,6 +491,10 @@ program
     "--plp <path>",
     "Pin the PLP path (skip auto-discovery), e.g. /roupas — useful to force a clothing category with real color variants",
   )
+  .option(
+    "--journey <type>",
+    "Journey shape: commerce (home→PLP→PDP→variant) | content (home→page A→page B, for blog/custom sites with no PLP/PDP). Auto-detected from the platform when omitted. Issue #251.",
+  )
   .option("--cep <cep>", "CEP (kept for overlay/region dismissal parity)", "01310-100")
   .option("--output <dir>", "Output directory for runs/<id>/", "./parity-output")
   .option("--no-vitals", "Skip the Lighthouse web-vitals pass (faster iteration)")
