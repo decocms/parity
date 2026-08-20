@@ -48,15 +48,104 @@ export async function detectComponents(
   if (opts?.llm && isComponentDetectionLlmAvailable()) {
     const { refineComponentsWithLlm } = await import("../llm/component-refine.ts");
     const refined = await refineComponentsWithLlm(page, components);
-    if (refined) return refined;
+    if (refined) return sanitizeDetectedComponents(refined);
   }
 
-  return components;
+  return sanitizeDetectedComponents(components);
 }
 
 /** Same "is a provider configured" gate other optional LLM passes use. */
 export function isComponentDetectionLlmAvailable(): boolean {
   return isUnderstandingAvailable();
+}
+
+/**
+ * Tokens that name a layout wrapper, not a content component. A role built
+ * ENTIRELY from these (`main-wrapper`, `portal-root`, `overlay-container`,
+ * `modal-dialog`) is DOM plumbing the live capture snagged — never a migratable
+ * section. A role that also carries a content noun (`newsletter-modal`,
+ * `product-hero`) is kept.
+ */
+const STRUCTURAL_TOKENS = new Set([
+  "wrapper",
+  "container",
+  "root",
+  "overlay",
+  "portal",
+  "backdrop",
+  "modal",
+  "dialog",
+  "layout",
+  "main",
+  "site",
+  "page",
+  "app",
+  "body",
+  "inner",
+  "outer",
+  "scroll",
+  "sticky",
+  "shell",
+  "region",
+  "content",
+]);
+
+/** Synonyms that all mean the same shared global block. */
+const HEADER_SYNONYMS = new Set(["header", "masthead"]);
+const FOOTER_SYNONYMS = new Set(["footer"]);
+const NAV_SYNONYMS = new Set(["nav", "navbar", "navigation", "menu", "megamenu", "mega"]);
+
+function roleTokens(role: string): string[] {
+  return role
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+/** All tokens are structural plumbing (or numeric) → not a real component. */
+export function isStructuralJunkRole(role: string): boolean {
+  const tokens = roleTokens(role);
+  if (tokens.length === 0) return true;
+  return tokens.every((t) => STRUCTURAL_TOKENS.has(t) || /^\d+$/.test(t));
+}
+
+/**
+ * Fold a role's many capture-time spellings down to a canonical shared-global
+ * name so global dedup + target reconcile actually match. `site-header` →
+ * `header`, `main-navigation`/`navigation-mega-menu` → `nav`, `footer-content`
+ * → `footer`. Only folds when EVERY non-structural token is a synonym of that
+ * global — so `product-navigation`/`product-header` stay distinct.
+ */
+export function canonicalRole(role: string): string {
+  const meaningful = roleTokens(role).filter((t) => !STRUCTURAL_TOKENS.has(t));
+  if (meaningful.length === 0) return role; // pure junk — the filter drops it
+  if (meaningful.every((t) => HEADER_SYNONYMS.has(t))) return "header";
+  if (meaningful.every((t) => FOOTER_SYNONYMS.has(t))) return "footer";
+  if (meaningful.every((t) => NAV_SYNONYMS.has(t))) return "nav";
+  return role;
+}
+
+/**
+ * Post-process detected/refined components: drop structural-wrapper junk the
+ * capture snagged (`portal-root`, `overlay-container`, `modal-overlay`) and
+ * canonicalize shared-global spellings, collapsing the many `site-header` /
+ * `navigation-*` / `footer-*` variants to ONE `header`/`nav`/`footer` each.
+ * Pure — unit-tested. Without this, a live-only capture emits 25+ rows where
+ * ~half are DOM plumbing and ~half are re-spellings of the same shell.
+ */
+export function sanitizeDetectedComponents(components: DetectedComponent[]): DetectedComponent[] {
+  const seenGlobal = new Set<string>();
+  const out: DetectedComponent[] = [];
+  for (const c of components) {
+    if (isStructuralJunkRole(c.role)) continue;
+    const role = canonicalRole(c.role);
+    if (role === "header" || role === "footer" || role === "nav") {
+      if (seenGlobal.has(role)) continue; // keep the first spelling only
+      seenGlobal.add(role);
+    }
+    out.push(role === c.role ? c : { ...c, role });
+  }
+  return out;
 }
 
 /**
@@ -259,9 +348,7 @@ function collectCandidatesInPage(): RawCandidate[] {
       el = el.parentElement;
     }
     header ??= widest(
-      Array.from(document.querySelectorAll("[class*='header' i]")).filter(
-        (e) => rectOf(e).y < 200,
-      ),
+      Array.from(document.querySelectorAll("[class*='header' i]")).filter((e) => rectOf(e).y < 200),
     );
     if (header) push("header", header);
   }
@@ -271,7 +358,9 @@ function collectCandidatesInPage(): RawCandidate[] {
       widest(
         Array.from(document.querySelectorAll("[class*='footer' i]")).filter((e) => {
           const r = rectOf(e);
-          return r.y + r.height > docHeight - window.innerHeight && e.querySelectorAll("a").length >= 4;
+          return (
+            r.y + r.height > docHeight - window.innerHeight && e.querySelectorAll("a").length >= 4
+          );
         }),
       ) ??
       // Geometry fallback: bottom full-width block with many links.
