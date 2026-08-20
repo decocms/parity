@@ -36,6 +36,15 @@ Read-only. You receive: `target_dir`, `build_ok` (bool), `dev_log_path` (opt),
    grep for `from "preact`, `@preact/signals`, `$fresh/`, `from "apps/`.
 6. **CSS violations** (if faststore-v4): grep for hex values and `px` in `.module.scss`
    (except `0px`), and `:global(` in `.module.scss`.
+7. **Missing LoadingFallback on deferred sections** (tanstack-deco). A deferred
+   section with no `LoadingFallback` export renders blank space until hydration →
+   CLS + blank no-JS render. Detect statically (no browser needed):
+   - Read section order per page from `.deco/blocks/pages-*.json` (`__resolveType`).
+   - Read flags from `.deco/sections.gen.ts` (`hasLoadingFallback`, `neverDefer`, `eager`, `sync`).
+   - A REAL content section (ignore `webRendering/Lazy.tsx` wrappers) that (a) sits
+     past the fold threshold OR is CMS-Lazy-wrapped, (b) is not `neverDefer`/`eager`,
+     and (c) has `hasLoadingFallback: false` → flag it.
+   Classify: `{severity: "high", category: "visual", title: "<Section> deferred without LoadingFallback — CLS/blank render", body: "Add 'export function LoadingFallback()' returning a skeleton with the same dimensions, OR mark eager/neverDefer if above the fold."}`
 
 ## Output
 
