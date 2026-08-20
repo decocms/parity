@@ -19,11 +19,27 @@ Ask `scout` with `task: "detect-source"`. Evidence priority:
 
 ## Prod URL discovery (delegate to `scout`)
 
+The parity `prod` URL must be the **legacy site being replaced** (e.g. the VTEX
+IO storefront) — NOT the target's own staging. When the target repo is already a
+`faststore-v4`/`tanstack-deco` scaffold, its `storeUrl` points at its OWN preview
+(`*.vtex.app`, `*.myvtex.com`, `*.deco.site`, a Workers `*.workers.dev`). Using
+that as `prod` compares the candidate against itself → a meaningless high score.
+
 Ask `scout` with `task: "find-prod-url"`. Check in order:
-1. `discovery.config.js` → `prod` preset `storeUrl`
+1. `discovery.config.js` → `prod` preset `storeUrl` — **but reject it if the host
+   is the target's own staging** (`*.vtex.app` / `*.myvtex.com` / `*.deco.site` /
+   `*.workers.dev`); that is the candidate, not the legacy source.
 2. `package.json` → `homepage`
-3. `README.md` → first `https://` URL that looks like a store (has `.com`, `.ec`, etc.)
-4. Ask the user if still unknown.
+3. `.env.example` / `.env` → a legacy-gateway var (`VTEX_IO_BASE_URL`,
+   `LEGACY_URL`, `SOURCE_URL`) — often the only place the real live domain lives,
+   commented out.
+4. `README.md` → first `https://` URL that looks like the live store (has a real
+   brand TLD: `.com`, `.com.ec`, `.com.br`, …), not a staging host.
+5. Ask the user: "What is the URL of the legacy live site being migrated?"
+
+Also flag **config smells** while here: if `discovery.config.js` locale/currency/
+country (e.g. `pt-BR`/`BRL`/`BRA`) disagree with the live host's TLD/market
+(e.g. `.com.ec` → Ecuador), report it — it's a real target bug worth an issue.
 
 ## Conventions discovery (delegate to `scout`)
 

@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.24.0] — 2026-08-20
+
+### Added
+
+* **Live-capture sanitization (`sanitizeDetectedComponents`).** `parity migrate`
+  against a live-only site (no source repo — e.g. a VTEX IO storefront) used to
+  emit DOM plumbing as migratable components: `main-wrapper`, `portal-root`,
+  `overlay-container`, `modal-overlay`/`modal-dialog`, plus a separate row for
+  every spelling of the same shell (`header` + `site-header`; `navigation-menu` +
+  `main-navigation` + `navigation-mega-menu`; `footer` + `site-footer` +
+  `footer-content`). A post-detect pass now (1) drops roles built entirely from
+  structural-wrapper tokens and (2) canonicalizes global synonyms to one
+  `header`/`nav`/`footer` each — so `isGlobalRole` scopes them correctly and the
+  plan stops listing ~11 phantom/duplicate components. Content in a wrapper
+  (`newsletter-modal`, `product-hero`) is preserved; only all-structural roles
+  are dropped. Runs for both the heuristic and the LLM-refine path.
+
+### Changed
+
+* **Orchestrator: reconcile-only mode when the target already exists.** When
+  `scout` classifies the repo the user points at as an already-scaffolded
+  `faststore-v4`/`tanstack-deco` target, `repo-setup`/`template-bootstrap` are
+  now explicitly skipped (re-scaffolding would clobber real work) and the source
+  is the legacy live site. (`skills/migration-orchestrator`)
+* **Discovery: never use the target's own staging as the parity `prod`.**
+  `find-prod-url` now rejects `*.vtex.app`/`*.myvtex.com`/`*.deco.site`/
+  `*.workers.dev` hosts (that's the candidate, not the legacy source), scans
+  `.env(.example)` for a legacy-gateway URL, and flags locale/currency/country
+  config that disagrees with the live host's market. Reconcile guidance now
+  says to match plan rows to target sections by CONCEPT, not just string, so a
+  mature target isn't misread as ~2 done / 25 pending. (`skills/migration-discovery`)
+
 ## [Unreleased]
 
 ### Added

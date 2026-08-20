@@ -3,9 +3,13 @@ import {
   type RawCandidate,
   boxArea,
   boxOverlapArea,
+  canonicalRole,
   containmentRatio,
   dedupeByContainment,
+  isStructuralJunkRole,
+  sanitizeDetectedComponents,
 } from "../../src/extract/detect-components.ts";
+import type { DetectedComponent } from "../../src/types/extract.ts";
 
 function candidate(over: Partial<RawCandidate>): RawCandidate {
   return {
@@ -127,5 +131,130 @@ describe("dedupeByContainment", () => {
     });
     const out = dedupeByContainment([bottom, top]);
     expect(out.map((c) => c.role)).toEqual(["header", "footer"]);
+  });
+});
+
+describe("isStructuralJunkRole", () => {
+  it.each([
+    "main-wrapper",
+    "main-container",
+    "portal-root",
+    "overlay-container",
+    "modal-overlay",
+    "modal-dialog",
+    "page-content",
+    "sticky-wrapper",
+  ])("descarta o wrapper estrutural %s", (role) => {
+    expect(isStructuralJunkRole(role)).toBe(true);
+  });
+
+  it.each([
+    "header",
+    "footer",
+    "product-shelf",
+    "newsletter-signup",
+    "newsletter-modal",
+    "registration-modal",
+    "product-hero",
+    "search-results",
+    "section-deals",
+    "shelf-freezers-launch",
+  ])("mantém o componente de conteúdo %s", (role) => {
+    expect(isStructuralJunkRole(role)).toBe(false);
+  });
+});
+
+describe("canonicalRole", () => {
+  it.each([
+    ["site-header", "header"],
+    ["header", "header"],
+    ["site-footer", "footer"],
+    ["footer-content", "footer"],
+    ["navigation-menu", "nav"],
+    ["main-navigation", "nav"],
+    ["navigation-mega-menu", "nav"],
+    ["nav", "nav"],
+  ])("dobra %s → %s", (input, expected) => {
+    expect(canonicalRole(input)).toBe(expected);
+  });
+
+  it.each(["product-hero", "product-shelf", "product-navigation", "newsletter-signup"])(
+    "não dobra o componente de página %s",
+    (role) => {
+      expect(canonicalRole(role)).toBe(role);
+    },
+  );
+});
+
+describe("sanitizeDetectedComponents", () => {
+  function comp(role: string, selector = `.${role}`): DetectedComponent {
+    return { role, selector, boundingBox: { x: 0, y: 0, width: 100, height: 100 } };
+  }
+
+  it("limpa uma captura live-only realista (27 → sem lixo, globais únicos)", () => {
+    // Nomes reais capturados de um site VTEX IO (www.electrolux.com.ec).
+    const raw = [
+      "main-wrapper",
+      "header",
+      "modal-overlay",
+      "product-shelf",
+      "footer",
+      "search-results",
+      "newsletter-signup",
+      "product-combo-section",
+      "notify-me-form",
+      "product-carousel",
+      "navigation-menu",
+      "newsletter-signup-form",
+      "modal-dialog",
+      "overlay-container",
+      "main-container",
+      "shelf-freezers-launch",
+      "product-detail-hero",
+      "site-header",
+      "newsletter-modal",
+      "registration-modal",
+      "site-footer",
+      "product-hero",
+      "product-slider",
+      "main-navigation",
+      "navigation-mega-menu",
+      "portal-root",
+      "footer-content",
+    ].map((r) => comp(r));
+
+    const out = sanitizeDetectedComponents(raw);
+    const roles = out.map((c) => c.role);
+
+    // Lixo estrutural some.
+    for (const junk of [
+      "main-wrapper",
+      "main-container",
+      "portal-root",
+      "overlay-container",
+      "modal-overlay",
+      "modal-dialog",
+    ]) {
+      expect(roles).not.toContain(junk);
+    }
+    // Globais colapsam para uma ocorrência cada.
+    expect(roles.filter((r) => r === "header")).toHaveLength(1);
+    expect(roles.filter((r) => r === "footer")).toHaveLength(1);
+    expect(roles.filter((r) => r === "nav")).toHaveLength(1);
+    // Componentes de conteúdo reais sobrevivem.
+    for (const kept of ["product-shelf", "search-results", "newsletter-modal", "product-hero"]) {
+      expect(roles).toContain(kept);
+    }
+    expect(out.length).toBeLessThan(raw.length);
+  });
+
+  it("preserva o primeiro seletor ao colapsar globais", () => {
+    const out = sanitizeDetectedComponents([
+      comp("header", "header#top"),
+      comp("site-header", ".masthead"),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.selector).toBe("header#top");
+    expect(out[0]?.role).toBe("header");
   });
 });

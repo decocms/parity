@@ -128,6 +128,17 @@ no-account/live-only migration, faststore-v4 yields buildable code but not a run
 Set `source.prodUrl` if not found automatically.
 
 ### reconcile
+**First: is the target already a scaffolded storefront?** When `scout` classified
+the repo the user pointed at as `faststore-v4` or `tanstack-deco` (i.e. it is
+already a TARGET, not a source — `@faststore/cli` in `package.json`, or a
+populated `src/components/index.tsx`), then the SOURCE is the legacy live site,
+not this repo. Enter **reconcile-only mode**: set `target.dir`/`target.repo` to
+this existing repo and **skip `repo-setup` + `template-bootstrap` entirely**
+(re-scaffolding would clobber real work). Go reconcile → workflows (verify only)
+→ porting (pending rows only) → build-green → … as usual. A mature target most
+often has NO pending real work — the value is the `parity → triage → fix` loop,
+not porting. Say so to the user.
+
 1. If `source.repo` exists: run `parity migrate --source <dir> --url <prodUrl>`
    via `runner` to get `migration-plan.json`.
 2. If no source: run `parity migrate --url <prodUrl>`.
@@ -136,12 +147,26 @@ Set `source.prodUrl` if not found automatically.
    copy it to the canonical `<target.dir>/.parity/migration-plan.json`.
 4. If target already has work done (read `src/components/index.tsx`), mark each
    matching component done: `parity plan set-status <name> done --dir <target.dir>/.parity`.
+   **Match by CONCEPT, not just string.** A live-only plan names components from
+   the DOM (`product-hero`, `navigation-mega-menu`, `product-slider`), which
+   rarely string-match the target's clean section names (`HeroSwiper`, `Navbar`,
+   `ProductGallery`). `parity plan set-status`'s case/separator-insensitive match
+   catches `product-shelf`↔`ProductShelf` but NOT `product-hero`↔`HeroSwiper`.
+   So read the target's sections and map each plan row to its semantic equivalent
+   yourself before flipping status — otherwise a mature target reads as ~2 done /
+   25 pending and you dispatch porters to re-do finished work. Rows with no target
+   equivalent stay `pending`; rows that are pure DOM plumbing → `skipped`.
 5. If target has a backlog file (`docs/todo-radar.md`), read it and import
    open items as issues via `gh issue create` with label `parity-migrate` ONLY
    if no issue with the same title already exists.
 6. `pendingComponents` = plan rows still `status: "pending"`.
 
 ### repo-setup / template-bootstrap
+**Skip this whole phase in reconcile-only mode** (the target the user pointed at
+is already a scaffolded `faststore-v4`/`tanstack-deco` repo — see `reconcile`).
+Also skip when the source is `deco-fresh` (`deco-migrate` scaffolds instead).
+Only scaffold when creating a brand-new target repo from a source/live capture.
+
 - **TanStack**: scaffold by **copying the code** from `deco-sites/storefront-tanstack`
   (public) into the new repo — `git clone` it, copy the tree, re-init git and set
   the new remote. NOT `gh repo create --template`: copying its current `main` means
