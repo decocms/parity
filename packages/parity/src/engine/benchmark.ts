@@ -217,23 +217,37 @@ export async function navigateWithHover(
   page: import("playwright").Page,
   targetUrl: string,
   productImage = false,
-): Promise<{ ok: boolean; navMs: number }> {
+): Promise<{ ok: boolean; navMs: number; landed: boolean }> {
   const targetPath = new URL(targetUrl).pathname;
   const sel = `a[href="${cssAttrEscape(targetUrl)}"], a[href="${cssAttrEscape(targetPath)}"], a[href^="${cssAttrEscape(`${targetPath}?`)}"]`;
   const anchor = page.locator(sel).first();
   const visible = await anchor.isVisible({ timeout: 1_500 }).catch(() => false);
   let t: number;
+  let viaFallback = false;
   if (visible) {
     // Prep (UNTIMED): hover so the SPA prefetches, then let it land.
     await anchor.hover({ timeout: 1_500 }).catch(() => undefined);
     await page.waitForTimeout(500);
     t = Date.now(); // ⏱ start the clock at the CLICK
     await Promise.allSettled([
+      // Shorter cap than NAV_CAP_MS: a link that hasn't navigated in 6s is a
+      // dropdown parent / intercepted click, not a slow page — fall back to goto
+      // instead of waiting the full cap (which read as a bogus ~20s timing).
       page
-        .waitForURL((u) => u.toString().includes(targetPath), { timeout: NAV_CAP_MS })
+        .waitForURL((u) => u.toString().includes(targetPath), { timeout: 6_000 })
         .catch(() => undefined),
       anchor.click({ timeout: 3_000 }),
     ]);
+    if (!page.url().includes(targetPath)) {
+      // The click didn't navigate (e.g. /especialidades is a dropdown toggle that
+      // opens a submenu instead of navigating). Fall back to a direct goto so the
+      // page is still measured; reset the clock to time only the goto.
+      viaFallback = true;
+      t = Date.now();
+      await page
+        .goto(targetUrl, { waitUntil: "domcontentloaded", timeout: NAV_CAP_MS })
+        .catch(() => undefined);
+    }
   } else {
     t = Date.now(); // ⏱ no anchor to hover — time the goto
     await page
@@ -248,7 +262,8 @@ export async function navigateWithHover(
     await waitReady(page);
   }
   const navMs = Date.now() - t;
-  return { ok, navMs };
+  const landed = page.url().includes(targetPath);
+  return { ok: ok && landed, navMs, landed, viaFallback };
 }
 
 // ── realistic-navigation helpers ─────────────────────────────────────────────

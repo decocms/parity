@@ -242,10 +242,14 @@ function printSummary(report: BenchmarkReport): void {
     console.log("");
     console.log(chalk.bold(`  [${viewport}] tempo total da jornada`));
     const su = cand.totalMs > 0 ? prod.totalMs / cand.totalMs : 0;
+    // A failed step (e.g. a hung hover-prefetched click) reports the cap time,
+    // which would poison the total → never show a verdict "%" over a broken run.
+    const anyFailed = [...prod.steps, ...cand.steps].some((s) => s.ok === false);
     // Same rule as the HTML hero: ≥2× reads as "N×"; 1.05–2× as "% faster"
     // (a "1.3×" is confusing); ~parity as "≈ same"; slower as "% slower".
     let verdict: string;
-    if (su >= 2) verdict = chalk.green(`${su.toFixed(1)}× mais rápido`);
+    if (anyFailed) verdict = chalk.red("⚠ medição incompleta (passo com erro) — veja abaixo");
+    else if (su >= 2) verdict = chalk.green(`${su.toFixed(1)}× mais rápido`);
     else if (su >= 1.05) verdict = chalk.green(`${Math.round(((prod.totalMs - cand.totalMs) / prod.totalMs) * 100)}% mais rápido`);
     else if (su > 0.95) verdict = chalk.yellow("≈ mesma velocidade");
     else verdict = chalk.red(`${Math.round(((cand.totalMs - prod.totalMs) / prod.totalMs) * 100)}% mais lento`);

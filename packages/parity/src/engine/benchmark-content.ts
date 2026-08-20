@@ -27,8 +27,10 @@ import {
   waitReady,
 } from "./benchmark.ts";
 
-/** Max internal content pages to include in the journey (home + these). */
-const MAX_CONTENT_PAGES = 2;
+/** Max internal content pages to include in the journey (home + these). When the
+ *  orchestrator passes an authoritative `--pages` list from .deco, all of them are
+ *  used (capped here to keep runtime sane). */
+const MAX_CONTENT_PAGES = 6;
 
 /**
  * "The user sees the first content" signal — First Contentful Paint. This is the
@@ -92,6 +94,11 @@ async function discoverNavLinks(page: import("playwright").Page): Promise<string
       const href = a.getAttribute("href") || "";
       if (!href.startsWith("/") || href.startsWith("//")) continue; // internal only
       if (href.startsWith("/#") || href === "/") continue; // skip anchors + home
+      // Skip dropdown-PARENT links (e.g. "Especialidades"): a nav item that owns a
+      // submenu is a hover/toggle trigger — clicking it opens the submenu instead
+      // of navigating, so it can't be prefetched or measured. The REAL pages are
+      // the submenu leaves (sourced authoritatively from .deco/blocks).
+      if (a.parentElement?.querySelector("ul, [class*='dropdown'], [class*='submenu']")) continue;
       const path = href.split("#")[0].split("?")[0];
       if (path === "/" || seen.has(path)) continue;
       seen.add(path);
@@ -168,6 +175,30 @@ export async function resolveContentPaths(opts: {
   }
 }
 
+/**
+ * Make the target's anchor reachable so navigateWithHover takes the hover→prefetch
+ * path instead of a cold goto. Leaf pages often live behind a dropdown (e.g.
+ * "Especialidades" → Colorretal) or a mobile hamburger; reveal them by opening the
+ * hamburger and hovering each top-level nav item to expand its submenu. Returns
+ * true once the target anchor is visible.
+ */
+async function revealLink(page: import("playwright").Page, path: string): Promise<boolean> {
+  const sel = `a[href="${path}"], a[href^="${path}?"]`;
+  const isVis = () => page.locator(sel).first().isVisible({ timeout: 400 }).catch(() => false);
+  if (await isVis()) return true;
+  await openMenu(page).catch(() => undefined); // mobile hamburger
+  if (await isVis()) return true;
+  // Desktop dropdowns: hover each top-level nav item to open its submenu.
+  const parents = page.locator("header nav > *, header > nav > *, header ul > li");
+  const n = Math.min(await parents.count().catch(() => 0), 10);
+  for (let i = 0; i < n; i++) {
+    await parents.nth(i).hover({ timeout: 800 }).catch(() => undefined);
+    await page.waitForTimeout(250);
+    if (await isVis()) return true;
+  }
+  return false;
+}
+
 async function dismissAllSafe(page: import("playwright").Page): Promise<void> {
   // dismissAll needs a FlowContext; for discovery we only need the cookie/overlay
   // clearing, so call the page-level parts defensively.
@@ -212,15 +243,23 @@ async function contentPass(
   for (const path of paths) {
     const key = stepKeyForPath(path);
     const target = new URL(path, base).toString();
-    // On mobile the nav links live behind the hamburger — open it first (UNTIMED
-    // prep) so the anchor is visible and navigateWithHover takes the hover path
-    // (which triggers the SPA/speculation-rules prefetch) instead of the cold
-    // goto fallback. Mirrors the real flow: open menu → tap link.
-    const sel = `a[href="${path}"], a[href^="${path}?"]`;
-    const linkVisible = await page.locator(sel).first().isVisible({ timeout: 800 }).catch(() => false);
-    if (!linkVisible) await openMenu(page).catch(() => undefined);
-    const { ok, navMs } = await navigateWithHover(page, target, false);
-    steps.push({ step: key, ms: navMs, url: page.url(), ok, note: path });
+    // Reveal the anchor (open hamburger / expand dropdown) — UNTIMED prep — so
+    // navigateWithHover takes the hover→prefetch path, not a cold goto. Leaf pages
+    // behind the "Especialidades" dropdown are only prefetchable once the submenu
+    // is open. Mirrors the real flow: open menu/dropdown → hover → click.
+    await revealLink(page, path).catch(() => undefined);
+    const { ok, navMs, landed, viaFallback } = await navigateWithHover(page, target, false);
+    steps.push({
+      step: key,
+      ms: navMs,
+      url: page.url(),
+      ok,
+      note: !landed
+        ? `${path} — navegação não trocou de página`
+        : viaFallback
+          ? `${path} — link não navegou no clique (dropdown/interceptado); medido via goto, sem prefetch`
+          : path,
+    });
     // Capture the arrived page BEFORE returning home, so the report shows the
     // real content page (not a blank/home frame). Keyed by step so the report
     // renders it under this hop.
