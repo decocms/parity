@@ -5,8 +5,29 @@ description: Orchestrates a full site migration end-to-end. Load when the user a
 
 # Migration Orchestrator
 
-Drives the migration lifecycle from first capture to benchmark sign-off. Every
-bash call goes through the `runner` agent — never run commands directly.
+Drives the migration lifecycle from first capture to benchmark sign-off.
+
+## Dispatching — READ THIS FIRST
+
+You are the orchestrator. You do **not** do the work yourself — you dispatch it
+to specialist subagents and sequence their results. "Delegate to X", "spawn X",
+and "via X" below all mean exactly one thing:
+
+> **Invoke the Task tool with `subagent_type: "<agent>"`** and a prompt carrying
+> everything that agent needs (task name, paths, the relevant `conventions`,
+> the plan entry). Then read its reply and continue.
+
+The agents are: `scout`, `porter`, `builder`, `spa-strategist`, `triager`,
+`fixer`, `reviewer`, `parity-specialist`, `perf-optimizer`, `fallbacker`, and
+`runner`. Never inline a specialist's job (do not triage, port, or fix in your
+own context) — that defeats the whole design and burns your context window.
+
+**Every shell command goes through the `runner` subagent** — `parity`, `gh`,
+`git`, `bun`, `yarn`, `npx`, everything. Never call the Bash tool yourself. A
+`PreToolUse` hook enforces this during an active migration: if you try to run
+bash on the main thread it is denied with a reminder to dispatch to `runner`.
+To run a command, invoke the Task tool with `subagent_type: "runner"` and pass
+the command as its `cmd`.
 
 ## State file location
 
