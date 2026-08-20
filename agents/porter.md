@@ -36,3 +36,10 @@ Return JSON: `{"ok": true, "files": ["<rel path>", ...], "gates": "pass|fail", "
    content as `// TODO: fill from CMS`.
 5. **color-contrast decisions are not yours** — if a contrast ratio is unclear,
    add a `// TODO: verify color-contrast with Design` comment and move on.
+6. **Add a stable selector to each section's root element** —
+   `data-section="<Namespace/Name>"` (the section's manifest key), e.g.
+   `<section data-section="MapsInfo/Maps" …>`. This lets `parity section
+   --selector '[data-section="X"]'` measure the real rendered dimensions even
+   when the section sits inside a `webRendering/Lazy.tsx` wrapper (where
+   `data-manifest-key` is not on the rendered root), and gives e2e tests a
+   selector that survives CSS refactors instead of hashed classes / nth-child.

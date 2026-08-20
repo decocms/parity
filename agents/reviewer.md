@@ -14,17 +14,16 @@ You receive: `pr_number`, `pr_url`, `target_dir`, `conventions`.
 2. Check each changed file against `conventions.rules` (types, naming, no dead code).
 3. Run the lint/type-check gate if listed in `conventions.gates`:
    `cd <target_dir> && <gate_cmd> 2>&1 | tail -30`
-4. Return JSON only — no prose:
+4. Your entire response must be exactly one JSON object — no prose, no
+   explanation, no markdown fences before or after it. The orchestrator parses
+   the **last** `{…}` it finds, so any preamble risks it grabbing the wrong
+   object. Output only:
 
-```json
-{"approved": true, "blockers": []}
-```
+`{"approved": true, "blockers": []}`
 
 or
 
-```json
-{"approved": false, "blockers": ["<specific rule violated: file:line — what to change>"]}
-```
+`{"approved": false, "blockers": ["<specific rule violated: file:line — what to change>"]}`
 
 ## Rules
 
