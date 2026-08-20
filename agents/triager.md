@@ -45,6 +45,25 @@ Read-only. You receive: `target_dir`, `build_ok` (bool), `dev_log_path` (opt),
      past the fold threshold OR is CMS-Lazy-wrapped, (b) is not `neverDefer`/`eager`,
      and (c) has `hasLoadingFallback: false` → flag it.
    Classify: `{severity: "high", category: "visual", title: "<Section> deferred without LoadingFallback — CLS/blank render", body: "Add 'export function LoadingFallback()' returning a skeleton with the same dimensions, OR mark eager/neverDefer if above the fold."}`
+8. **Static performance checks** (tanstack-deco) — cheap, pre-deploy, no browser.
+   These mirror the Lighthouse opportunities the `perf-optimizer` fixes; catching
+   them statically flags the work before the site is even deployed:
+   - **useScript `//` comments**: `grep -n "//" src/**/*.tsx` inside any function
+     passed to `useScript(...)` — `//` line comments break after newline-stripping
+     minification (fatal inline-script parse error). `{high, runtime}`.
+   - **Eager 3rd-party embed**: `grep -rn "youtube.*/embed\|youtube-nocookie\|player.vimeo\|maps.googleapis" src/sections`
+     — an embed `<iframe>` rendered unconditionally (not behind `{playing && …}`
+     state / a facade) loads the full player on page load. `{high, performance,
+     title: "<Section>: eager 3rd-party embed — use facade (thumbnail + click)"}`.
+   - **LCP image lazy**: the first section/banner on the homepage (from
+     `.deco/blocks/pages-home`) with `loading="lazy"` and no `fetchpriority` is the
+     likely LCP → `{high, performance, "first banner should be eager + fetchpriority=high"}`.
+   - **Render-blocking webfont**: a `<link rel="stylesheet" href="fonts.googleapis…">`
+     in `__root.tsx` head → `{medium, performance, "load font non-blocking"}`.
+   - **Missing `public/_headers`**: no `public/_headers` file → hashed assets ship
+     `max-age=0` → `{medium, performance, "add immutable /assets/* caching"}`.
+   Dead-code note (#243): before filing a bug in `src/components/ui/`, confirm the
+   file is imported by a CMS-referenced section (else it's template dead code → low/infra).
 
 ## Output
 
