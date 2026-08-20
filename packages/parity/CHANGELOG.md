@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.25.0] — 2026-08-20
+
+### Added
+
+* **Stacked-PR fix mode (`budget.stackPrs`).** The `fix` phase can now chain fix
+  PRs instead of merging them: each fix branches off the PREVIOUS fix's branch
+  (`fixer` takes a `base_branch` and opens the PR with `gh pr create --base`), so
+  the **top of the stack accumulates every fix and its per-PR preview deploy
+  shows all fixes together** — one combined preview to review before landing
+  anything. Nothing is merged; a new `stack-review` terminal reports the ordered
+  stack + the top PR's preview URL and hands off (merge bottom-up, delete
+  branches last). Default stays **merge mode** (independent PRs off `main`, one
+  at a time, with the `fix → parity` re-score loop). Set at `discovery` when the
+  user asks to stack fixes / see one preview with all fixes / not auto-merge.
+  Orchestration-only change — no CLI behavior change (version kept in lockstep).
+
 ## [0.24.0] — 2026-08-20
 
 ### Added
