@@ -31,6 +31,39 @@ describe("htmlStructuralDiff", () => {
     expect(r.issues[0]?.summary).toMatch(/links/);
   });
 
+  it("demotes an img-only count delta to informational (low + inconclusive), not fail (#252)", () => {
+    const prodHtml = baseHtml(`${"<img src='/a.jpg'/>".repeat(60)}`);
+    const candHtml = baseHtml(`${"<img src='/a.jpg'/>".repeat(20)}`);
+    const r = htmlStructuralDiff(
+      makeContext({
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", html: prodHtml })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", html: candHtml })],
+      }),
+    );
+    expect(r.status).toBe("warn");
+    const info = r.issues.find((i) => i.id.includes("counts-informational"));
+    expect(info?.severity).toBe("low");
+    expect(info?.inconclusive).toBe(true);
+    expect(info?.summary).toMatch(/únicas por src/);
+    // no blocking structural issue
+    expect(r.issues.some((i) => i.severity === "high")).toBe(false);
+  });
+
+  it("still fails on a structural (non-img) count divergence alongside an img delta", () => {
+    const prodHtml = baseHtml(
+      `<form></form><form></form><form></form><form></form>${"<img src='/a.jpg'/>".repeat(60)}`,
+    );
+    const candHtml = baseHtml("");
+    const r = htmlStructuralDiff(
+      makeContext({
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", html: prodHtml })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", html: candHtml })],
+      }),
+    );
+    expect(r.status).toBe("fail");
+    expect(r.issues.some((i) => i.id.includes("counts:") && i.severity === "high")).toBe(true);
+  });
+
   it("flags deco sections present in prod but missing in cand", () => {
     const prodHtml = baseHtml(`<div data-section="Hero"></div><div data-section="Footer"></div>`);
     const candHtml = baseHtml(`<div data-section="Footer"></div>`);

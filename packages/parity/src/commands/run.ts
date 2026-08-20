@@ -13,10 +13,7 @@ import { capturePage, installVitalsCollector } from "../engine/collect.ts";
 import { runFlow } from "../engine/flows.ts";
 import { promptForModuleSelection } from "../engine/interactive-module-prompt.ts";
 import { disableInteractive, isInteractiveMode } from "../engine/interactive-selector-prompt.ts";
-import {
-  fetchHomeHtml,
-  runSelectorDiscoveryPass,
-} from "../engine/selector-discovery-pass.ts";
+import { fetchHomeHtml, runSelectorDiscoveryPass } from "../engine/selector-discovery-pass.ts";
 import { discoverPagesFromSitemap } from "../engine/sitemap-discover.ts";
 import {
   SCORE_VERSION,
@@ -25,7 +22,12 @@ import {
   computeVerdict,
 } from "../engine/verdict.ts";
 import { loadParityIgnore, loadParityRc } from "../ignore/parser.ts";
-import { type Platform, detectPlatform } from "../learned/platform.ts";
+import {
+  type Platform,
+  type SiteProfile,
+  detectPlatform,
+  profileForPlatform,
+} from "../learned/platform.ts";
 import { promoteStepsFromFlow } from "../learned/promote.ts";
 import { type LearnedSelectors, loadLearned, saveLearned } from "../learned/repo.ts";
 import { aggregateIssues } from "../llm/aggregate-issues.ts";
@@ -78,6 +80,8 @@ export interface RunOptions {
   flows: string;
   viewports: string;
   cep: string;
+  /** Site profile scoping. Auto-detected from platform when unset. #254/#255. */
+  profile?: "commerce" | "content";
   runs: string;
   baseline?: string;
   output: string;
@@ -463,6 +467,32 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     }
   }
 
+  // --- Site profile (commerce vs content) — scopes modules/flows/CEP (#254/#255) ---
+  // Resolve BEFORE selection so a content site auto-drops the commerce e2e
+  // journey/PLP/PDP/CEP instead of running them empty. Explicit --profile wins;
+  // otherwise detect from the prod home (reused later for platform detection).
+  // A failed fetch defaults to `commerce` — the safe, unchanged behavior.
+  let earlyProdHtml: string | null = null;
+  let profile: SiteProfile;
+  if (opts.profile === "commerce" || opts.profile === "content") {
+    profile = opts.profile;
+  } else {
+    const pv = (opts.viewports.split(",")[0]?.trim() as Viewport) || "mobile";
+    earlyProdHtml = await fetchHomeHtml(opts.prod, pv);
+    profile = earlyProdHtml
+      ? profileForPlatform(detectPlatform({ url: opts.prod, html: earlyProdHtml }))
+      : "commerce";
+  }
+  const isContentProfile = profile === "content";
+  if (isContentProfile && !opts.only && !opts.skip) {
+    opts.only = "seo,visual,vitals,cache,console,html,network";
+    console.log(
+      chalk.dim(
+        "  profile: content → skipping e2e module (commerce purchase-journey/cart make no sense on a content site); pass --profile commerce to force",
+      ),
+    );
+  }
+
   const selection = resolveSelection({ only: opts.only, skip: opts.skip });
   if (selection.errors.length > 0) {
     console.error(chalk.red("  --only/--skip: invalid value(s):"));
@@ -504,6 +534,21 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     }
   }
 
+  // Content profile: PLP/PDP don't exist — scope flows to the homepage (plus
+  // any content route the user asked for explicitly), never plp/pdp (#255).
+  if (isContentProfile) {
+    const before = flows.join(",");
+    flows = flows.filter((f) => f !== "plp" && f !== "pdp");
+    if (!flows.includes("homepage")) flows.unshift("homepage");
+    if (before !== flows.join(",")) {
+      console.log(
+        chalk.dim(
+          `  profile: content → flows scoped to ${flows.join(",")} (dropped plp/pdp; was: ${before}); CEP skipped`,
+        ),
+      );
+    }
+  }
+
   const pagesScopeWarning = pagesFlowsScopeWarning(opts, flows);
   if (pagesScopeWarning) {
     console.log(chalk.dim(`  ${pagesScopeWarning}`));
@@ -539,7 +584,10 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     .filter(Boolean) as Issue["severity"][];
 
   const rc = loadParityRc();
-  rc.cep = opts.cep || rc.cep;
+  rc.profile = profile;
+  // Content sites have no shipping/CEP flow — skip it (#255). Commerce keeps
+  // the CLI value / .parityrc default.
+  rc.cep = isContentProfile ? "" : opts.cep || rc.cep;
   // --add-to-cart-timeout overrides .parityrc.json addToCartConfirmMs (#143).
   if (typeof opts.addToCartTimeout === "number" && Number.isFinite(opts.addToCartTimeout)) {
     rc.addToCartConfirmMs = opts.addToCartTimeout;
@@ -600,7 +648,9 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   const learned = loadLearned();
   const learnedBefore = JSON.stringify(learned);
   let platform: Platform = "custom";
-  const prodHomeHtml = await fetchHomeHtml(opts.prod, primaryViewport);
+  // Reuse the home HTML already fetched for profile auto-detection (avoids a
+  // second GET); re-fetch only if profile was set explicitly via --profile.
+  const prodHomeHtml = earlyProdHtml ?? (await fetchHomeHtml(opts.prod, primaryViewport));
   if (prodHomeHtml) {
     platform = detectPlatform({ url: opts.prod, html: prodHomeHtml });
     if (platform !== "custom") {
@@ -659,7 +709,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
   console.log(chalk.dim(`  cand: ${opts.cand}`));
   console.log(
     chalk.dim(
-      `  flows: ${flows.join(", ")} · viewports: ${viewports.join(", ")} · CEP: ${rc.cep}\n`,
+      `  profile: ${profile} · flows: ${flows.join(", ")} · viewports: ${viewports.join(", ")}${rc.cep ? ` · CEP: ${rc.cep}` : ""}\n`,
     ),
   );
 
@@ -836,9 +886,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     ): Promise<{ captures: FlowCapture[]; pages: PageCapture[] }> => {
       const baseUrl = side === "prod" ? opts.prod : opts.cand;
       const harPath = join(paths.harDir, `${viewport}-${side}.har`);
-      const tracePath = traceEnabled
-        ? join(paths.tracesDir, `${viewport}-${side}.zip`)
-        : null;
+      const tracePath = traceEnabled ? join(paths.tracesDir, `${viewport}-${side}.zip`) : null;
       const ctx = await newContext(browser!, {
         viewport,
         harPath,

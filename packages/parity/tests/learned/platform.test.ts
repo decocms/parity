@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { detectPlatform } from "../../src/learned/platform.ts";
+import { detectPlatform, profileForPlatform } from "../../src/learned/platform.ts";
+
+describe("profileForPlatform", () => {
+  it("maps commerce platforms to the commerce profile", () => {
+    for (const p of [
+      "vtex",
+      "vtex-fs",
+      "shopify",
+      "salesforce-commerce",
+      "wake",
+      "nuvemshop",
+    ] as const) {
+      expect(profileForPlatform(p)).toBe("commerce");
+    }
+  });
+
+  it("maps deco/custom (framework or unknown, no commerce signal) to content", () => {
+    expect(profileForPlatform("deco")).toBe("content");
+    expect(profileForPlatform("custom")).toBe("content");
+  });
+});
 
 describe("detectPlatform — URL heuristics", () => {
   it("detects VTEX from .myvtex.com", () => {

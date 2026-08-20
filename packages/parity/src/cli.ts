@@ -189,6 +189,10 @@ program
     "--why <text>",
     "Free-text reason for this run's scope, stored in report.json as `selectionReason`. Purely informational. M3 module selection.",
   )
+  .option(
+    "--profile <type>",
+    "Site profile: commerce | content. Scopes modules/flows/CEP. `content` (blog/custom site with no storefront) drops the e2e purchase journey, scopes flows to the homepage, and skips CEP. Auto-detected from the platform when omitted. Issues #254/#255.",
+  )
   .action(async (opts) => {
     // --flow is just sugar for --flows with a single value
     if (opts.flow) {
