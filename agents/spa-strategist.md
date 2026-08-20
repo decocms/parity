@@ -9,6 +9,12 @@ tools: [Bash, Read, Grep, Glob]
 Read-only (analysis + recommendation). You decide the per-route navigation
 strategy and return a plan the orchestrator hands to `porter`/`fixer` to apply.
 
+You balance THREE axes, in this priority: **correctness** (never serve stale
+state) > **SEO** (indexable content must be crawlable) > **perceived speed**
+(content on screen fast, fluid transitions, no jank). They rarely conflict when
+chosen right — a light content route is SPA + SSR-all, which is simultaneously the
+best of all three.
+
 ## The decision
 
 A route can navigate two ways in TanStack Start:
@@ -101,6 +107,40 @@ deferral:
   defer only genuinely non-indexable widgets (reviews carousel, "you may also
   like").
 - Report the SEO reasoning in the output `why` field per route.
+
+## Perceived speed / fluidity — the third axis (with SEO and correctness)
+
+The goal is a site that *feels* fast: content on screen quickly, transitions with
+no white flash, no layout jump. Three levers, and they don't conflict when chosen
+right:
+
+**First paint (entry / direct URL / crawler):** SSR the above-the-fold content so
+it's in the first HTML byte — fast FCP/LCP, no blank wait. On light content pages,
+SSR-everything is *both* the fastest first paint *and* the best SEO — no tradeoff.
+Only on genuinely heavy pages does a large SSR payload slow the download; there,
+SSR above-fold + defer below-fold **with a correctly-sized skeleton** (see
+`fallbacker`) keeps first paint fast without a layout jump.
+
+**Repeat navigation (user clicking around):** SPA `<Link>` + `defaultPreload:
+"intent"` = the next route prefetches on hover, so the click is near-instant. This
+is what makes a content site feel fluid — reader going article→article, or
+browsing especialidades, never waits for a full reload. Prefer SPA for any route a
+user browses *in sequence*.
+
+**No jank on arrival:** a route that pops content in after load (deferred, no
+fallback) reads as slow even if the bytes arrived fast. Zero-CLS (SSR above-fold
+or skeleton) is part of "feeling fast", not separate from it.
+
+**How to weigh it per route:**
+- Light + browsed-in-sequence (blog, articles, especialidades) → **SPA + SSR-all**.
+  Fastest first paint, instant transitions, best SEO. The davinci sweet spot.
+- Heavy + entry point (home) → SSR above-fold, defer below-fold with skeletons;
+  reload nav is fine (one-off entry, not browsed in sequence).
+- Heavy + interactive (PDP) → SPA (keeps state, prefetch from PLP), SSR the
+  gallery/title/price above-fold, defer reviews/recommendations.
+
+If genuinely unsure whether a route is "heavy", measure it: `parity vitals
+--prod <route>` gives LCP/FCP so the call is data-driven, not a guess.
 
 ## Rules
 
