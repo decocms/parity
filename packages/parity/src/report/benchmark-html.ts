@@ -141,7 +141,9 @@ function renderStep(
   const max = Math.max(p, c, 1);
   const label = STEP_LABELS[step.step] ?? { pt: step.step, en: step.step };
   const tone = deltaTone(p, c);
-  const shotKey = STEP_SHOT[step.step];
+  // Commerce steps map to fixed slots; content steps are keyed by the step name
+  // itself (e.g. nav-especialidades) — fall back to that so their shots render.
+  const shotKey = STEP_SHOT[step.step] ?? step.step;
   // Full-page prints scroll inside a phone-like frame.
   const scroll = true;
 

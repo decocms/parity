@@ -45,6 +45,14 @@ export interface BenchmarkOptions {
    *   validate on both sites.
    */
   journey?: "auto" | "commerce" | "content";
+  /**
+   * Comma-separated authoritative page paths for the content journey (e.g.
+   * `/blog,/especialidades`). Source of truth for content sites — the
+   * orchestrator extracts these from the target's `.deco/blocks` decofile, which
+   * lists every real page (a sitemap may be missing; nav-scraping only sees
+   * header links). When omitted, the content journey scrapes nav links.
+   */
+  pages?: string;
 }
 
 function num(v: string | number, fallback: number): number {
@@ -141,9 +149,17 @@ export async function benchmarkCommand(opts: BenchmarkOptions): Promise<number> 
     viewport: Viewport,
     onEvent: (m: string) => void,
   ): Promise<[SideBenchmark, SideBenchmark] | null> => {
-    onEvent("batedor: procurando páginas de conteúdo no nav (home + internas)…");
+    const explicitPages = opts.pages
+      ?.split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.startsWith("/"));
+    onEvent(
+      explicitPages?.length
+        ? `batedor: validando ${explicitPages.length} página(s) do .deco nos dois sites…`
+        : "batedor: procurando páginas de conteúdo no nav (home + internas)…",
+    );
     const contentPaths = await resolveContentPaths({
-      browser, prodBase: opts.prod, candBase: opts.cand, viewport, onEvent,
+      browser, prodBase: opts.prod, candBase: opts.cand, viewport, pages: explicitPages, onEvent,
     });
     if (!contentPaths) return null;
     const runOne = (side: Side, base: string) =>

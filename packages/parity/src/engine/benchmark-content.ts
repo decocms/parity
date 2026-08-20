@@ -123,6 +123,13 @@ export async function resolveContentPaths(opts: {
   prodBase: string;
   candBase: string;
   viewport: import("../types/schema.ts").Viewport;
+  /**
+   * Authoritative page paths (e.g. extracted from the target's `.deco/blocks`
+   * decofile by the orchestrator). When given, these are used INSTEAD of scraping
+   * nav links — the decofile lists every real page, whereas a sitemap may be
+   * missing and nav-scraping only sees what's linked in the header.
+   */
+  pages?: string[];
   onEvent?: (m: string) => void;
 }): Promise<string[] | null> {
   const emit = (m: string) => opts.onEvent?.(m);
@@ -133,8 +140,13 @@ export async function resolveContentPaths(opts: {
       .goto(opts.prodBase, { waitUntil: "domcontentloaded", timeout: 20_000 })
       .catch(() => undefined);
     await dismissAllSafe(page);
-    const candidates = await discoverNavLinks(page);
-    emit(`content: ${candidates.length} link(s) de nav candidatos`);
+    const candidates =
+      opts.pages && opts.pages.length > 0 ? opts.pages : await discoverNavLinks(page);
+    emit(
+      opts.pages && opts.pages.length > 0
+        ? `content: ${candidates.length} página(s) do .deco (autoritativo)`
+        : `content: ${candidates.length} link(s) de nav candidatos (sem lista .deco)`,
+    );
 
     const picked: string[] = [];
     for (const path of candidates) {
@@ -175,7 +187,7 @@ async function contentPass(
   measure: boolean,
 ): Promise<{ steps: StepTiming[]; screenshots: SideBenchmark["screenshots"] }> {
   const screenshots: SideBenchmark["screenshots"] = {};
-  const shot = async (label: keyof SideBenchmark["screenshots"]): Promise<void> => {
+  const shot = async (label: string): Promise<void> => {
     if (!measure) return;
     const p = screenshotPath(flowCtx, `bench-${label}`).replace(/\.png$/, ".jpg");
     await screenshotStable(page, { path: p, fullPage: true, quality: 92 });
@@ -197,9 +209,14 @@ async function contentPass(
 
   // ── home → each content page (hover-prefetch, then click→content) ──
   for (const path of paths) {
+    const key = stepKeyForPath(path);
     const target = new URL(path, base).toString();
     const { ok, navMs } = await navigateWithHover(page, target, false);
-    steps.push({ step: stepKeyForPath(path), ms: navMs, url: page.url(), ok, note: path });
+    steps.push({ step: key, ms: navMs, url: page.url(), ok, note: path });
+    // Capture the arrived page BEFORE returning home, so the report shows the
+    // real content page (not a blank/home frame). Keyed by step so the report
+    // renders it under this hop.
+    await shot(key);
     // back to home so the next hop starts from the same place (mirrors a reader
     // returning to the menu). Untimed.
     await page.goto(base, { waitUntil: "domcontentloaded", timeout: 20_000 }).catch(() => undefined);

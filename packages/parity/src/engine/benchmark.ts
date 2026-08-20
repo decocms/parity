@@ -67,10 +67,15 @@ export interface SideBenchmark {
   vitals: PageVitals;
   /** Absolute path to the recorded HAR (empty if recording failed). */
   harPath: string;
-  /** Absolute screenshot paths captured on the last measured pass. */
+  /**
+   * Absolute screenshot paths captured on the last measured pass. Commerce uses
+   * the fixed slots; the content journey keys by step (e.g. `nav-especialidades`),
+   * so an index signature allows arbitrary step-keyed shots too.
+   */
   screenshots: Partial<
     Record<"home" | "plp" | "plpPaginated" | "pdp" | "pdpVariant" | "shelf", string>
-  >;
+  > &
+    Record<string, string | undefined>;
 }
 
 /** The full benchmark payload written to report.json and fed to the renderer. */

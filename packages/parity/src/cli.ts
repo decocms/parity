@@ -493,6 +493,10 @@ program
     "Journey to benchmark: commerce (home→PLP→PDP→variant), content (home→internal pages), or auto (try commerce, fall back to content)",
     "auto",
   )
+  .option(
+    "--pages <list>",
+    "Content journey: comma-separated authoritative page paths (e.g. /blog,/especialidades). Source these from the target's .deco/blocks decofile. Falls back to nav scraping when omitted.",
+  )
   .option("--open", "Open the HTML report when done", false)
   .option("--pt", "Tell the LLM to respond in Brazilian Portuguese. Issue #67.")
   .action(async (opts) => {
