@@ -33,7 +33,7 @@ whole message is JSON.
 
 ```
 discovery → reconcile → repo-setup → template-bootstrap → workflows
-→ [migrate-script | porting] → cleanup → build-green → triage → fix → parity
+→ [migrate-script | porting] → cleanup → build-green → fallbacks → triage → fix → parity
 → [loop back to triage if score < target] → benchmark → done
 ```
 
@@ -231,6 +231,24 @@ After all `pending` are `done`: advance to `build-green`.
 Via `runner`: run the target's build command. If it fails, spawn a `builder`.
 Repeat until `runner` reports exit 0. Cap at 3 attempts before escalating to
 the user.
+
+### fallbacks (tanstack-deco)
+Deferred sections without a `LoadingFallback` render blank until hydration →
+CLS + blank no-JS render. Fix them BEFORE parity so the vitals run isn't polluted.
+
+1. **Detect** (static, no browser) — cross-reference section order in
+   `.deco/blocks/pages-*.json` against flags in `.deco/sections.gen.ts`. A real
+   content section (ignore `webRendering/Lazy.tsx` wrappers) that defers (past
+   fold OR CMS-Lazy), is not `neverDefer`/`eager`, and has `hasLoadingFallback:
+   false` needs attention. This is the same check as `triager` step 7.
+2. **Above the fold** (first ~3 sections on the page): mark `export const
+   neverDefer = true` in the section file — no skeleton needed, it renders in SSR.
+   NOTE: if the CMS wraps everything in Lazy, `setAsyncRenderingConfig({
+   respectCmsLazy: false })` in `src/setup.ts` is required or the flags are ignored.
+3. **Below the fold**: spawn `fallbacker` per section. It measures the real
+   rendered size via `parity section --computed-styles --json` and writes a
+   skeleton of matching dimensions (zero CLS when it defers).
+4. After all are handled: `bun run generate`, rebuild, advance to `triage`.
 
 ### triage
 Spawn `triager`. It surveys the migrated repo and returns issue drafts.
