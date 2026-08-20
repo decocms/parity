@@ -23,6 +23,15 @@ describe("plugin manifests", () => {
     expect(plugin.hooks, "plugin.json must NOT re-reference the conventional hooks file").toBeUndefined();
   });
 
+  it("wires the PreToolUse(Bash) runner gate to an existing script", () => {
+    const hooks = readJson("hooks/hooks.json").hooks;
+    const bashGate = (hooks.PreToolUse ?? []).find((h: { matcher?: string }) => h.matcher === "Bash");
+    expect(bashGate, "PreToolUse Bash matcher").toBeTruthy();
+    const cmd = bashGate.hooks[0].command as string;
+    expect(cmd).toContain("require-runner.mjs");
+    expect(existsSync(resolve(root, "hooks", "require-runner.mjs")), "require-runner.mjs").toBe(true);
+  });
+
   it("marketplace.json matches the Claude Code catalog schema", () => {
     // owner object + non-empty plugins[] — without these, `claude plugin
     // marketplace add` registers the marketplace but finds zero installable

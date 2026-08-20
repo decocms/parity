@@ -11,14 +11,19 @@ The **parity** plugin is active. It orchestrates site migrations end-to-end.
 | `/parity:validate` | Run parity (prod × cand) on demand and report the score |
 | `/parity:resume` | Resume from the last saved `.parity/migration.json` |
 
-## Critical rule: bash is always routed through the `runner` agent
+## Critical rule: dispatch — never work inline
 
-No shell commands run directly from the orchestrator. Every `parity`, `gh`,
-`git`, `bun`, or `yarn` call goes through the `runner` agent (Haiku, read-only
-tools for analysis phases, full tools for build phases). This keeps the
-orchestrator context lean and Haiku token costs low for the repetitive parts.
+The orchestrator sequences specialist subagents; it does not do their jobs. To
+delegate, **invoke the Task tool with `subagent_type: "<agent>"`** (e.g.
+`scout`, `porter`, `triager`, `fixer`, `reviewer`, `runner`). Phrases like
+"spawn a porter" or "via the runner" in the skills mean exactly that Task call.
 
-If you see yourself about to run a bash command, delegate it to `runner` instead.
+**Every shell command goes through the `runner` subagent** — `parity`, `gh`,
+`git`, `bun`, `yarn`, `npx`. Never call the Bash tool from the orchestrator.
+This keeps the orchestrator context lean and Haiku token costs low for the
+repetitive parts. A `PreToolUse` hook enforces it during an active migration:
+main-thread bash is denied with a reminder to dispatch to `runner` instead
+(subagents and non-migration sessions are unaffected).
 
 ## State file
 

@@ -5,6 +5,10 @@ description: How to discover prod URL, source stack, and target repo conventions
 
 # Migration Discovery
 
+"Delegate to `scout`" below means: **invoke the Task tool with
+`subagent_type: "scout"`** and the given `task`. Run any shell (the reconcile
+snippets) through the `runner` subagent, never the Bash tool directly.
+
 ## Source detection (delegate to `scout`)
 
 Ask `scout` with `task: "detect-source"`. Evidence priority:

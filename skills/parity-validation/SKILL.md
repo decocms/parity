@@ -7,8 +7,10 @@ description: How to run parity correctly for each case in a migration. Load when
 
 ## Command selection (delegate to `parity-specialist`)
 
-Always ask `parity-specialist` for the exact command. Never guess flags —
-the `prod->cand` pair syntax and `--cand-selector` only exist since v0.22.
+Invoke the Task tool with `subagent_type: "parity-specialist"` for the exact
+command, then run it via the `runner` subagent (`subagent_type: "runner"`).
+Never guess flags and never run bash from the orchestrator directly — the
+`prod->cand` pair syntax and `--cand-selector` only exist since v0.22.
 Full command surface (run vs e2e, section, benchmark, vitals, cache, audit) with
 flags and when to use each: `skills/knowledge/parity/commands.md`.
 
