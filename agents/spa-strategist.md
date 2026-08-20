@@ -142,6 +142,32 @@ or skeleton) is part of "feeling fast", not separate from it.
 If genuinely unsure whether a route is "heavy", measure it: `parity vitals
 --prod <route>` gives LCP/FCP so the call is data-driven, not a guess.
 
+## Prefetch — activate it, then validate no double-fetch
+
+SPA `<Link>` + `defaultPreload: "intent"` (already the `createDecoRouter` default)
+prefetches the route's loader — i.e. the CMS page HTML/data — on hover, so the
+click is instant. The migrated nav usually ships `<a href>`, which is **inert**:
+no prefetch fires. Converting to `<Link>` is what turns prefetch on.
+
+**The double-fetch trap.** Hover fires `loadCmsPage`; the click must REUSE that
+result, not call it again. Reuse is governed by `defaultPreloadStaleTime`
+(TanStack default 30s). The `cmsRoute` `pageInflight` map only dedups *concurrent*
+calls — once the preload resolves, its `.finally()` clears the inflight entry, so
+a click after the preload completes relies entirely on the staleTime cache. If
+`defaultPreloadStaleTime` were 0, every hover+click = 2 `loadCmsPage` calls.
+
+**Validate after converting to `<Link>`** — this is not optional; the deco variant
+links shipped this exact bug (`deco-variant-selection-perf`: "duplicate
+loadCmsPage calls in HAR"):
+1. Run `parity run` (captures a HAR) or `parity vitals`, then grep the HAR for
+   the route path: `grep -c "loadCmsPage.*<path>" parity-output/runs/<id>/har/*`.
+2. Hovering then clicking one link should show **1** `loadCmsPage` for that path,
+   not 2. If 2 → set `defaultPreloadStaleTime: 30_000` explicitly in
+   `src/router.tsx` (createDecoRouter options) and re-check.
+3. Search-param-only nav (variant switch, filters) is the highest-risk case —
+   if converting those to `<Link>`, verify the loader dedups on the param key or
+   drop `preload` on just those links.
+
 ## Rules
 
 - Never mark cart/checkout/account SPA — stale client state is a correctness bug.
