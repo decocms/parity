@@ -93,9 +93,24 @@ Complements the two narrow perf agents already built:
 - `reviewer`: JSON-only contract (#242, done).
 - orchestrator `migrate-script`: fold in the mechanics fixes (Track 1).
 
-## Recommended order
-1. **Parity #264** (surface Lighthouse opportunities) — unblocks everything.
-2. **`perf-optimizer` agent + `performance` phase** — turns opportunities into fixes.
-3. **Site-profile** (#254/#255) — scopes modules/flows/benchmark by site type.
-4. **triager static perf checks** (#245/#249/#265) — pre-deploy front line.
-5. The deco-migrate mechanics bugs (Track 1) — hand to blocks-cli.
+## Recommended order — STATUS (all 5 executed)
+1. ✅ **Parity Lighthouse opportunities #264** — part 1 DONE (`lighthouse.ts`
+   extracts `LhSample.opportunities`; benchmark report surfaces them, commit
+   c310e56). Part 2 (run measures vitals via Lighthouse, not browser API — the
+   root of "run said 100 while PageSpeed flagged problems") specced in #264 with
+   a concrete plan; deferred as a risky run-pipeline re-plumb.
+2. ✅ **`perf-optimizer` agent + `performance` phase** — DONE (commit d2677d5).
+   Owns the transform catalog; consumes #264 opportunities.
+3. ◐ **Site-profile #254/#255** — benchmark DONE (`--journey auto`). Run-side
+   (scope modules/flows/CEP) specced in #255 (needs platform-detection reorder).
+4. ✅ **triager static perf checks** — DONE (commit 17e1c11): useScript comments,
+   eager embeds, lazy LCP, render-block font, missing `_headers`, dead-code.
+5. ✅ **deco-migrate mechanics bugs** — filed as decocms/blocks#491 (6 bugs:
+   siteName casing, KV placeholder, useScript-comment codemod, SiteSetupOptions
+   template, `_headers`, Secret preservation).
+
+## Agent family after this work
+- `porter` (port a component), `builder` (fix build), `triager` (find issues +
+  static perf), `fixer` (fix one issue), `reviewer` (gate PRs)
+- Perf specialists: `fallbacker` (CLS/skeletons), `spa-strategist` (nav/prefetch/
+  SEO/speed), `perf-optimizer` (JS/img/font/LCP/cache) — all new this session.
