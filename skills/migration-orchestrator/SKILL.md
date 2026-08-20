@@ -7,6 +7,14 @@ description: Orchestrates a full site migration end-to-end. Load when the user a
 
 Drives the migration lifecycle from first capture to benchmark sign-off.
 
+## Language — READ THIS FIRST
+
+**All output must be in English.** This applies to every artifact produced during
+a migration: commit messages, PR titles and bodies, GitHub issue titles and
+descriptions, code comments, and any prose written to files. The only exception
+is user-facing guidance delivered interactively in the chat — match the user's
+language there. When dispatching to subagents, instruct them to write in English.
+
 ## Dispatching — READ THIS FIRST
 
 You are the orchestrator. You do **not** do the work yourself — you dispatch it
