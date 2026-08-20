@@ -24,6 +24,7 @@ import {
   navigateWithHover,
   openMenu,
   pageLooksBroken,
+  waitForFirstContent,
   waitReady,
 } from "./benchmark.ts";
 
@@ -31,49 +32,6 @@ import {
  *  orchestrator passes an authoritative `--pages` list from .deco, all of them are
  *  used (capped here to keep runtime sane). */
 const MAX_CONTENT_PAGES = 6;
-
-/**
- * "The user sees the first content" signal — First Contentful Paint. This is the
- * only fair home-load metric across sites with DIFFERENT rendering strategies:
- * - networkidle (waitReady) never settles on a heavy section (Maps geocoding
- *   100+ addresses) → inflates the SSR candidate to the full cap.
- * - a visible-element selector times out on a fully-DEFERRED site (Fresh prod
- *   lazy-loads everything) → inflates prod instead.
- * FCP fires when the browser paints the first content (header/shell) — both an
- * SSR and a deferred site reach it early, so it's apples-to-apples. Matches the
- * vitals module's definition.
- */
-async function waitForContentReady(page: import("playwright").Page, cap = 8_000): Promise<boolean> {
-  return page
-    .evaluate((capMs: number) => {
-      return new Promise<boolean>((resolve) => {
-        const seen = performance.getEntriesByName?.("first-contentful-paint")[0];
-        if (seen) return resolve(true);
-        let done = false;
-        const finish = (ok: boolean) => {
-          if (done) return;
-          done = true;
-          resolve(ok);
-        };
-        try {
-          const obs = new PerformanceObserver((list) => {
-            if (list.getEntries().some((e) => e.name === "first-contentful-paint")) {
-              obs.disconnect();
-              finish(true);
-            }
-          });
-          obs.observe({ type: "paint", buffered: true });
-          setTimeout(() => {
-            obs.disconnect();
-            finish(false);
-          }, capMs);
-        } catch {
-          finish(false);
-        }
-      });
-    }, cap)
-    .catch(() => false);
-}
 
 /** kebab a path into a stable step key: /blog/foo → nav-blog-foo. */
 function stepKeyForPath(path: string): string {
@@ -243,7 +201,7 @@ async function contentPass(
   // usable, which would inflate this to the full cap).
   const t = Date.now();
   await page.goto(base, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => undefined);
-  const contentOk = await waitForContentReady(page);
+  const contentOk = await waitForFirstContent(page);
   const homeOk = contentOk && !(await pageLooksBroken(page));
   const steps: StepTiming[] = [
     { step: "home-load", ms: Date.now() - t, url: page.url(), ok: homeOk },
@@ -260,7 +218,9 @@ async function contentPass(
     // behind the "Especialidades" dropdown are only prefetchable once the submenu
     // is open. Mirrors the real flow: open menu/dropdown → hover → click.
     await revealLink(page, base, path).catch(() => undefined);
-    const { ok, navMs, landed, viaFallback } = await navigateWithHover(page, target, false);
+    // contentReady=true → time click→first-content (FCP), not networkidle, so an
+    // SSR page that renders the whole article isn't penalised vs a deferred one.
+    const { ok, navMs, landed, viaFallback } = await navigateWithHover(page, target, false, true);
     steps.push({
       step: key,
       ms: navMs,

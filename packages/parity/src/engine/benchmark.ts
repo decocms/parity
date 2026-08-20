@@ -155,6 +155,52 @@ export async function waitReady(page: import("playwright").Page, cap = READY_CAP
 }
 
 /**
+ * "First content painted" signal (FCP). The FAIR readiness metric when comparing
+ * sites with different rendering strategies: `networkidle` (waitReady) punishes an
+ * SSR site that renders the WHOLE page upfront (more content → network settles
+ * later) while a deferred site settles early with less on screen — so the site
+ * that shows MORE, FASTER scores as "slower". FCP is the moment the browser paints
+ * the first content; both an SSR and a deferred page reach it early, so it isolates
+ * the click→content latency (and the prefetch head-start) without the tail of
+ * background image/tracker requests. Returns true if FCP was observed before cap.
+ */
+export async function waitForFirstContent(
+  page: import("playwright").Page,
+  cap = READY_CAP_MS,
+): Promise<boolean> {
+  await withCap(page.waitForLoadState("domcontentloaded"), cap, undefined);
+  return page
+    .evaluate((capMs: number) => {
+      return new Promise<boolean>((resolve) => {
+        const seen = performance.getEntriesByName?.("first-contentful-paint")[0];
+        if (seen) return resolve(true);
+        let done = false;
+        const finish = (ok: boolean) => {
+          if (done) return;
+          done = true;
+          resolve(ok);
+        };
+        try {
+          const obs = new PerformanceObserver((list) => {
+            if (list.getEntries().some((e) => e.name === "first-contentful-paint")) {
+              obs.disconnect();
+              finish(true);
+            }
+          });
+          obs.observe({ type: "paint", buffered: true });
+          setTimeout(() => {
+            obs.disconnect();
+            finish(false);
+          }, capMs);
+        } catch {
+          finish(false);
+        }
+      });
+    }, cap)
+    .catch(() => false);
+}
+
+/**
  * Wait until a real product image has actually LOADED and rendered (decoded,
  * ≥120px on screen). This is the user's "the product image showed up, the page
  * worked" signal — a far better readiness/success check than `networkidle`
@@ -217,7 +263,8 @@ export async function navigateWithHover(
   page: import("playwright").Page,
   targetUrl: string,
   productImage = false,
-): Promise<{ ok: boolean; navMs: number; landed: boolean }> {
+  contentReady = false,
+): Promise<{ ok: boolean; navMs: number; landed: boolean; viaFallback: boolean }> {
   const targetPath = new URL(targetUrl).pathname;
   const sel = `a[href="${cssAttrEscape(targetUrl)}"], a[href="${cssAttrEscape(targetPath)}"], a[href^="${cssAttrEscape(`${targetPath}?`)}"]`;
   const anchor = page.locator(sel).first();
@@ -258,6 +305,10 @@ export async function navigateWithHover(
   if (productImage) {
     await withCap(page.waitForLoadState("domcontentloaded"), 5_000, undefined);
     ok = await waitForProductImage(page);
+  } else if (contentReady) {
+    // Measure to first content painted (FCP), not networkidle — fair for SSR vs
+    // deferred pages and isolates the prefetch head-start (see waitForFirstContent).
+    ok = await waitForFirstContent(page);
   } else {
     await waitReady(page);
   }
