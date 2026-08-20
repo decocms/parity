@@ -165,7 +165,10 @@ These two knowledge files were listed in `knowledge/INDEX.md` but not written
 
 ---
 
-## 8. Source playbook never wired into MIGRATION_PROMPT.md
+## 8. Source playbook never wired into MIGRATION_PROMPT.md — RESOLVED
+
+**RESOLVED** (PR #222, commit `481a80a`): `migrate.ts` now passes
+`source.playbook` + `sourceInventory.notes` into `buildMigrationPrompt`.
 
 **Why it matters:** Each source (`deco-fresh`, `vtex-io`, `live-only`) has a
 `.playbook` string defined in `src/migrate/sources/*.ts` (e.g. "Fresh/Deno
@@ -183,7 +186,13 @@ prompt — append them too.
 
 ---
 
-## 9. `PlanComponent.status` not updateable by the orchestrator
+## 9. `PlanComponent.status` not updateable by the orchestrator — RESOLVED
+
+**RESOLVED** (schema in PR #222, commit `481a80a`; orchestrator loop finished in
+the `plugin-installable`/`orchestrator-plan-loop` PRs): `PlanComponent.status`,
+`loadPlan`/`savePlan`, `setComponentStatus`, and the `parity plan set-status`
+command exist. The plan is pinned at `<target>/.parity/migration-plan.json` and
+the orchestrator flips status via the CLI, never by hand-editing.
 
 **Why it matters:** `migration-plan.json` is written once by `parity migrate`
 with all components as `origin: "both" | "source-only" | "live-only"` but NO
@@ -253,7 +262,11 @@ See `skills/target-tanstack-deco/SKILL.md` + the orchestrator `workflows` phase.
 
 ---
 
-## 14. `sourceInventory.components` not merged into `MigrationBundle`
+## 14. `sourceInventory.components` not merged into `MigrationBundle` — RESOLVED
+
+**RESOLVED** (PR #222, commit `481a80a`): `syntheticSourceComponents(plan)` emits
+source-only rows as synthetic `MigratedComponent`s (`synthetic: true`) and
+`migrate.ts` pushes them into `bundle.components` for the exporters.
 
 **Why it matters:** The plan says "with `--source`, the inventory comes from CODE
 and complements the scrape". In the implementation, `sourceInventory` goes into
@@ -287,12 +300,12 @@ packages/parity` first, which is easy to forget.
 
 ## Priority order for a follow-up PR
 
-1. **9 + 14** (plan status field + component merge) — unimplementable orchestrator flow without these.
-2. **8** (source playbook wiring) — one-line fix, high value.
-3. **10 + 11** (reviewer agent + resume command) — completes the agent table and command surface.
-4. **12** (root AGENTS.md) — orientation for any agent working in the repo.
-5. **13** (template bootstrap plan B) — blocks public release of the plugin.
-6. **Tests 4a–4d** — catch regressions in the new code.
-7. **15** (sync-skills at root) — convenience, low risk.
-8. **Agent benchmark dry-run (5)** — validates everything end-to-end.
-9. **Everything else** in any order.
+Done: **8, 9, 14** (orchestrator plan-state loop) and **10, 11, 12, 13** (reviewer
+agent, resume command, root AGENTS.md, TanStack template). Remaining:
+
+1. **Tests 4a–4d** — catch regressions in the new code.
+2. **15** (sync-skills at root) — convenience, low risk.
+3. **Everything else** in any order.
+
+(#5 agent end-to-end dry-run: a real site was migrated successfully in a separate
+session — the flow is validated.)

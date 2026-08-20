@@ -8,8 +8,8 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { SourceComponent, SourceInventory } from "./sources/types.ts";
 import type { MigratedComponent, MigrationBundle } from "../types/migrate.ts";
+import type { SourceComponent, SourceInventory } from "./sources/types.ts";
 
 /**
  * Per-component reconciliation of the two inventories:
@@ -112,6 +112,25 @@ export function loadPlan(dir: string): MigrationPlan | null {
 /** Write `migration-plan.json` to a run dir (the orchestrator updates it in-place). */
 export function savePlan(dir: string, plan: MigrationPlan): void {
   writeFileSync(join(dir, PLAN_FILE), `${JSON.stringify(plan, null, 2)}\n`, "utf8");
+}
+
+/**
+ * Flip one component's porting status, matching `name` with the same
+ * case/separator-insensitive rule the reconciler uses. Mutates the plan in
+ * place; returns the matched row, or null when no component matches. Backs the
+ * `parity plan set-status` command the orchestrator calls instead of hand-editing
+ * the JSON.
+ */
+export function setComponentStatus(
+  plan: MigrationPlan,
+  name: string,
+  status: ComponentStatus,
+): PlanComponent | null {
+  const k = key(name);
+  const component = plan.components.find((c) => key(c.name) === k);
+  if (!component) return null;
+  component.status = status;
+  return component;
 }
 
 /**

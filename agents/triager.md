@@ -14,7 +14,7 @@ Read-only. You receive: `target_dir`, `build_ok` (bool), `dev_log_path` (opt),
 1. **Build gate**: is `build_ok` false? If yes, that's a critical issue.
 2. **Runtime**: read `dev_log_path | tail -80`. Grep for ERROR/WARN/fail/is not a function.
 3. **Missing sections**: compare `src/components/index.tsx` exports against
-   migration-plan.json `components` where `status !== "done"`.
+   the rows in `.parity/migration-plan.json` where `status !== "done"`.
 4. **FastStore 3-point invariant** (if platform === faststore-v4):
    - Every export in index.tsx has a schema in `cms/faststore/components/`.
    - Every schema key appears in at least one whitelist in `cms/faststore/pages/`.

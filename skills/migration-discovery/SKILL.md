@@ -52,8 +52,10 @@ For TanStack target:
 ls src/components/sections/
 ```
 
-Cross-reference against `components` in `migration-plan.json`. Mark `status: "done"`
-for every component whose name (case-insensitive) appears in both lists.
+Cross-reference against the rows in `<target.dir>/.parity/migration-plan.json`.
+For every component whose name appears in both lists, mark it done via the CLI
+(never hand-edit): `parity plan set-status <name> done --dir <target.dir>/.parity`
+(matching is case- and separator-insensitive).
 
 ## Importing existing backlog
 

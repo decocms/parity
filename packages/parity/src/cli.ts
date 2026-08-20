@@ -16,6 +16,7 @@ import { journeyCommand } from "./commands/journey.ts";
 import { learnedStats, learnedValidate } from "./commands/learned.ts";
 import { listCommand, listModulesCommand } from "./commands/list.ts";
 import { migrateCommand } from "./commands/migrate.ts";
+import { planSetStatusCommand } from "./commands/plan.ts";
 import { prCommand } from "./commands/pr.ts";
 import { promptCommand } from "./commands/prompt.ts";
 import { reportCommand } from "./commands/report.ts";
@@ -319,6 +320,24 @@ program
       .option("--json", "Emit structured JSON instead of human-readable text", false)
       .action((opts) => {
         process.exit(listModulesCommand(Boolean(opts.json)));
+      }),
+  );
+
+program
+  .command("plan")
+  .description("Inspect/update the migration-plan.json component contract")
+  .addCommand(
+    new Command("set-status")
+      .description("Mark a component pending|done|skipped as the orchestrator ports it")
+      .argument("<name>", "Component name (case- and separator-insensitive)")
+      .argument("<status>", "pending | done | skipped")
+      .option(
+        "--dir <path>",
+        "Directory holding migration-plan.json (default: the target repo's .parity/)",
+        ".parity",
+      )
+      .action((name, status, opts) => {
+        process.exit(planSetStatusCommand(opts.dir, name, status));
       }),
   );
 

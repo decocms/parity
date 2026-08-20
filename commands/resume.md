@@ -16,7 +16,8 @@ turns and sessions get cut off mid-phase.
 
 ## Notes
 
-- Mid-phase state (`round`, `components[].status`, `parity.lastScore`) is the
-  source of truth — trust it over re-deriving. Only re-run a phase's work for
+- Mid-phase state (`round`, `parity.lastScore`) in `.parity/migration.json` plus
+  the component `status` rows in `.parity/migration-plan.json` are the source of
+  truth — trust them over re-deriving. Only re-run a phase's work for
   components/issues still marked `pending`/open.
 - Every bash call still goes through the `runner` agent.
