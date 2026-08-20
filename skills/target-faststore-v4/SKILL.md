@@ -27,13 +27,31 @@ in `blocks.json`) + locale/currency (from the DOM/`manifest.json`) and set them 
 (`VTEX_STORE_ID`, `VTEX_WORKSPACE`, `CONTENT_SOURCE_PROJECT`) / `discovery.config.js`.
 Replace the template's example brand theme (`src/themes/`) + assets with the store's.
 
-**Rendering needs the account CMS.** FastStore fetches page/global content from the
-store's headless CMS by documentId at runtime (local `CMS_DATA` only maps slugs→ids;
-globals/home/landing re-fetch remotely). So a build is green with just code, but a
-running site needs the captured content SYNCED into the account CMS (`faststore
-cms-sync`, needs account write access) + the `faststore` custom app on the orderForm.
-State this at the target decision: **faststore-v4 needs the client's VTEX account to
-render; tanstack-deco renders standalone.**
+**The app runs locally; only real CONTENT needs the account.** `faststore dev`
+serves `http://localhost:3000` with zero account access — code renders fine. What
+comes from the account is the page/global CONTENT: FastStore fetches it by
+documentId at runtime (local `CMS_DATA` only maps slugs→ids; globals/home/landing
+re-fetch remotely). So a build is green and the app boots with just code, but real
+content requires the VTEX account.
+
+**Modern content path = Content Platform (CP), not Headless CMS.** On FastStore v4
+today, **Headless CMS is LEGACY** (`faststore cms-sync` / `yarn cms-sync` — legacy
+flows only). The current flow is the **Content Platform**: upload component/page
+schemas with the VTEX Content plugin — `vtex content …` (repos often wrap it as
+`yarn cms:content` = generate-schema + upload-schema). Without the schema uploaded,
+the Admin/CP can't see a component. Check `package.json` scripts + the repo README
+before assuming which path a repo uses (grep `cms:content`/`vtex content` = CP;
+`cms-sync` = legacy).
+
+**Local content preview: `/api/preview`.** To preview real CP content on localhost
+without a full deploy, use the app's preview route against a CP branch:
+`http://localhost:3000/api/preview?contentType=home&documentId=<entryId>&versionId=<branchId>&slug=/&locale=<locale>`
+(create the branch + edit content in the CP admin panel first; per-page for now).
+This is how you validate a candidate locally when the account content exists.
+
+State this at the target decision: **faststore-v4 needs the client's VTEX account
+for real content (CP schema upload + a `faststore` custom app on the orderForm);
+the app itself runs locally either way. tanstack-deco renders standalone.**
 
 **Gitignore build output**: `faststore build` copies `.faststore/{public,.next,
 lighthouserc.js}` into the repo root. The starter's `.gitignore` misses `public/`
@@ -102,8 +120,14 @@ node scripts/validate-responsive-mixins.mjs
 ## CLI commands
 
 ```bash
-faststore dev         # localhost:3000
+faststore dev         # localhost:3000 (runs with no account access)
 faststore build       # production build
 faststore generate    # regenerate schema + TS types (run after adding sections)
-faststore cms-sync    # sync cms/ folder to Headless CMS
+
+# Content — modern path (Content Platform), often wrapped as a repo script:
+vtex content ...      # a.k.a. `yarn cms:content` — generate + upload CP schemas
+# /api/preview?contentType=…&documentId=…&versionId=…&slug=/&locale=… — preview a CP branch locally
+
+# Content — LEGACY (Headless CMS), only for legacy flows:
+faststore cms-sync    # a.k.a. `yarn cms-sync` — sync cms/ folder to Headless CMS
 ```

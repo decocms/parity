@@ -132,11 +132,13 @@ discovery → reconcile → repo-setup → template-bootstrap → workflows
 Delegate to `scout` with `task: "full-discovery"`. Merge result into state.
 Ask the user: "What is the output target? (tanstack-deco / faststore-v4)" — and state
 the tradeoff: **`tanstack-deco` renders standalone from props/loaders (a blind live-only
-migration is viewable end-to-end); `faststore-v4` is coupled to the client's VTEX account
-— it builds from code, but RENDERING needs content synced to the account's headless CMS
-(`faststore cms-sync`, account write access) + the `faststore` custom app.** For a
-no-account/live-only migration, faststore-v4 yields buildable code but not a running site.
-Set `source.prodUrl` if not found automatically.
+migration is viewable end-to-end); `faststore-v4` builds AND runs locally from code
+(`faststore dev`), but real page CONTENT is coupled to the client's VTEX account —
+uploaded via the Content Platform (`vtex content` / `yarn cms:content`; Headless CMS
+`cms-sync` is legacy) + a `faststore` custom app on the orderForm. Preview real
+content locally via `/api/preview` against a CP branch.** For a no-account/live-only
+migration, faststore-v4 yields buildable, locally-runnable code but no real content.
+See `skills/target-faststore-v4/SKILL.md`. Set `source.prodUrl` if not found automatically.
 
 **PR mode.** If the user asked to stack fixes, review one combined preview, or
 not auto-merge, set `budget.stackPrs: true` (see `fix` / `stack-review`).

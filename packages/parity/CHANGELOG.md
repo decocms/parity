@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.25.1] — 2026-08-20
+
+### Fixed
+
+* **FastStore v4 target skill: Content Platform, not legacy Headless CMS.** The
+  `target-faststore-v4` skill (and the orchestrator's discovery blurb) only knew
+  the legacy `faststore cms-sync` → Headless CMS flow. On FastStore v4 today
+  Headless CMS is LEGACY; the current content path is the **Content Platform**
+  (`vtex content` / `yarn cms:content` to upload schemas), and real content
+  previews locally via **`/api/preview`** against a CP branch. Corrected both
+  files to lead with CP (legacy path kept, labeled), and clarified that
+  `faststore dev` runs locally with **no** account access — only real CONTENT
+  needs the account, not the app. Fixes misleading "faststore needs cms-sync to
+  render" guidance. (Skill/knowledge only; `porter`/`triager` inherit it via
+  `target_skill_path` — no agent change.)
+
 ## [0.25.0] — 2026-08-20
 
 ### Added
