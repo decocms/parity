@@ -20,6 +20,21 @@ agent can build from, whether or not the source code still exists.
 The plugin closes the loop between them: capture → build → measure → file issues
 → fix → measure again, until the score converges.
 
+## Install in Claude Code
+
+```bash
+claude plugin add decocms/parity
+```
+
+Once installed, four slash commands drive a migration:
+
+| Command | What it does |
+| --- | --- |
+| `/parity:migrate` | Start or resume a migration for a site |
+| `/parity:status` | Show the current phase and score of an active migration |
+| `/parity:validate` | Run parity (prod × candidate) on demand and report the score |
+| `/parity:resume` | Resume from the last saved `.parity/migration.json` |
+
 ## Getting started
 
 ```bash
