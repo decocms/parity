@@ -1,9 +1,12 @@
 {
   "name": "parity",
-  "displayName": "Parity — Site Migration Orchestrator",
-  "description": "End-to-end migration orchestration for deco storefronts. Captures the live site, reconciles existing work, ports components, runs parity validation, files GitHub issues, and loops until the score converges.",
-  "repository": "decocms/parity",
-  "installCommand": "claude plugin add decocms/parity",
-  "category": "development",
-  "tags": ["migration", "vtex", "faststore", "tanstack", "deco", "e2e"]
+  "description": "deco's site-migration plugin — orchestrates capture → reconcile → port → validate → fix loops for storefront migrations.",
+  "owner": { "name": "deco CMS", "email": "hi@deco.cx" },
+  "plugins": [
+    {
+      "name": "parity",
+      "source": "./",
+      "description": "End-to-end migration orchestration for deco storefronts. Captures the live site, reconciles existing work, ports components, runs parity validation, files GitHub issues, and loops until the score converges."
+    }
+  ]
 }

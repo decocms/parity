@@ -23,7 +23,18 @@ The plugin closes the loop between them: capture → build → measure → file 
 ## Install in Claude Code
 
 ```bash
-claude plugin add decocms/parity
+# 1. register the marketplace (one-time)
+claude plugin marketplace add decocms/parity
+# 2. install the plugin from it
+claude plugin install parity@parity
+```
+
+Confirm it installed:
+
+```bash
+claude plugin list            # "parity" should appear
+claude plugin details parity  # command/agent/skill inventory + token cost
+# inside a Claude Code session, /help lists the /parity:* commands below
 ```
 
 Once installed, four slash commands drive a migration:

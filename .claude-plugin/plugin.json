@@ -9,7 +9,6 @@
   "homepage": "https://github.com/decocms/parity",
   "repository": "https://github.com/decocms/parity",
   "license": "MIT",
-  "hooks": "./hooks/hooks.json",
   "keywords": [
     "migration",
     "parity",

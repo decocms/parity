@@ -16,16 +16,30 @@ describe("plugin manifests", () => {
     }
   });
 
-  it("hooks path resolves to an existing file", () => {
-    expect(plugin.hooks, "plugin.json.hooks").toBeTruthy();
-    expect(existsSync(resolve(root, plugin.hooks))).toBe(true);
+  it("uses the conventional hooks file, not an explicit manifest reference", () => {
+    // Claude Code auto-loads hooks/hooks.json by convention. Referencing it via
+    // manifest.hooks too triggers a "Duplicate hooks file" load error on install.
+    expect(existsSync(resolve(root, "hooks", "hooks.json")), "hooks/hooks.json").toBe(true);
+    expect(plugin.hooks, "plugin.json must NOT re-reference the conventional hooks file").toBeUndefined();
   });
 
-  it("installCommand references the same repo as plugin.repository", () => {
-    // "decocms/parity" must appear in both, regardless of URL vs slug form.
-    const slug = marketplace.repository;
-    expect(marketplace.installCommand).toContain(slug);
-    expect(plugin.repository).toContain(slug);
+  it("marketplace.json matches the Claude Code catalog schema", () => {
+    // owner object + non-empty plugins[] — without these, `claude plugin
+    // marketplace add` registers the marketplace but finds zero installable
+    // plugins. Guards against the "app-store listing" shape that shipped in #268.
+    expect(marketplace.owner?.name, "marketplace.owner.name").toBeTruthy();
+    expect(Array.isArray(marketplace.plugins), "marketplace.plugins is array").toBe(true);
+    expect(marketplace.plugins.length, "marketplace.plugins non-empty").toBeGreaterThan(0);
+
+    for (const entry of marketplace.plugins) {
+      expect(entry.name, "plugins[].name").toBeTruthy();
+      // source resolves to a dir holding a plugin.json
+      const manifestPath = resolve(root, entry.source ?? ".", ".claude-plugin", "plugin.json");
+      expect(existsSync(manifestPath), entry.source).toBe(true);
+      // the entry's plugin.json declares the same name
+      const declared = JSON.parse(readFileSync(manifestPath, "utf8"));
+      expect(declared.name, `${entry.name} plugin.json name`).toBe(entry.name);
+    }
   });
 
   it("agents/skills/commands dirs exist", () => {

@@ -7,7 +7,7 @@
     },
     "packages/parity": {
       "name": "@decocms/parity",
-      "version": "0.22.0",
+      "version": "0.23.0",
       "bin": {
         "parity": "dist/cli.js",
       },
