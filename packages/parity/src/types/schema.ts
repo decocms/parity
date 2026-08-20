@@ -7,6 +7,7 @@ export const Category = z.enum([
   "functional",
   "visual",
   "performance",
+  "a11y",
   "seo",
   "console",
   "network",
@@ -37,8 +38,44 @@ export const WebVitals = z.object({
   fcp: z.number().nullable(),
   ttfb: z.number().nullable(),
   inp: z.number().nullable(),
+  /** Total Blocking Time — Lighthouse-only (the Playwright collector can't measure it). */
+  tbt: z.number().nullable().optional(),
 });
 export type WebVitals = z.infer<typeof WebVitals>;
+
+/** Lighthouse category scores (0..100), null when the category didn't run. Owned here so it can be persisted on a PageCapture; `engine/lighthouse.ts` imports the type. */
+export const LhScores = z.object({
+  performance: z.number().nullable(),
+  accessibility: z.number().nullable(),
+  bestPractices: z.number().nullable(),
+  seo: z.number().nullable(),
+});
+export type LhScores = z.infer<typeof LhScores>;
+
+/**
+ * One Lighthouse accessibility-tree audit relevant to AI agents (button-name,
+ * link-name, label, image-alt, aria-*). `score` is 1 (pass) / 0 (fail) / null
+ * (n/a). `elements` samples the failing nodes (selector + snippet). Feeds the
+ * "Navegação agêntica" composite. #264.
+ */
+export const AgentA11yAudit = z.object({
+  id: z.string(),
+  title: z.string(),
+  score: z.number().nullable(),
+  elements: z.array(z.object({ selector: z.string(), snippet: z.string() })),
+});
+export type AgentA11yAudit = z.infer<typeof AgentA11yAudit>;
+
+/** One actionable Lighthouse audit (opportunity or failing diagnostic). Owned here so it can be persisted on a PageCapture; `engine/lighthouse.ts` imports the type. */
+export const LhOpportunity = z.object({
+  id: z.string(),
+  title: z.string(),
+  savingsMs: z.number(),
+  savingsBytes: z.number(),
+  displayValue: z.string().optional(),
+  score: z.number().nullable(),
+});
+export type LhOpportunity = z.infer<typeof LhOpportunity>;
 
 export const WebVitalStat = z.object({
   median: z.number(),
@@ -114,6 +151,12 @@ export const PageCapture = z.object({
    * captures, or `scrollToLoad: false`). Issue #185.
    */
   vitalsFullPage: WebVitals.optional(),
+  /** Lighthouse actionable audits (render-block, unused JS, oversized images…), biggest savings first. Present only when captured via Lighthouse (`parity vitals` default). #264. */
+  lhOpportunities: z.array(LhOpportunity).optional(),
+  /** Lighthouse category scores (performance/accessibility/best-practices/seo, 0..100). Present only when captured via Lighthouse. #264. */
+  lhScores: LhScores.optional(),
+  /** Agent-relevant accessibility-tree audits (for "Navegação agêntica"). Present only when captured via Lighthouse. #264. */
+  agentA11y: z.array(AgentA11yAudit).optional(),
   console: z.array(ConsoleEntry),
   network: z.array(NetworkEntry),
   screenshotPath: z.string(),

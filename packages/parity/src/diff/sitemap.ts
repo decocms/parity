@@ -80,13 +80,82 @@ export function parseSitemap(xml: string): ParsedSitemap {
 }
 
 /**
- * Resolves a sitemap into a flat list of URLs, recursing one level of sitemap-index.
+ * Deco framework fallback: sites built on deco (any `x-powered-by: deco`) expose
+ * their CMS-configured pages at `/live/invoke/website/loaders/pages.ts` as a JSON
+ * array of `{pathTemplate}`. Many deco storefronts ship NO `/sitemap.xml` (404)
+ * and no `Sitemap:` in robots.txt — this is the way to discover their content
+ * pages. Non-deco sites 404 here → returns `[]` harmlessly. Dynamic templates
+ * (`:slug`, `*`, `{param}`) are skipped since we have no concrete param values.
  */
-export async function resolveSitemapUrls(baseUrl: string, hintUrl?: string): Promise<string[]> {
+export async function fetchDecoPages(baseUrl: string, timeoutMs = 15_000): Promise<string[]> {
+  const url = new URL("/live/invoke/website/loaders/pages.ts", baseUrl).toString();
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (compatible; parity-cli/0.1; +https://github.com/decocms/parity)",
+      },
+      redirect: "follow",
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as unknown;
+    return parseDecoPages(data, baseUrl);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * Transform the deco pages-loader JSON into absolute URLs: keep static
+ * `pathTemplate`s, drop dynamic routes (`:slug`, `*`, `{param}`), dedupe, cap at
+ * MAX_URLS. Pure (no network) — exported for testing. Exported from fetchDecoPages.
+ */
+export function parseDecoPages(data: unknown, baseUrl: string): string[] {
+  if (!Array.isArray(data)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of data) {
+    const tpl = (entry as { pathTemplate?: unknown })?.pathTemplate;
+    if (typeof tpl !== "string" || !tpl.startsWith("/")) continue;
+    if (/[:*{}]/.test(tpl)) continue; // dynamic route — no param values to fill
+    if (seen.has(tpl) || out.length >= MAX_URLS) continue;
+    seen.add(tpl);
+    try {
+      out.push(new URL(tpl, baseUrl).toString());
+    } catch {
+      /* skip unparsable */
+    }
+  }
+  return out;
+}
+
+/**
+ * Resolves a sitemap into a flat list of URLs, recursing one level of sitemap-index.
+ * Falls back to the deco pages loader ({@link fetchDecoPages}) when the sitemap is
+ * missing or empty — common on deco storefronts that ship no `/sitemap.xml`.
+ *
+ * `decoFallback` (default `true`) turns that fallback on. Page-discovery callers
+ * (vitals/run/cache/benchmark) want it — they just need pages to crawl. The SEO
+ * audit passes `false`: it must see the TRUE sitemap state (empty = the site
+ * genuinely serves no sitemap.xml) so it can report the gap instead of having the
+ * deco fallback silently paper over it.
+ */
+export async function resolveSitemapUrls(
+  baseUrl: string,
+  hintUrl?: string,
+  opts?: { decoFallback?: boolean },
+): Promise<string[]> {
+  const fallback = opts?.decoFallback !== false;
+  const deco = () => (fallback ? fetchDecoPages(baseUrl) : []);
   const root = await fetchSitemap(baseUrl, hintUrl);
-  if (!root) return [];
+  if (!root) return deco();
   const parsed = parseSitemap(root.xml);
-  if (!parsed.isIndex) return parsed.urls;
+  if (!parsed.isIndex) return parsed.urls.length > 0 ? parsed.urls : deco();
 
   const all: string[] = [];
   for (const child of parsed.childSitemaps.slice(0, 20)) {
@@ -99,7 +168,7 @@ export async function resolveSitemapUrls(baseUrl: string, hintUrl?: string): Pro
       all.push(u);
     }
   }
-  return all;
+  return all.length > 0 ? all : deco();
 }
 
 export interface SitemapDiff {

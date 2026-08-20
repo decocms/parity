@@ -91,6 +91,7 @@ function renderDashboard(r: AuditResult): string {
     functional: 0,
     visual: 0,
     performance: 0,
+    a11y: 0,
     seo: 0,
     console: 0,
     network: 0,

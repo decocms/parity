@@ -207,4 +207,62 @@ describe("seoDeepAudit", () => {
     );
     expect(r.issues.find((i) => i.id.includes("x-robots-noindex"))?.severity).toBe("critical");
   });
+
+  it("flags sitemap.xml absent on BOTH sides as an SEO gap (not a parity pass)", async () => {
+    // robots present, but no /sitemap.xml anywhere and no deco fallback in the audit.
+    ({ restore } = mockFetch({ "/robots.txt": { status: 200, body: ROBOTS_OK } }));
+    const r = await seoDeepAudit(
+      makeContext({
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", html: HTML_OK })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", html: HTML_OK })],
+      }),
+    );
+    expect(r.issues.find((i) => i.id === "seo:sitemap-absent")).toBeDefined();
+  });
+
+  it("flags robots.txt with no Sitemap: directive", async () => {
+    ({ restore } = mockFetch({
+      "/robots.txt": { status: 200, body: ROBOTS_OK }, // no `Sitemap:` line
+      "/sitemap.xml": { status: 200, body: SITEMAP_OK },
+    }));
+    const r = await seoDeepAudit(
+      makeContext({
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", html: HTML_OK })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", html: HTML_OK })],
+      }),
+    );
+    expect(r.issues.find((i) => i.id === "seo:robots-no-sitemap-directive")).toBeDefined();
+  });
+
+  it("flags missing /llms.txt, and stays quiet when cand serves one", async () => {
+    ({ restore } = mockFetch({
+      "/robots.txt": { status: 200, body: ROBOTS_OK },
+      "/sitemap.xml": { status: 200, body: SITEMAP_OK },
+    }));
+    const missing = await seoDeepAudit(
+      makeContext({
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", html: HTML_OK })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", html: HTML_OK })],
+      }),
+    );
+    expect(missing.issues.find((i) => i.id === "seo:llms-txt-absent")).toBeDefined();
+    restore();
+
+    ({ restore } = mockFetch({
+      "/robots.txt": { status: 200, body: ROBOTS_OK },
+      "/sitemap.xml": { status: 200, body: SITEMAP_OK },
+      "/llms.txt": {
+        status: 200,
+        body: "# Site\n\n- [Home](https://x.com/)\n",
+        headers: { "content-type": "text/plain" },
+      },
+    }));
+    const present = await seoDeepAudit(
+      makeContext({
+        prodPages: [makePageCapture({ url: "https://x.com/", side: "prod", html: HTML_OK })],
+        candPages: [makePageCapture({ url: "https://x.com/", side: "cand", html: HTML_OK })],
+      }),
+    );
+    expect(present.issues.find((i) => i.id === "seo:llms-txt-absent")).toBeUndefined();
+  });
 });

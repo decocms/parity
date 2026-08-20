@@ -7,6 +7,7 @@ vi.mock("@anthropic-ai/sdk", () => ({
   })),
 }));
 
+import { disableLlm, resetLlmState } from "../../src/llm/client.ts";
 import { compactHtmlForRecovery, suggestRecovery } from "../../src/llm/recover-step.ts";
 
 describe("compactHtmlForRecovery", () => {
@@ -37,9 +38,17 @@ describe("compactHtmlForRecovery", () => {
 
 describe("suggestRecovery", () => {
   beforeEach(() => mockCreate.mockReset());
-  afterEach(() => delete process.env.ANTHROPIC_API_KEY);
+  afterEach(() => {
+    delete process.env.ANTHROPIC_API_KEY;
+    resetLlmState();
+  });
 
-  it("returns null when no LLM key", async () => {
+  it("returns null when no LLM is available", async () => {
+    // Must be hermetic: parity auto-detects a logged-in `claude` CLI
+    // (claude-agent-sdk) as a fallback provider, so merely unsetting
+    // ANTHROPIC_API_KEY still resolves an LLM on a dev machine. disableLlm()
+    // expresses the real "no LLM at all" condition regardless of environment.
+    disableLlm();
     const out = await suggestRecovery({
       stepName: "click-buy",
       intendedAction: "click the buy button",

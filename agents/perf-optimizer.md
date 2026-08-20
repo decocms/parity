@@ -13,9 +13,13 @@ the transform; when unsure, leave a `// TODO(perf)` and move on.
 
 You receive:
 - `target_dir`, `conventions`, `build_cmd`
-- `opportunities`: the Lighthouse opportunities for the candidate, from
-  `parity-output/runs/<id>/report.json` (`sides[].vitals[page].opportunities`) or
-  a `parity vitals` pass — each `{id, title, savingsMs, savingsBytes}`.
+- `opportunities`: the Lighthouse opportunities for the candidate, each
+  `{id, title, savingsMs, savingsBytes}`. Two sources:
+  - `parity vitals` (default Lighthouse mode) → `runs/<id>/vitals.json` `opportunities`
+    (deduped across pages, biggest first) + per-page `report.json`
+    `flowCaptures[].pages[].lhOpportunities`. **This is the usual source** — run it
+    scoped to the page you're optimizing.
+  - `parity benchmark` → `report.json` `sides[].vitals[page].opportunities`.
 - `prodUrl`, `candUrl` (to measure/verify)
 
 ## The transform catalog
