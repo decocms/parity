@@ -100,8 +100,17 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Set version
-        working-directory: packages/parity
-        run: npm version "${{ steps.version.outputs.next }}" --no-git-tag-version --allow-same-version
+        # Edit package.json directly. `npm version` chokes inside a workspace
+        # member ("Cannot read properties of null (reading 'matches')"), so we
+        # write the field ourselves — no git tag, formatting preserved.
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const p = "packages/parity/package.json";
+            const j = JSON.parse(fs.readFileSync(p, "utf8"));
+            j.version = process.argv[1];
+            fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
+          ' "${{ steps.version.outputs.next }}"
 
       - name: Build
         working-directory: packages/parity
