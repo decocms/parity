@@ -15,16 +15,46 @@ state) > **SEO** (indexable content must be crawlable) > **perceived speed**
 chosen right — a light content route is SPA + SSR-all, which is simultaneously the
 best of all three.
 
-## The decision
+## The decision — THREE navigation modes, not two
 
-A route can navigate two ways in TanStack Start:
-- **SPA** (`<Link>` + `defaultPreload="intent"`): client-side transition, no full
-  reload, keeps JS state, prefetches on hover. Feels instant.
-- **Full reload** (`<a href>`): fresh SSR request each time. Simpler, always
-  correct, no stale client state, but slower nav.
+1. **`<a>` + Speculation Rules prefetch** — the DEFAULT for content sites. Links
+   stay plain `<a>` (real SSR document navigation: SEO-perfect, works without JS,
+   zero hydration), but a `<script type="speculationrules">` in `__root.tsx` tells
+   the browser to prefetch the target HTML **document** on hover (`eagerness:
+   "moderate"`). The click reuses the already-fetched document → instant, ONE
+   network call (browser dedups natively — no double-fetch). Chrome/Edge
+   accelerate; Safari/Firefox fall back to normal `<a>`. This gives the instant
+   feel of SPA with none of its SEO/no-JS/hydration cost.
+2. **`<Link>` SPA** — client-side transition (React re-render from loader data).
+   Use ONLY when client state must persist across the nav (PDP variant switch
+   keeping scroll+cart, filters). Costs hydration + risks the loadCmsPage
+   double-fetch; not worth it for stateless content nav.
+3. **Plain `<a>`, no prefetch** — full reload, no speculation. For rarely-clicked,
+   heavy, or must-be-fresh routes where prefetch would waste bandwidth.
 
-The router already defaults `defaultPreload: "intent"`, so the lever is
-**`<Link>` vs `<a>`** in nav components (Header, Footer, breadcrumbs, cards).
+Default reasoning: a content route is almost always **mode 1** — you keep the `<a>`
+(so everything we fixed for SEO/no-JS stays) and just add the speculation rule.
+Reach for mode 2 (`<Link>`) only when a route genuinely needs to preserve client
+state. This is the opposite of the old "convert `<a>`→`<Link>`" instinct.
+
+### Speculation Rules snippet (mode 1)
+
+Add once in `src/routes/__root.tsx` `head().scripts`:
+```jsonc
+{ "type": "speculationrules", "children": JSON.stringify({
+  "prefetch": [{
+    "source": "document",
+    "where": { "and": [
+      { "href_matches": "/*" },
+      { "not": { "href_matches": "/deco/*" } }   // exclude admin
+    ]},
+    "eagerness": "moderate"   // hover/pointerdown; use "conservative" to prefetch less
+  }]
+})}
+```
+Use `prefetch` (fetch the HTML) not `prerender` (fully render in background) unless
+a route is provably worth the extra cost. Exclude `#anchors`, external, and any
+non-cacheable/dynamic path (cart, checkout, account).
 
 ## Inputs
 
