@@ -488,6 +488,11 @@ program
   .option("--no-vitals", "Skip the Lighthouse web-vitals pass (faster iteration)")
   .option("--no-auto-selectors", "Skip LLM-based selector discovery")
   .option("--lang <pt|en>", "Default report language (toggle switches live)", "pt")
+  .option(
+    "--journey <auto|commerce|content>",
+    "Journey to benchmark: commerce (home→PLP→PDP→variant), content (home→internal pages), or auto (try commerce, fall back to content)",
+    "auto",
+  )
   .option("--open", "Open the HTML report when done", false)
   .option("--pt", "Tell the LLM to respond in Brazilian Portuguese. Issue #67.")
   .action(async (opts) => {

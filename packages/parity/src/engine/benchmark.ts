@@ -139,7 +139,7 @@ function cssAttrEscape(s: string): string {
 }
 
 /** load + networkidle (both capped) + a short settle — fair for SPA and MPA nav. */
-async function waitReady(page: import("playwright").Page, cap = READY_CAP_MS): Promise<void> {
+export async function waitReady(page: import("playwright").Page, cap = READY_CAP_MS): Promise<void> {
   await withCap(page.waitForLoadState("load"), cap, undefined);
   await withCap(
     page.waitForLoadState("networkidle", { timeout: cap }).catch(() => undefined),
@@ -208,7 +208,7 @@ async function waitForCardGrowth(
  * and made a warm prefetched SPA hop look like ~1s instead of its real ~300ms.
  * `ok=false` ⇒ no product image appeared (broken/empty page).
  */
-async function navigateWithHover(
+export async function navigateWithHover(
   page: import("playwright").Page,
   targetUrl: string,
   productImage = false,
@@ -284,7 +284,7 @@ const CATEGORY_DEMOTE =
   /\betc\b|collab|acess[oó]ri|cal[cç]ados|bolsas?|beauty|casa|kids|infantil|\bpet\b|zee\.?dog|bazar|presente|\bgift\b/i;
 
 /** Dismiss overlays AND accept the cookie banner (the FARM-navigation blocker). */
-async function dismissAll(page: import("playwright").Page, ctx: FlowContext): Promise<void> {
+export async function dismissAll(page: import("playwright").Page, ctx: FlowContext): Promise<void> {
   await dismissOverlays(page, ctx).catch(() => undefined);
   for (const sel of COOKIE_ACCEPT_SELECTORS) {
     const b = page.locator(sel).first();
@@ -296,7 +296,7 @@ async function dismissAll(page: import("playwright").Page, ctx: FlowContext): Pr
   }
 }
 
-async function scrollToTop(page: import("playwright").Page): Promise<void> {
+export async function scrollToTop(page: import("playwright").Page): Promise<void> {
   await page.evaluate(() => window.scrollTo({ top: 0 })).catch(() => undefined);
   await page.waitForTimeout(200);
 }
@@ -365,7 +365,7 @@ async function pickMenuLink(
  * candidate site doesn't have a route the prod site does. Used to FAIL a step
  * instead of silently reporting a fake-fast time for a broken page.
  */
-async function pageLooksBroken(page: import("playwright").Page): Promise<boolean> {
+export async function pageLooksBroken(page: import("playwright").Page): Promise<boolean> {
   return page
     .getByText(
       /n[ãa]o foi encontrad|p[áa]gina n[ãa]o encontrada|not found|erro 404|\bops[,!]? sua busca|nenhum (produto|resultado) encontrado|no results found/i,
@@ -1455,7 +1455,7 @@ export async function runSideBenchmark(opts: RunSideOptions): Promise<SideBenchm
   };
 }
 
-function aggregatePhase(step: string, samples: StepTiming[]): StepTiming {
+export function aggregatePhase(step: string, samples: StepTiming[]): StepTiming {
   return {
     step,
     ms: median(samples.map((s) => s.ms)),

@@ -8,6 +8,7 @@ import {
   resolveTargetPaths,
   runSideBenchmark,
 } from "../engine/benchmark.ts";
+import { resolveContentPaths, runContentSide } from "../engine/benchmark-content.ts";
 import { launchBrowser, userAgentFor } from "../engine/browser.ts";
 import { loadParityRc } from "../ignore/parser.ts";
 import { type Platform, detectPlatform } from "../learned/platform.ts";
@@ -36,6 +37,14 @@ export interface BenchmarkOptions {
   /** Default HTML report language (the PT/EN toggle can switch live). */
   lang?: string;
   open?: boolean;
+  /**
+   * Which journey to benchmark:
+   * - `commerce`: home → PLP → paginate → PDP → variant (needs a store)
+   * - `content`: home → internal content pages (blog/marketing, no PLP/PDP)
+   * - `auto` (default): try commerce; fall back to content when no PLP+PDP
+   *   validate on both sites.
+   */
+  journey?: "auto" | "commerce" | "content";
 }
 
 function num(v: string | number, fallback: number): number {
@@ -103,64 +112,73 @@ export async function benchmarkCommand(opts: BenchmarkOptions): Promise<number> 
   const browser = await launchBrowser({ headless: true });
   spinner.succeed("Browser pronto");
 
+  const journeyMode = opts.journey ?? "auto";
+  const harFor = (viewport: Viewport, side: Side) =>
+    join(paths.harDir, `user-navigation-benchmark-${viewport}-${side}.har`);
+  const commonSide = { browser, rc, learned, platform, outDir: paths.screenshotsDir, lighthouseDir: join(paths.runDir, "lighthouse"), warmupRuns, measuredRuns, paginations, runVitals } as const;
+
+  /** Commerce journey for one viewport, or null if no PLP+PDP validate on both. */
+  const runCommerceViewport = async (
+    viewport: Viewport,
+    onEvent: (m: string) => void,
+  ): Promise<[SideBenchmark, SideBenchmark] | null> => {
+    onEvent("batedor: procurando PLP + PDP que funcionem nos DOIS sites…");
+    const targetPaths = await resolveTargetPaths({
+      browser, prodBase: opts.prod, candBase: opts.cand, viewport, rc, learned, platform,
+      outDir: paths.screenshotsDir, onEvent,
+    });
+    if (!targetPaths) return null;
+    onEvent(`PLP: ${targetPaths.categoryPath} · PDP: ${targetPaths.productPath}`);
+    favicon ??= targetPaths.favicon;
+    logo ??= targetPaths.logo;
+    const runOne = (side: Side, base: string) =>
+      runSideBenchmark({ ...commonSide, base, side, viewport, harPath: harFor(viewport, side), targetPaths, onEvent });
+    return Promise.all([runOne("prod", opts.prod), runOne("cand", opts.cand)]);
+  };
+
+  /** Content journey for one viewport, or null if no shared nav pages found. */
+  const runContentViewport = async (
+    viewport: Viewport,
+    onEvent: (m: string) => void,
+  ): Promise<[SideBenchmark, SideBenchmark] | null> => {
+    onEvent("batedor: procurando páginas de conteúdo no nav (home + internas)…");
+    const contentPaths = await resolveContentPaths({
+      browser, prodBase: opts.prod, candBase: opts.cand, viewport, onEvent,
+    });
+    if (!contentPaths) return null;
+    const runOne = (side: Side, base: string) =>
+      runContentSide({ ...commonSide, base, side, viewport, harPath: harFor(viewport, side), contentPaths, onEvent });
+    return Promise.all([runOne("prod", opts.prod), runOne("cand", opts.cand)]);
+  };
+
   try {
     for (const viewport of viewports) {
       console.log(chalk.bold(`\n  ── ${viewport} ─────────────────────────────`));
       const onEvent = (m: string) => console.log(chalk.dim(`  ${m}`));
 
-      // Scout ("batedor"): discover a PLP + PDP that WORK ON BOTH SITES, so we
-      // never measure a broken page. If nothing validates on both, abort with a
-      // clear message instead of benchmarking an error page.
-      onEvent("batedor: procurando PLP + PDP que funcionem nos DOIS sites…");
-      const targetPaths = await resolveTargetPaths({
-        browser,
-        prodBase: opts.prod,
-        candBase: opts.cand,
-        viewport,
-        rc,
-        learned,
-        platform,
-        outDir: paths.screenshotsDir,
-        onEvent,
-      });
-      if (!targetPaths) {
+      let pair: [SideBenchmark, SideBenchmark] | null = null;
+      if (journeyMode === "content") {
+        pair = await runContentViewport(viewport, onEvent);
+      } else if (journeyMode === "commerce") {
+        pair = await runCommerceViewport(viewport, onEvent);
+      } else {
+        // auto: try commerce, fall back to content when no PLP+PDP validate.
+        pair = await runCommerceViewport(viewport, onEvent);
+        if (!pair) {
+          onEvent("sem PLP/PDP nos dois sites → journey de conteúdo (home → páginas internas)");
+          pair = await runContentViewport(viewport, onEvent);
+        }
+      }
+
+      if (!pair) {
         console.error(
           chalk.red(
-            `\n  ✗ batedor não achou uma PLP + PDP que funcionem nos dois sites (${viewport}).\n    Verifique se as URLs batem e/ou passe --plp com uma categoria que exista nos DOIS.`,
+            `\n  ✗ batedor não achou uma jornada que funcione nos dois sites (${viewport}).\n    Commerce: passe --plp com uma categoria que exista nos DOIS. Conteúdo: verifique se o nav tem links internos que abrem nos dois.`,
           ),
         );
         return 2;
       }
-      onEvent(`PLP: ${targetPaths.categoryPath} · PDP: ${targetPaths.productPath}`);
-      favicon ??= targetPaths.favicon;
-      logo ??= targetPaths.logo;
-
-      const runOne = (side: Side, base: string) =>
-        runSideBenchmark({
-          browser,
-          base,
-          side,
-          viewport,
-          rc,
-          learned,
-          platform,
-          outDir: paths.screenshotsDir,
-          harPath: join(paths.harDir, `user-navigation-benchmark-${viewport}-${side}.har`),
-          lighthouseDir: join(paths.runDir, "lighthouse"),
-          warmupRuns,
-          measuredRuns,
-          paginations,
-          runVitals,
-          targetPaths,
-          onEvent,
-        });
-      // prod and cand in parallel — halves wall time; Lighthouse runs after each
-      // side closes its own context, so they never fight over the CPU.
-      const [prod, cand] = await Promise.all([
-        runOne("prod", opts.prod),
-        runOne("cand", opts.cand),
-      ]);
-      sides.push(prod, cand);
+      sides.push(pair[0], pair[1]);
     }
   } finally {
     await browser.close().catch(() => undefined);
