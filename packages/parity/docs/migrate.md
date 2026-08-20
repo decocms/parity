@@ -169,8 +169,11 @@ capture:
 
 - `origin` — `both` (in code and seen live), `source-only` (in code, not
   observed live), or `live-only` (seen live, no source file).
-- `status` — `pending` \| `done` \| `skipped`, all `pending` at creation; an
-  orchestrator flips it in-place as it ports.
+- `status` — `pending` \| `done` \| `skipped`, all `pending` at creation; the
+  orchestrator flips it via `parity plan set-status <name> <status> [--dir]`
+  (default `.parity/`; case- and separator-insensitive name match) rather than
+  hand-editing the JSON. The plan lives at `<target>/.parity/migration-plan.json`
+  — the single source of truth for components, so it survives a resume.
 - `file` — repo-relative source path when the code defines the component.
 
 `source-only` components also join the lean artifact as **synthetic** entries

@@ -23,6 +23,7 @@
 | `parity section` | Focused prod×cand diff of a section: HTML + screenshot + computed styles |
 | `parity fix` | Pixel-perfect bundle: heatmap + CSS source + LLM-ready Markdown prompt |
 | `parity extract` | Single-site AI-ready component extraction (no prod×cand) — see `docs/extract.md` |
+| `parity plan set-status <name> <status>` | Mark a component `pending`/`done`/`skipped` in `migration-plan.json` (`--dir`, default `.parity/`) — the orchestrator's API instead of hand-editing JSON. See `docs/migrate.md` |
 | `parity prompt` | Export issues as a Markdown prompt for any LLM |
 | `parity explain` | LLM deep-dive on a specific issue (needs API key) |
 | `parity learned` | Inspect the learned-selectors library |

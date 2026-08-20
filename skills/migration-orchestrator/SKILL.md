@@ -21,6 +21,22 @@ itself). Resolve it once, at the start of every turn:
    it only after `repo-setup` establishes `target.dir`. Never scatter a
    `.parity/` into the parity repo or an unrelated cwd.
 
+## Plan file — the single source of truth for components
+
+The component list and each component's porting `status` live in ONE place:
+`<target.dir>/.parity/migration-plan.json`, produced by `parity migrate`. The
+state file does **not** duplicate it. Once `target.dir` exists (`repo-setup`),
+copy the plan there and treat that path as canonical for the rest of the run
+(it survives a resume — see `/parity:resume`).
+
+Never hand-edit the JSON. Flip a component's status through the CLI, via `runner`:
+
+```
+parity plan set-status <name> <pending|done|skipped> --dir <target.dir>/.parity
+```
+
+Name matching is case- and separator-insensitive (`product-shelf` == `ProductShelf`).
+
 ## Reading a `runner` reply
 
 The `runner` is a subagent — its reply is **prose that ends with a JSON line**,
@@ -63,7 +79,8 @@ discovery → reconcile → repo-setup → template-bootstrap → workflows
     "gates": []
   },
   "pagePairs": [],                // [{prod, cand, kind}] for cross-path pairing
-  "components": [],               // [{name, status, file}] from migration-plan.json
+  // components + their porting status live in <target.dir>/.parity/migration-plan.json,
+  // NOT here. Flip status via `parity plan set-status` (see "Plan file" above).
   "budget": { "fixRounds": 6, "used": 0 },
   "parity": { "lastScore": null, "target": 97, "reportPath": null }
 }
@@ -85,13 +102,15 @@ Set `source.prodUrl` if not found automatically.
 1. If `source.repo` exists: run `parity migrate --source <dir> --url <prodUrl>`
    via `runner` to get `migration-plan.json`.
 2. If no source: run `parity migrate --url <prodUrl>`.
-3. Read `migration-plan.json` → populate `components` with `status: "pending"`.
-4. If target already has work done (FastStore: read `src/components/index.tsx`;
-   TanStack: read `src/components/index.tsx`), mark matching components as `"done"`.
+3. `parity migrate` writes `migration-plan.json` (all rows `status: "pending"`)
+   under its `--out` dir (`./parity-migrate/<host>/`). Once `target.dir` exists,
+   copy it to the canonical `<target.dir>/.parity/migration-plan.json`.
+4. If target already has work done (read `src/components/index.tsx`), mark each
+   matching component done: `parity plan set-status <name> done --dir <target.dir>/.parity`.
 5. If target has a backlog file (`docs/todo-radar.md`), read it and import
    open items as issues via `gh issue create` with label `parity-migrate` ONLY
    if no issue with the same title already exists.
-6. `pendingComponents` = components where `status === "pending"`.
+6. `pendingComponents` = plan rows still `status: "pending"`.
 
 ### repo-setup / template-bootstrap
 - **TanStack**: scaffold by **copying the code** from `deco-sites/storefront-tanstack`
@@ -159,9 +178,9 @@ them:
    race on).
 
 Each porter gets the component name + its `migration-plan.json` entry + target
-conventions. When a porter signals done, set that component's `status: "done"`
-in `migration-plan.json` (in place). `source-only` (synthetic) components are
-ported from their source `file`, not a live capture.
+conventions. When a porter signals done, mark it via `runner`:
+`parity plan set-status <name> done --dir <target.dir>/.parity`. `source-only`
+(synthetic) components are ported from their source `file`, not a live capture.
 After all `pending` are `done`: advance to `build-green`.
 
 ### build-green
