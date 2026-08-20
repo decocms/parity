@@ -593,6 +593,13 @@ export type Baseline = z.infer<typeof Baseline>;
 
 export const ParityRc = z.object({
   cep: z.string().default("01310-100"),
+  /**
+   * Site profile — scopes modules/flows/CEP. `commerce` runs everything
+   * (purchase journey, PLP/PDP, CEP); `content` (blog/custom, no storefront)
+   * drops the e2e commerce journey, scopes flows to the homepage, and skips
+   * CEP. Auto-detected from the platform when unset (issues #254/#255).
+   */
+  profile: z.enum(["commerce", "content"]).optional(),
   plpUrlHint: z.string().optional(),
   selectors: z
     .object({

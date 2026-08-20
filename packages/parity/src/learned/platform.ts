@@ -10,6 +10,34 @@ export type Platform =
   | "nuvemshop"
   | "custom";
 
+/**
+ * Site profile — the axis that decides whether commerce-only checks/flows make
+ * sense. A content/blog site has no PLP/PDP/cart/CEP, so running the purchase
+ * journey there is either a meaningless 100 or a spurious failure (issues
+ * #254/#255). Distinct from `Platform`: `Platform` says "how it's built",
+ * `SiteProfile` says "what it is".
+ */
+export type SiteProfile = "commerce" | "content";
+
+const COMMERCE_PLATFORMS: ReadonlySet<Platform> = new Set<Platform>([
+  "vtex",
+  "vtex-fs",
+  "shopify",
+  "salesforce-commerce",
+  "wake",
+  "nuvemshop",
+]);
+
+/**
+ * Map a detected platform to a default site profile. Known storefront
+ * platforms are commerce; a bare framework (`deco`) or an unrecognized stack
+ * (`custom`) defaults to content — the safe assumption for a site that showed
+ * no commerce signal. The user can always override with `--profile`.
+ */
+export function profileForPlatform(platform: Platform): SiteProfile {
+  return COMMERCE_PLATFORMS.has(platform) ? "commerce" : "content";
+}
+
 export interface PlatformDetectionInput {
   url: string;
   html?: string;
