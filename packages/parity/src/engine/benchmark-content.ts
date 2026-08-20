@@ -29,6 +29,49 @@ import {
 /** Max internal content pages to include in the journey (home + these). */
 const MAX_CONTENT_PAGES = 2;
 
+/**
+ * "The user sees the first content" signal — First Contentful Paint. This is the
+ * only fair home-load metric across sites with DIFFERENT rendering strategies:
+ * - networkidle (waitReady) never settles on a heavy section (Maps geocoding
+ *   100+ addresses) → inflates the SSR candidate to the full cap.
+ * - a visible-element selector times out on a fully-DEFERRED site (Fresh prod
+ *   lazy-loads everything) → inflates prod instead.
+ * FCP fires when the browser paints the first content (header/shell) — both an
+ * SSR and a deferred site reach it early, so it's apples-to-apples. Matches the
+ * vitals module's definition.
+ */
+async function waitForContentReady(page: import("playwright").Page, cap = 8_000): Promise<boolean> {
+  return page
+    .evaluate((capMs: number) => {
+      return new Promise<boolean>((resolve) => {
+        const seen = performance.getEntriesByName?.("first-contentful-paint")[0];
+        if (seen) return resolve(true);
+        let done = false;
+        const finish = (ok: boolean) => {
+          if (done) return;
+          done = true;
+          resolve(ok);
+        };
+        try {
+          const obs = new PerformanceObserver((list) => {
+            if (list.getEntries().some((e) => e.name === "first-contentful-paint")) {
+              obs.disconnect();
+              finish(true);
+            }
+          });
+          obs.observe({ type: "paint", buffered: true });
+          setTimeout(() => {
+            obs.disconnect();
+            finish(false);
+          }, capMs);
+        } catch {
+          finish(false);
+        }
+      });
+    }, cap)
+    .catch(() => false);
+}
+
 /** kebab a path into a stable step key: /blog/foo → nav-blog-foo. */
 function stepKeyForPath(path: string): string {
   const slug = path.replace(/^\/+|\/+$/g, "").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
@@ -139,11 +182,13 @@ async function contentPass(
     screenshots[label] = p;
   };
 
-  // ── home-load ── time to first content-ready (not networkidle).
-  let t = Date.now();
+  // ── home-load ── time to first VISIBLE content, not networkidle (a heavy
+  // section like Maps geocoding keeps the network busy long after the page is
+  // usable, which would inflate this to the full cap).
+  const t = Date.now();
   await page.goto(base, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => undefined);
-  await waitReady(page);
-  const homeOk = !(await pageLooksBroken(page));
+  const contentOk = await waitForContentReady(page);
+  const homeOk = contentOk && !(await pageLooksBroken(page));
   const steps: StepTiming[] = [
     { step: "home-load", ms: Date.now() - t, url: page.url(), ok: homeOk },
   ];
