@@ -1192,7 +1192,9 @@ async function captureBrand(page: import("playwright").Page): Promise<Brand> {
   const dataUri = async (url: string | null): Promise<string | null> => {
     if (!url) return null;
     const got = await browserFetchBytes(page, url);
-    return got ? `data:${got.contentType ?? "image/png"};base64,${got.buf.toString("base64")}` : null;
+    return got
+      ? `data:${got.contentType ?? "image/png"};base64,${got.buf.toString("base64")}`
+      : null;
   };
   try {
     const a = await collectSiteAssets(page);
@@ -1489,4 +1491,306 @@ function aggregatePaginationSteps(measured: PassResult[]): StepTiming[] {
     });
   }
   return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Content journey (#251) — sites with no PLP/PDP (blog/custom). Reuses the same
+// warm-context / median / Lighthouse scaffolding as the commerce path above;
+// only the journey changes: home-load → nav to content page A → nav to page B.
+// The commerce path (onePass/resolveTargetPaths/runSideBenchmark) is untouched.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Two internal content routes reused across sides — the content analog of TargetPaths. */
+export interface ContentPaths {
+  pageA: string;
+  pageB: string;
+}
+
+const CONTENT_LINK_JUNK =
+  /login|entrar|conta|account|carrinho|\bcart\b|wishlist|whatsapp|instagram|facebook|tiktok|pinterest|youtube|termos|privacidade|pol[ií]tica|cookie/i;
+
+/**
+ * From a list of raw hrefs found on the prod home, keep the internal content
+ * paths worth benchmarking: same-host, not the home, not commerce/social/legal
+ * junk, de-duplicated, in DOM order. Pure — unit-tested.
+ */
+export function filterContentPaths(hrefs: string[], prodBase: string): string[] {
+  let prodHost = "";
+  try {
+    prodHost = new URL(prodBase).host;
+  } catch {}
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const href of hrefs) {
+    let path: string;
+    try {
+      const u = new URL(href, prodBase);
+      if (u.host !== prodHost) continue;
+      path = u.pathname;
+    } catch {
+      continue;
+    }
+    if (path.length < 2 || path === "/") continue;
+    if (CONTENT_LINK_JUNK.test(path) || seen.has(path)) continue;
+    seen.add(path);
+    out.push(path);
+  }
+  return out;
+}
+
+async function pathLoads(base: string, path: string): Promise<boolean> {
+  try {
+    const res = await fetch(new URL(path, base).toString(), {
+      method: "HEAD",
+      redirect: "follow",
+      signal: AbortSignal.timeout(8_000),
+    });
+    return res.status >= 200 && res.status < 400;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Discover two internal content routes that return 2xx/3xx on BOTH sites.
+ * Reads the prod home's nav/header links in DOM order, drops commerce/social/
+ * legal junk, and keeps the first two distinct internal paths that load on prod
+ * AND cand — so the benchmark never measures a route the candidate lacks.
+ */
+export async function resolveContentPaths(opts: {
+  browser: Browser;
+  prodBase: string;
+  candBase: string;
+  viewport: Viewport;
+  rc: ParityRc;
+  learned?: LearnedSelectors;
+  platform?: Platform;
+  outDir: string;
+  onEvent?: (msg: string) => void;
+}): Promise<(ContentPaths & Brand) | null> {
+  const ctx = await newContext(opts.browser, {
+    viewport: opts.viewport,
+    diskCacheDisabled: true,
+    deviceScaleFactor: 1,
+    cohortCookieValue: "control",
+  });
+  try {
+    const page = await ctx.newPage();
+    await page
+      .goto(opts.prodBase, { waitUntil: "domcontentloaded", timeout: 30_000 })
+      .catch(() => undefined);
+    const flow: FlowContext = {
+      baseUrl: opts.prodBase,
+      side: "prod",
+      viewport: opts.viewport,
+      rc: opts.rc,
+      ctx,
+      outDir: opts.outDir,
+      learned: opts.learned,
+      platform: opts.platform,
+    };
+    await dismissAll(page, flow);
+    const brand = await captureBrand(page);
+    const hrefs = await page
+      .evaluate(() =>
+        Array.from(document.querySelectorAll("header a[href], nav a[href], a[href]"))
+          .map((a) => a.getAttribute("href"))
+          .filter((h): h is string => !!h),
+      )
+      .catch(() => [] as string[]);
+
+    const candidates = filterContentPaths(hrefs, opts.prodBase);
+
+    const ok: string[] = [];
+    for (const path of candidates) {
+      if (ok.length >= 2) break;
+      const [p, c] = await Promise.all([
+        pathLoads(opts.prodBase, path),
+        pathLoads(opts.candBase, path),
+      ]);
+      if (p && c) ok.push(path);
+    }
+    if (ok.length < 2) {
+      opts.onEvent?.(
+        `batedor content: só ${ok.length} rota(s) de conteúdo válida(s) nos dois sites (preciso de 2)`,
+      );
+      return null;
+    }
+    return { pageA: ok[0]!, pageB: ok[1]!, ...brand };
+  } finally {
+    await ctx.close().catch(() => undefined);
+  }
+}
+
+interface ContentPassResult {
+  home: StepTiming;
+  nav1: StepTiming;
+  nav2: StepTiming;
+  screenshots: SideBenchmark["screenshots"];
+}
+
+/** One content pass: home-load → click to page A → click to page B. `measure`
+ *  false = warmup (no screenshots). Readiness is `waitReady` (SPA+MPA fair),
+ *  not the product-image signal the commerce pass uses. */
+async function onePassContent(
+  page: import("playwright").Page,
+  ctx: FlowContext,
+  paths: ContentPaths,
+  measure: boolean,
+): Promise<ContentPassResult> {
+  const shot = async (label: string, fullPage: boolean): Promise<string> => {
+    if (!measure) return "";
+    const p = screenshotPath(ctx, `bench-${label}`).replace(/\.png$/, ".jpg");
+    await screenshotStable(page, { path: p, fullPage, quality: 92 });
+    return p;
+  };
+
+  const t = Date.now();
+  await page
+    .goto(ctx.baseUrl, { waitUntil: "domcontentloaded", timeout: 30_000 })
+    .catch(() => undefined);
+  await waitReady(page, 12_000);
+  const home: StepTiming = {
+    step: "home-load",
+    ms: Date.now() - t,
+    url: page.url(),
+    ok: !(await pageLooksBroken(page)),
+  };
+  await dismissAll(page, ctx);
+  await scrollPageInChunks(page).catch(() => undefined);
+  const homeShot = await shot("home", true);
+  await scrollToTop(page);
+
+  const urlA = new URL(paths.pageA, ctx.baseUrl).toString();
+  const a = await navigateWithHover(page, urlA, false); // click → content ready
+  const nav1: StepTiming = {
+    step: "nav-to-page-1",
+    ms: a.navMs,
+    url: page.url(),
+    ok: !(await pageLooksBroken(page)),
+    note: paths.pageA,
+  };
+  const shotA = await shot("page1", true);
+
+  const urlB = new URL(paths.pageB, ctx.baseUrl).toString();
+  const b = await navigateWithHover(page, urlB, false);
+  const nav2: StepTiming = {
+    step: "nav-to-page-2",
+    ms: b.navMs,
+    url: page.url(),
+    ok: !(await pageLooksBroken(page)),
+    note: paths.pageB,
+  };
+  const shotB = await shot("page2", true);
+
+  // Reuse the home/plp/pdp screenshot slots for home/pageA/pageB (renderer is
+  // generic over these keys — avoids widening the SideBenchmark type).
+  return { home, nav1, nav2, screenshots: { home: homeShot, plp: shotA, pdp: shotB } };
+}
+
+/** Content analog of runSideBenchmark: warm ONE context, measure the 3-phase
+ *  content journey, aggregate medians, Lighthouse on home + both content pages. */
+export async function runSideBenchmarkContent(
+  opts: RunSideOptions & { contentPaths: ContentPaths },
+): Promise<SideBenchmark> {
+  const emit = (m: string) => opts.onEvent?.(m);
+  const empty: SideBenchmark = {
+    side: opts.side,
+    viewport: opts.viewport,
+    base: opts.base,
+    steps: [],
+    paginationSteps: [],
+    totalMs: 0,
+    vitals: { home: { error: "not run" }, plp: { error: "not run" }, pdp: { error: "not run" } },
+    harPath: opts.harPath,
+    screenshots: {},
+  };
+
+  const ctx = await newContext(opts.browser, {
+    viewport: opts.viewport,
+    harPath: opts.harPath,
+    deviceScaleFactor: 1,
+    cohortCookieValue: "control",
+  });
+  const flowCtx: FlowContext = {
+    baseUrl: opts.base,
+    side: opts.side,
+    viewport: opts.viewport,
+    rc: opts.rc,
+    ctx,
+    outDir: opts.outDir,
+    learned: opts.learned,
+    platform: opts.platform,
+  };
+  const measured: ContentPassResult[] = [];
+  const screenshots: SideBenchmark["screenshots"] = {};
+  try {
+    const page = await ctx.newPage();
+    for (let r = 0; r < opts.warmupRuns; r++) {
+      emit(
+        `[${opts.viewport}/${opts.side}] aquecendo (conteúdo) — passe ${r + 1}/${opts.warmupRuns}`,
+      );
+      await onePassContent(page, flowCtx, opts.contentPaths, false);
+    }
+    const runs = Math.max(1, opts.measuredRuns);
+    for (let r = 0; r < runs; r++) {
+      emit(`[${opts.viewport}/${opts.side}] medindo conteúdo — passe ${r + 1}/${runs}`);
+      const res = await onePassContent(page, flowCtx, opts.contentPaths, true);
+      measured.push(res);
+      Object.assign(screenshots, res.screenshots);
+    }
+    await page.close().catch(() => undefined);
+  } catch (err) {
+    emit(`[${opts.viewport}/${opts.side}] erro na medição: ${(err as Error).message}`);
+  } finally {
+    await ctx.close().catch(() => undefined);
+  }
+
+  if (measured.length === 0) return { ...empty, screenshots };
+
+  const steps: StepTiming[] = [
+    aggregatePhase(
+      "home-load",
+      measured.map((m) => m.home),
+    ),
+    aggregatePhase(
+      "nav-to-page-1",
+      measured.map((m) => m.nav1),
+    ),
+    aggregatePhase(
+      "nav-to-page-2",
+      measured.map((m) => m.nav2),
+    ),
+  ];
+  const totalMs = steps.reduce((a, s) => a + s.ms, 0);
+
+  let vitals = empty.vitals;
+  if (opts.runVitals) {
+    emit(`[${opts.viewport}/${opts.side}] Lighthouse (home + 2 páginas de conteúdo)…`);
+    const ff = opts.viewport === "desktop" ? "desktop" : "mobile";
+    const lh = (id: string, url: string) =>
+      measureLighthouse(url, {
+        outDir: opts.lighthouseDir,
+        id: `${opts.side}-${opts.viewport}-${id}`,
+        formFactor: ff,
+      });
+    const [home, plp, pdp] = await Promise.all([
+      lh("home", opts.base),
+      lh("page1", new URL(opts.contentPaths.pageA, opts.base).toString()),
+      lh("page2", new URL(opts.contentPaths.pageB, opts.base).toString()),
+    ]);
+    vitals = { home, plp, pdp };
+  }
+
+  return {
+    side: opts.side,
+    viewport: opts.viewport,
+    base: opts.base,
+    steps,
+    paginationSteps: [],
+    totalMs,
+    vitals,
+    harPath: opts.harPath,
+    screenshots,
+  };
 }

@@ -308,6 +308,14 @@ product SPA shelf hop, and — only when the product has a colour variant — va
 Web Vitals come from Lighthouse (cold first visit) per viewport. A full HAR of the
 session is saved as `user-navigation-benchmark-<viewport>-<side>.har`.
 
+**Content sites** (blog/custom, no PLP/PDP) auto-switch to a `content` journey
+(`--journey content` to force): the scout picks two internal content routes that
+load on **both** sites (from the prod home's nav), and each side is measured on
+**home-load → click to page A → click to page B** with the same warm-context /
+median / Lighthouse scaffolding. This is exactly the click→content timing that a
+Speculation-Rules / hover-prefetch setup improves. The commerce journey above is
+unchanged.
+
 | Flag | What it does |
 | --- | --- |
 | `--prod <url>` / `--cand <url>` | Fresh ("before") and TanStack ("after") URLs (required) |
@@ -316,6 +324,7 @@ session is saved as `user-navigation-benchmark-<viewport>-<side>.har`.
 | `--measured-runs <n>` | Measured passes per side, reported as the median (default 3) |
 | `--paginations <n>` | How many times to scroll/paginate the PLP (default 3) |
 | `--plp <path>` | Pin the PLP path (skip auto-discovery), e.g. `/novidades` |
+| `--journey <type>` | `commerce` (home→PLP→PDP→variant) or `content` (home→page A→page B, for blog/custom sites with no PLP/PDP). Auto-detected from the platform when omitted (#251) |
 | `--no-vitals` | Skip the Lighthouse Web-Vitals pass (faster) |
 | `--no-auto-selectors` | Skip LLM selector discovery (defaults + learned only) |
 | `--lang <pt\|en>` | Default report language (the toggle switches live) |

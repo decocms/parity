@@ -4,13 +4,16 @@ import chalk from "chalk";
 import ora from "ora";
 import {
   type BenchmarkReport,
+  type ContentPaths,
   type SideBenchmark,
+  resolveContentPaths,
   resolveTargetPaths,
   runSideBenchmark,
+  runSideBenchmarkContent,
 } from "../engine/benchmark.ts";
 import { launchBrowser, userAgentFor } from "../engine/browser.ts";
 import { loadParityRc } from "../ignore/parser.ts";
-import { type Platform, detectPlatform } from "../learned/platform.ts";
+import { type Platform, detectPlatform, profileForPlatform } from "../learned/platform.ts";
 import { loadLearned } from "../learned/repo.ts";
 import { isLlmAvailable, providerLabel } from "../llm/client.ts";
 import { discoverSelectorsFromUrl, mergeDiscoveredSelectors } from "../llm/discover-selectors.ts";
@@ -36,6 +39,12 @@ export interface BenchmarkOptions {
   /** Default HTML report language (the PT/EN toggle can switch live). */
   lang?: string;
   open?: boolean;
+  /**
+   * Journey shape. `commerce` = home→PLP→pagination→PDP→variant (default for
+   * storefronts). `content` = home→content page A→content page B (blog/custom
+   * sites with no PLP/PDP). Auto-detected from the platform when omitted. #251.
+   */
+  journey?: "commerce" | "content";
 }
 
 function num(v: string | number, fallback: number): number {
@@ -96,6 +105,16 @@ export async function benchmarkCommand(opts: BenchmarkOptions): Promise<number> 
     /* discovery skipped */
   }
 
+  // Journey shape: explicit --journey wins; else auto from the platform profile
+  // (content site → content journey; storefront → commerce). #251.
+  const journey: "commerce" | "content" =
+    opts.journey === "content" || opts.journey === "commerce"
+      ? opts.journey
+      : profileForPlatform(platform) === "content"
+        ? "content"
+        : "commerce";
+  console.log(chalk.dim(`  journey: ${journey}${opts.journey ? "" : " (auto)"}`));
+
   const spinner = ora("Lançando browser…").start();
   const sides: SideBenchmark[] = [];
   let favicon: string | null = null;
@@ -108,52 +127,82 @@ export async function benchmarkCommand(opts: BenchmarkOptions): Promise<number> 
       console.log(chalk.bold(`\n  ── ${viewport} ─────────────────────────────`));
       const onEvent = (m: string) => console.log(chalk.dim(`  ${m}`));
 
-      // Scout ("batedor"): discover a PLP + PDP that WORK ON BOTH SITES, so we
-      // never measure a broken page. If nothing validates on both, abort with a
-      // clear message instead of benchmarking an error page.
-      onEvent("batedor: procurando PLP + PDP que funcionem nos DOIS sites…");
-      const targetPaths = await resolveTargetPaths({
+      const common = (side: Side, base: string) => ({
         browser,
-        prodBase: opts.prod,
-        candBase: opts.cand,
+        base,
+        side,
         viewport,
         rc,
         learned,
         platform,
         outDir: paths.screenshotsDir,
+        harPath: join(paths.harDir, `user-navigation-benchmark-${viewport}-${side}.har`),
+        lighthouseDir: join(paths.runDir, "lighthouse"),
+        warmupRuns,
+        measuredRuns,
+        paginations,
+        runVitals,
         onEvent,
       });
-      if (!targetPaths) {
-        console.error(
-          chalk.red(
-            `\n  ✗ batedor não achou uma PLP + PDP que funcionem nos dois sites (${viewport}).\n    Verifique se as URLs batem e/ou passe --plp com uma categoria que exista nos DOIS.`,
-          ),
-        );
-        return 2;
-      }
-      onEvent(`PLP: ${targetPaths.categoryPath} · PDP: ${targetPaths.productPath}`);
-      favicon ??= targetPaths.favicon;
-      logo ??= targetPaths.logo;
 
-      const runOne = (side: Side, base: string) =>
-        runSideBenchmark({
+      let runOne: (side: Side, base: string) => Promise<SideBenchmark>;
+      if (journey === "content") {
+        // Scout: 2 content routes that load on BOTH sites (no PLP/PDP needed).
+        onEvent("batedor: procurando 2 rotas de conteúdo que funcionem nos DOIS sites…");
+        const contentPaths:
+          | (ContentPaths & { favicon: string | null; logo: string | null })
+          | null = await resolveContentPaths({
           browser,
-          base,
-          side,
+          prodBase: opts.prod,
+          candBase: opts.cand,
           viewport,
           rc,
           learned,
           platform,
           outDir: paths.screenshotsDir,
-          harPath: join(paths.harDir, `user-navigation-benchmark-${viewport}-${side}.har`),
-          lighthouseDir: join(paths.runDir, "lighthouse"),
-          warmupRuns,
-          measuredRuns,
-          paginations,
-          runVitals,
-          targetPaths,
           onEvent,
         });
+        if (!contentPaths) {
+          console.error(
+            chalk.red(
+              `\n  ✗ batedor não achou 2 rotas de conteúdo que funcionem nos dois sites (${viewport}).\n    Verifique se as URLs batem, ou rode com --journey commerce se o site tiver PLP/PDP.`,
+            ),
+          );
+          return 2;
+        }
+        onEvent(`conteúdo: ${contentPaths.pageA} · ${contentPaths.pageB}`);
+        favicon ??= contentPaths.favicon;
+        logo ??= contentPaths.logo;
+        runOne = (side, base) => runSideBenchmarkContent({ ...common(side, base), contentPaths });
+      } else {
+        // Scout ("batedor"): discover a PLP + PDP that WORK ON BOTH SITES, so we
+        // never measure a broken page. If nothing validates on both, abort with a
+        // clear message instead of benchmarking an error page.
+        onEvent("batedor: procurando PLP + PDP que funcionem nos DOIS sites…");
+        const targetPaths = await resolveTargetPaths({
+          browser,
+          prodBase: opts.prod,
+          candBase: opts.cand,
+          viewport,
+          rc,
+          learned,
+          platform,
+          outDir: paths.screenshotsDir,
+          onEvent,
+        });
+        if (!targetPaths) {
+          console.error(
+            chalk.red(
+              `\n  ✗ batedor não achou uma PLP + PDP que funcionem nos dois sites (${viewport}).\n    Verifique se as URLs batem e/ou passe --plp com uma categoria que exista nos DOIS.`,
+            ),
+          );
+          return 2;
+        }
+        onEvent(`PLP: ${targetPaths.categoryPath} · PDP: ${targetPaths.productPath}`);
+        favicon ??= targetPaths.favicon;
+        logo ??= targetPaths.logo;
+        runOne = (side, base) => runSideBenchmark({ ...common(side, base), targetPaths });
+      }
       // prod and cand in parallel — halves wall time; Lighthouse runs after each
       // side closes its own context, so they never fight over the CPU.
       const [prod, cand] = await Promise.all([
