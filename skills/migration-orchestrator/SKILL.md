@@ -33,8 +33,8 @@ whole message is JSON.
 
 ```
 discovery → reconcile → repo-setup → template-bootstrap → workflows
-→ [migrate-script | porting] → cleanup → build-green → fallbacks → triage → fix → parity
-→ [loop back to triage if score < target] → benchmark → done
+→ [migrate-script | porting] → cleanup → build-green → fallbacks → nav-strategy
+→ triage → fix → parity → [loop back to triage if score < target] → benchmark → done
 ```
 
 **Decision at porting fork:**
@@ -248,7 +248,22 @@ CLS + blank no-JS render. Fix them BEFORE parity so the vitals run isn't pollute
 3. **Below the fold**: spawn `fallbacker` per section. It measures the real
    rendered size via `parity section --computed-styles --json` and writes a
    skeleton of matching dimensions (zero CLS when it defers).
-4. After all are handled: `bun run generate`, rebuild, advance to `triage`.
+4. After all are handled: `bun run generate`, rebuild, advance to `nav-strategy`.
+
+### nav-strategy
+Decide per-route navigation: SPA (client-side `<Link>`, instant, prefetch on
+hover) vs full reload (`<a href>`, fresh SSR each nav). The migrated nav
+components usually ship plain `<a>` everywhere → every click is a full reload.
+
+1. Spawn `spa-strategist` with `source.kind`, the route set (`src/routes/` +
+   `.deco/blocks/pages-*.json`), and `prodUrl`. It returns a per-route plan.
+   - Commerce: PDP → SPA; PLP/home/cart/checkout → reload.
+   - Content (davinci): most internal routes (blog, especialidades, articles) →
+     SPA; heavy-embed / form-roundtrip routes → reload.
+2. Hand the plan to a `porter`/`fixer`: in the nav components, convert
+   `<a href="X">` → `<Link to="X">` for routes marked `spa`; leave `<a>` for
+   `reload`, external, and `#anchor` links.
+3. Rebuild, advance to `triage`.
 
 ### triage
 Spawn `triager`. It surveys the migrated repo and returns issue drafts.
