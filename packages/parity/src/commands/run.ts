@@ -13,10 +13,7 @@ import { capturePage, installVitalsCollector } from "../engine/collect.ts";
 import { runFlow } from "../engine/flows.ts";
 import { promptForModuleSelection } from "../engine/interactive-module-prompt.ts";
 import { disableInteractive, isInteractiveMode } from "../engine/interactive-selector-prompt.ts";
-import {
-  fetchHomeHtml,
-  runSelectorDiscoveryPass,
-} from "../engine/selector-discovery-pass.ts";
+import { fetchHomeHtml, runSelectorDiscoveryPass } from "../engine/selector-discovery-pass.ts";
 import { discoverPagesFromSitemap } from "../engine/sitemap-discover.ts";
 import {
   SCORE_VERSION,
@@ -183,6 +180,8 @@ export interface RunOptions {
   llmModel?: string;
   /** Override the default tier (haiku/sonnet/opus). Issue #66. */
   llmTierDefault?: "haiku" | "sonnet" | "opus";
+  /** Bump the reasoning-heavy features (explain/aggregation/visual) to opus. #256. */
+  llmPremium?: boolean;
   /** Force every LLM call to use this exact model ID. Issue #66. */
   llmModelDefault?: string;
   /**
@@ -385,6 +384,9 @@ function applyLlmOptions(opts: RunOptions): string | null {
   }
   if (opts.llmModelDefault) {
     applyModelOverrides({ defaultModel: opts.llmModelDefault });
+  }
+  if (opts.llmPremium) {
+    applyModelOverrides({ premium: true });
   }
   return null;
 }
@@ -836,9 +838,7 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
     ): Promise<{ captures: FlowCapture[]; pages: PageCapture[] }> => {
       const baseUrl = side === "prod" ? opts.prod : opts.cand;
       const harPath = join(paths.harDir, `${viewport}-${side}.har`);
-      const tracePath = traceEnabled
-        ? join(paths.tracesDir, `${viewport}-${side}.zip`)
-        : null;
+      const tracePath = traceEnabled ? join(paths.tracesDir, `${viewport}-${side}.zip`) : null;
       const ctx = await newContext(browser!, {
         viewport,
         harPath,

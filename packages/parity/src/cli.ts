@@ -174,6 +174,10 @@ program
     "Force every LLM call to use this exact model ID, ignoring per-feature defaults. Issue #66.",
   )
   .option(
+    "--llm-premium",
+    "Bump the reasoning-heavy features (explain/issue-aggregation/visual-diff) to opus. Defaults are sonnet-first for cost/latency (opus blew the 60s timeout on most runs); opt into opus for hard fixes. Issue #256.",
+  )
+  .option(
     "--no-interactive",
     "Disable the interactive selector prompt that auto-fires in a TTY without an LLM provider. Use in scripts and CI where stdin is technically a TTY but you don't want to pause. Issue #72.",
   )
