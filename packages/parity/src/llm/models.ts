@@ -4,8 +4,9 @@
  * model IDs. Users can override per-feature or globally via CLI flags.
  *
  * The default map biases toward the cheapest model that still does the job:
- * selector discovery and step recovery need fast small calls; visual diff and
- * aggregation need sonnet-class reasoning; explain needs opus-class depth.
+ * selector discovery and step recovery need fast small calls; visual diff,
+ * aggregation, and explain default to sonnet-class reasoning. Opt into opus on
+ * the reasoning-heavy calls with `--llm-premium` (issue #256).
  */
 
 export type Feature =
@@ -47,7 +48,13 @@ export type Provider = "anthropic" | "openrouter" | "claude-agent-sdk";
  * Issue #102 (regression from #66).
  *
  * Want the old Haiku-everywhere behavior to save cost? Use
- * `--llm-tier-default haiku` to flip everything in one shot.
+ * `--llm-tier-default haiku` to flip everything in one shot. Want opus on the
+ * reasoning-heavy calls? Use `--llm-premium` (see `PREMIUM_FEATURE_TIER`).
+ *
+ * `explain` defaults to **sonnet**, not opus (issue #256): on real runs opus
+ * blew the 60s LLM timeout on almost every aggregate/fix and cost the most,
+ * while sonnet produces equivalent patches for the vast majority of fixes.
+ * Opt into opus for the hard cases with `--llm-premium`.
  */
 export const DEFAULT_FEATURE_TIER: Record<Feature, ModelTier> = {
   "selector-discovery": "sonnet",
@@ -58,10 +65,22 @@ export const DEFAULT_FEATURE_TIER: Record<Feature, ModelTier> = {
   "section-understanding": "sonnet",
   "visual-diff": "sonnet",
   "issue-aggregation": "sonnet",
-  explain: "opus",
+  explain: "sonnet",
   // M5 `parity extract` optional component-relabeling pass — same tier as
   // section-understanding (reads compacted HTML, no vision needed).
   "component-detection": "sonnet",
+};
+
+/**
+ * `--llm-premium` overlay: bumps only the reasoning-heavy features to opus,
+ * leaving the mechanical ones (selectors, search-terms) on their cheaper
+ * defaults. Applied above `DEFAULT_FEATURE_TIER` but below an explicit
+ * `--llm-tier-default`/per-feature override (issue #256).
+ */
+export const PREMIUM_FEATURE_TIER: Partial<Record<Feature, ModelTier>> = {
+  explain: "opus",
+  "issue-aggregation": "opus",
+  "visual-diff": "opus",
 };
 
 /**
@@ -91,6 +110,7 @@ export const PROVIDER_MODELS: Record<Provider, Record<ModelTier, string>> = {
 const featureOverrides: Partial<Record<Feature, string>> = {};
 let defaultTierOverride: ModelTier | null = null;
 let defaultModelOverride: string | null = null;
+let premiumEnabled = false;
 
 /**
  * Apply CLI flag overrides. Call once at startup. Pass `null`/undefined to clear.
@@ -102,6 +122,7 @@ export function applyModelOverrides(opts: {
   perFeature?: Partial<Record<Feature, string>>;
   defaultTier?: ModelTier | null;
   defaultModel?: string | null;
+  premium?: boolean;
 }): void {
   if (opts.perFeature) {
     for (const k of Object.keys(opts.perFeature) as Feature[]) {
@@ -111,12 +132,14 @@ export function applyModelOverrides(opts: {
   }
   if (opts.defaultTier !== undefined) defaultTierOverride = opts.defaultTier;
   if (opts.defaultModel !== undefined) defaultModelOverride = opts.defaultModel;
+  if (opts.premium !== undefined) premiumEnabled = opts.premium;
 }
 
 export function resetModelOverrides(): void {
   for (const k of Object.keys(featureOverrides) as Feature[]) delete featureOverrides[k];
   defaultTierOverride = null;
   defaultModelOverride = null;
+  premiumEnabled = false;
 }
 
 /**
@@ -124,13 +147,18 @@ export function resetModelOverrides(): void {
  *   1. `--llm-model-default <model>` (defaultModelOverride) — wins everything
  *   2. `--llm-model <feat>=<model>` (featureOverrides[feature])
  *   3. `--llm-tier-default <tier>` (defaultTierOverride) + provider map
- *   4. DEFAULT_FEATURE_TIER[feature] + provider map
+ *   4. `--llm-premium` (PREMIUM_FEATURE_TIER overlay, reasoning-heavy → opus)
+ *   5. DEFAULT_FEATURE_TIER[feature] + provider map
  */
 export function resolveModel(feature: Feature, provider: Provider): string {
   if (defaultModelOverride) return defaultModelOverride;
   const perFeature = featureOverrides[feature];
   if (perFeature) return perFeature;
-  const tier = defaultTierOverride ?? DEFAULT_FEATURE_TIER[feature];
+  const tier =
+    defaultTierOverride ??
+    (premiumEnabled
+      ? (PREMIUM_FEATURE_TIER[feature] ?? DEFAULT_FEATURE_TIER[feature])
+      : DEFAULT_FEATURE_TIER[feature]);
   return PROVIDER_MODELS[provider][tier];
 }
 

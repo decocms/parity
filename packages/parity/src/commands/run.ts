@@ -187,6 +187,8 @@ export interface RunOptions {
   llmModel?: string;
   /** Override the default tier (haiku/sonnet/opus). Issue #66. */
   llmTierDefault?: "haiku" | "sonnet" | "opus";
+  /** Bump the reasoning-heavy features (explain/aggregation/visual) to opus. #256. */
+  llmPremium?: boolean;
   /** Force every LLM call to use this exact model ID. Issue #66. */
   llmModelDefault?: string;
   /**
@@ -389,6 +391,9 @@ function applyLlmOptions(opts: RunOptions): string | null {
   }
   if (opts.llmModelDefault) {
     applyModelOverrides({ defaultModel: opts.llmModelDefault });
+  }
+  if (opts.llmPremium) {
+    applyModelOverrides({ premium: true });
   }
   return null;
 }
