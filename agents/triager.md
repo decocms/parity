@@ -13,15 +13,19 @@ Read-only. You receive: `target_dir`, `build_ok` (bool), `dev_log_path` (opt),
 
 1. **Build gate**: is `build_ok` false? If yes, that's a critical issue.
 2. **Runtime**: read `dev_log_path | tail -80`. Grep for ERROR/WARN/fail/is not a function.
-2b. **Usage check before filing component bugs**: for any bug found in
-   `src/components/ui/` or `src/hooks/`, first verify the file has callers:
+2b. **Dead-code check before filing component bugs**: for any bug found in
+   `src/components/ui/` or `src/hooks/`, first check if the file is referenced
+   by the CMS pages (source of truth = `.deco/blocks/`):
    ```bash
-   grep -r "<ComponentName>\|from.*<filename>" src/ --include="*.tsx" --include="*.ts" -l \
-     | grep -v "^<the file itself>$" | wc -l
+   # Is the component's parent section in .deco?
+   grep -rh "__resolveType" .deco/blocks/ 2>/dev/null | grep -o '"site/[^"]*"' | tr -d '"'
+   # Does any needed section import this file?
+   grep -r "<basename_no_ext>" src/sections/ --include="*.tsx" -l 2>/dev/null | wc -l
    ```
-   If count is **0** → classify as `{severity: "low", category: "infra"}` with title
-   "Dead template code: <file> — no callers, safe to delete". Do NOT report the
-   internal bug as critical/high. The cleanup phase handles these.
+   If the component has **0** callers among CMS-referenced sections → it is
+   dead template scaffolding. Classify as:
+   `{severity: "low", category: "infra", title: "Dead template code: <file> — not referenced in .deco/blocks, safe to delete"}`
+   Do NOT report internal bugs in dead code as critical/high.
 3. **Missing sections**: compare `src/components/index.tsx` exports against
    migration-plan.json `components` where `status !== "done"`.
 4. **FastStore 3-point invariant** (if platform === faststore-v4):
