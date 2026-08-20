@@ -13,6 +13,8 @@ import { cartInteractionsFlow } from "./cart-interactions-flow.ts";
 import { cartRevealModeDivergence } from "./cart-reveal-mode.ts";
 import { consoleErrorsBaseline } from "./console-errors.ts";
 import { cookieCepModalCls } from "./cookie-cep-modal-cls.ts";
+import { faviconParity } from "./favicon-parity.ts";
+import { fontParity } from "./font-parity.ts";
 import { footerLinksHealth } from "./footer-links-health.ts";
 import { htmlStructuralDiff } from "./html-structural.ts";
 import { httpStatusParity } from "./http-status.ts";
@@ -20,8 +22,10 @@ import { imageLoadingHealth } from "./image-health.ts";
 import { lazySectionPresence } from "./lazy-sections.ts";
 import { loginFlow } from "./login-flow.ts";
 import { metaSeoParity } from "./meta-seo.ts";
+import { navLinksHealth } from "./nav-links-health.ts";
 import { networkSummaryDelta } from "./network-summary.ts";
 import { notFoundParity } from "./not-found-parity.ts";
+import { ssrNoJs } from "./ssr-no-js.ts";
 import { pdpBreadcrumbs } from "./pdp-breadcrumbs.ts";
 import { pdpGalleryRelated } from "./pdp-gallery-related.ts";
 import { pictureMissingDims } from "./picture-missing-dims.ts";
@@ -98,6 +102,11 @@ export const ALL_CHECKS: Check[] = [
   plpSorting,
   spaNavigationFlow,
   serverFnHoverFlood,
+  // Portal-davinci run gaps
+  faviconParity,
+  fontParity,
+  ssrNoJs,
+  navLinksHealth,
 ];
 
 /**
@@ -140,6 +149,10 @@ export const ALL_CHECKS_BY_NAME: Record<string, Check> = {
   "plp-sorting": plpSorting,
   "spa-navigation-flow": spaNavigationFlow,
   "serverfn-hover-flood": serverFnHoverFlood,
+  "favicon-parity": faviconParity,
+  "font-parity": fontParity,
+  "ssr-no-js": ssrNoJs,
+  "nav-links-health": navLinksHealth,
 };
 
 /**
