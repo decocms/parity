@@ -187,6 +187,27 @@ shows a small score chip per module. Score trend (`previousRun`) only compares
 against a prior run that scored the **same module set** — a `--only e2e` run
 is never diffed against a full run's composite.
 
+## Site profile: `--profile` (commerce vs content)
+
+Not every site is a storefront. A content/blog site has no PLP, PDP, cart, or
+CEP — running the commerce purchase journey there is either a meaningless 100
+or a spurious failure (issues #254/#255).
+
+```bash
+# force content scoping (blog / custom site with no storefront)
+parity run --prod https://blog.example.com --cand https://cand.example.com --profile content
+```
+
+- **`commerce`** — runs everything (purchase journey, PLP/PDP, CEP). The default
+  for any recognized storefront platform (VTEX, Shopify, Wake, Nuvemshop, …).
+- **`content`** — drops the `e2e` module, scopes flows to the **homepage** (never
+  plp/pdp), and skips CEP. Every scope decision is printed, never silent.
+- **Auto-detection** — when `--profile` is omitted, the profile is derived from
+  the platform detected on the prod home page. A bare framework (`deco`) or an
+  unrecognized stack (`custom`) defaults to `content`; a failed fetch falls back
+  to `commerce` (unchanged behavior). Explicit `--profile`/`--only`/`--skip`
+  always win.
+
 ## Visual Diff tab
 
 When `--visual-pages > 0` AND an LLM provider is configured, the report's **Visual Diff** tab shows per page:
