@@ -280,7 +280,53 @@ function renderVitals(prod: SideBenchmark, cand: SideBenchmark, lang: string): s
       <thead><tr><th></th><th>LCP</th><th>FCP</th><th>TTFB</th><th>TBT</th><th>CLS</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
+    ${renderOpportunities(cand, lang)}
   </div>`;
+}
+
+/**
+ * Surface Lighthouse's actionable opportunities for the CANDIDATE (aggregated
+ * across pages, deduped by audit, biggest savings first). Lighthouse already
+ * computes these — the report just wasn't showing them (#264). These are the
+ * per-audit fixes (render-block, unused JS, lazy LCP, oversized images…).
+ */
+function renderOpportunities(cand: SideBenchmark, lang: string): string {
+  const byId = new Map<string, { title: string; ms: number; bytes: number; display?: string }>();
+  for (const page of ["home", "plp", "pdp"] as const) {
+    const v = cand.vitals[page];
+    if (!v || "error" in v || !v.opportunities) continue;
+    for (const op of v.opportunities) {
+      const cur = byId.get(op.id);
+      // Keep the worst (max savings) occurrence across pages.
+      if (!cur || op.savingsMs > cur.ms || op.savingsBytes > cur.bytes) {
+        byId.set(op.id, {
+          title: op.title,
+          ms: Math.max(op.savingsMs, cur?.ms ?? 0),
+          bytes: Math.max(op.savingsBytes, cur?.bytes ?? 0),
+          display: op.displayValueValue ?? cur?.display,
+        });
+      }
+    }
+  }
+  const items = [...byId.values()]
+    .sort((a, b) => b.ms - a.ms || b.bytes - a.bytes)
+    .slice(0, 12);
+  if (items.length === 0) return "";
+  const li = items
+    .map((o) => {
+      const save = o.ms >= 50
+        ? `${(o.ms / 1000).toFixed(2)}s`
+        : o.bytes > 0
+          ? `${Math.round(o.bytes / 1024)} KiB`
+          : (o.display ?? "");
+      return `<li><span class="op-save">${save}</span> ${o.title}</li>`;
+    })
+    .join("");
+  return `
+    <div class="opps">
+      <div class="eyebrow">${L("OPORTUNIDADES (LIGHTHOUSE, CANDIDATO)", "OPPORTUNITIES (LIGHTHOUSE, CANDIDATE)", lang)}</div>
+      <ul class="op-list">${li}</ul>
+    </div>`;
 }
 
 // ── one viewport block ───────────────────────────────────────────────────────

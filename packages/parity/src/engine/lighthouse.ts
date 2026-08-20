@@ -15,12 +15,93 @@ import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+/** One actionable Lighthouse audit (opportunity or failing diagnostic). */
+export interface LhOpportunity {
+  /** Audit id, e.g. "render-blocking-resources", "unused-javascript". */
+  id: string;
+  /** Human title from the report. */
+  title: string;
+  /** Estimated wall-clock savings (ms), when the audit reports it. */
+  savingsMs: number;
+  /** Estimated byte savings, when the audit reports it. */
+  savingsBytes: number;
+  /** Lighthouse's own short value, e.g. "Potential savings of 690 ms". */
+  displayValue?: string;
+  /** 0..1 audit score (lower = worse); null for informative audits. */
+  score: number | null;
+}
+
 export interface LhSample {
   lcp: number | null;
   cls: number | null;
   fcp: number | null;
   ttfb: number | null;
   tbt: number | null;
+  /** Actionable audits (render-block, unused JS, lazy LCP, oversized images…). */
+  opportunities: LhOpportunity[];
+}
+
+// Curated set of actionable audits worth reporting even when Lighthouse doesn't
+// tag them as an "opportunity" (some are diagnostics). Anything with a real
+// overallSavingsMs/Bytes is picked up generically regardless of this list.
+const ACTIONABLE_AUDIT_IDS = new Set([
+  "render-blocking-resources",
+  "unused-javascript",
+  "unused-css-rules",
+  "unminified-javascript",
+  "unminified-css",
+  "uses-responsive-images",
+  "uses-optimized-images",
+  "modern-image-formats",
+  "offscreen-images",
+  "uses-rel-preconnect",
+  "uses-rel-preload",
+  "server-response-time",
+  "redirects",
+  "legacy-javascript",
+  "font-display",
+  "lcp-lazy-loaded",
+  "prioritize-lcp-image",
+  "total-byte-weight",
+  "dom-size",
+  "bootup-time",
+  "mainthread-work-breakdown",
+  "third-party-summary",
+]);
+
+/** Extract actionable audits from a Lighthouse report's `audits` map. */
+export function extractOpportunities(
+  audits: Record<string, LhAudit>,
+  minSavingsMs = 50,
+): LhOpportunity[] {
+  const out: LhOpportunity[] = [];
+  for (const [id, a] of Object.entries(audits)) {
+    if (!a) continue;
+    const savingsMs = a.details?.overallSavingsMs ?? a.numericValue ?? 0;
+    const savingsBytes = a.details?.overallSavingsBytes ?? 0;
+    const scored = typeof a.score === "number" && a.score < 0.9;
+    const hasSavings = (a.details?.overallSavingsMs ?? 0) >= minSavingsMs || savingsBytes > 0;
+    const curated = ACTIONABLE_AUDIT_IDS.has(id) && (scored || hasSavings);
+    if (!hasSavings && !curated) continue;
+    out.push({
+      id,
+      title: a.title ?? id,
+      savingsMs: Math.round(a.details?.overallSavingsMs ?? 0),
+      savingsBytes: Math.round(savingsBytes),
+      displayValue: a.displayValue,
+      score: typeof a.score === "number" ? a.score : null,
+    });
+  }
+  // Biggest wins first (ms, then bytes).
+  return out.sort((x, y) => y.savingsMs - x.savingsMs || y.savingsBytes - x.savingsBytes);
+}
+
+interface LhAudit {
+  title?: string;
+  score?: number | null;
+  numericValue?: number;
+  displayValue?: string;
+  details?: { overallSavingsMs?: number; overallSavingsBytes?: number };
 }
 
 export type LhResult = LhSample | { error: string };
@@ -101,7 +182,7 @@ async function measureLighthouseOnce(
     proc.on("error", (err) => resolve({ code: 1, stderr: err.message }));
   });
   let report: {
-    audits: Record<string, { numericValue?: number }>;
+    audits: Record<string, LhAudit>;
     runtimeError?: { code: string; message: string };
   };
   try {
@@ -131,5 +212,6 @@ async function measureLighthouseOnce(
     fcp: audits["first-contentful-paint"]?.numericValue ?? null,
     ttfb: audits["server-response-time"]?.numericValue ?? null,
     tbt: audits["total-blocking-time"]?.numericValue ?? null,
+    opportunities: extractOpportunities(audits),
   };
 }
