@@ -68,7 +68,7 @@ phase), `--viewports`. Page discovery falls back to the deco pages loader when a
 site ships no `sitemap.xml`. Fast-sweep to localize, then a scoped real pass to confirm.
 Lighthouse mode also captures the other three category scores (accessibility/
 best-practices/seo, prod-vs-cand chips + `lighthouse-scores` check that flags any
-category worse than prod — "equal or better") and a **Navegação agêntica** composite
+category worse than prod — "equal or better") and a **Agentic Navigation** composite
 (agent-accessibility audits + llms.txt quality) in the Vitals tab.
 
 ## `parity cache` — CDN cache opportunities (cand-side)
