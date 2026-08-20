@@ -13,8 +13,11 @@ name: Publish
 #     in the PR and CI respects it.
 #   - Otherwise auto-increment the PATCH from the latest published version.
 # Either way the next version is always > npm, so every merge publishes exactly
-# once. CI commits the resolved version + tag back to main (best-effort; a
-# GITHUB_TOKEN push does NOT re-trigger this workflow, so no loop).
+# once. `main` is branch-protected, so CI does NOT commit the bump back — npm is
+# the source of truth and the version is recomputed from it each run. The git tag
+# + GitHub release are created via `gh release create --target <sha>` (tag
+# creation isn't blocked by branch protection), so the repo package.json version
+# just acts as a floor / manual minor-major override, and may lag npm.
 #
 # DO NOT RENAME THIS FILE: the npm trusted-publisher rule is bound to the
 # workflow *filename* (publish.yml) — renaming it breaks OIDC publishing.
@@ -123,22 +126,18 @@ jobs:
         working-directory: packages/parity
         run: npm publish
 
-      - name: Commit version bump + tag back to main
-        # Best-effort: npm is the source of truth. If the push is rejected
-        # (branch protection / main advanced), the publish already happened —
-        # warn, don't fail. Next merge recomputes from npm regardless.
-        continue-on-error: true
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore(release): ${{ steps.version.outputs.next }} [skip ci]" || echo "nothing to commit"
-          git tag "${{ steps.version.outputs.tag }}"
-          git push origin "HEAD:main" --follow-tags || echo "::warning::could not push version bump back to main; npm already has ${{ steps.version.outputs.next }}"
-
-      - name: Create GitHub release
+      - name: Tag + GitHub release
+        # `main` is branch-protected, so pushing the version bump back is
+        # blocked. We don't need it: npm is the source of truth and the
+        # Compute step derives the next version from npm every run (the repo's
+        # package.json version is just a floor / manual minor-major override).
+        # `gh release create --target <sha>` creates the tag ref remotely at the
+        # published commit — tag creation is NOT blocked by branch protection —
+        # and the release in one call, no `git push` to main required.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${{ steps.version.outputs.tag }}" \
+            --target "$GITHUB_SHA" \
             --title "${{ steps.version.outputs.tag }}" \
             --generate-notes
