@@ -13,6 +13,15 @@ Read-only. You receive: `target_dir`, `build_ok` (bool), `dev_log_path` (opt),
 
 1. **Build gate**: is `build_ok` false? If yes, that's a critical issue.
 2. **Runtime**: read `dev_log_path | tail -80`. Grep for ERROR/WARN/fail/is not a function.
+2b. **Usage check before filing component bugs**: for any bug found in
+   `src/components/ui/` or `src/hooks/`, first verify the file has callers:
+   ```bash
+   grep -r "<ComponentName>\|from.*<filename>" src/ --include="*.tsx" --include="*.ts" -l \
+     | grep -v "^<the file itself>$" | wc -l
+   ```
+   If count is **0** → classify as `{severity: "low", category: "infra"}` with title
+   "Dead template code: <file> — no callers, safe to delete". Do NOT report the
+   internal bug as critical/high. The cleanup phase handles these.
 3. **Missing sections**: compare `src/components/index.tsx` exports against
    migration-plan.json `components` where `status !== "done"`.
 4. **FastStore 3-point invariant** (if platform === faststore-v4):

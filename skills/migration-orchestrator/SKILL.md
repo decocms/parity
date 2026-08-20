@@ -33,7 +33,7 @@ whole message is JSON.
 
 ```
 discovery → reconcile → repo-setup → template-bootstrap → workflows
-→ [migrate-script | porting] → build-green → triage → fix → parity
+→ [migrate-script | porting] → cleanup → build-green → triage → fix → parity
 → [loop back to triage if score < target] → benchmark → done
 ```
 
@@ -143,6 +143,48 @@ bun run generate 2>&1 | tail -20
 ```
 Note: deco-fresh sites have no `package.json` — skip `bun run predev`. The
 Bootstrap phase of `deco-migrate` creates `package.json` and runs install.
+After: advance to `cleanup`.
+
+### cleanup
+Remove template scaffolding that does not belong to this site's context.
+The storefront-tanstack template ships e-commerce infrastructure (cart, wishlist,
+user, product selectors) that content/blog sites never use. Leaving dead code:
+- misleads the `triager` into filing bugs against unused files
+- bloats the bundle
+- adds confusion for future maintainers
+
+**Step 1 — detect platform context from state:**
+- `source.platform === "custom"` (no commerce) → run commerce dead-code sweep
+- `source.platform === "vtex"` or `"shopify"` → skip (all hooks/components are needed)
+- Unknown / not set → run the sweep conservatively (only delete if zero callers)
+
+**Step 2 — find unused template files via `runner`:**
+
+For each candidate file in `src/components/ui/` and `src/hooks/`:
+```bash
+# A file is dead if it has no importers outside itself
+# Run in target_dir:
+for f in src/components/ui/*.tsx src/hooks/*.ts; do
+  name=$(basename $f)
+  callers=$(grep -r "$name\|$(basename $f .tsx)\|$(basename $f .ts)" src/ \
+            --include="*.tsx" --include="*.ts" -l 2>/dev/null | grep -v "^$f$" | wc -l)
+  echo "$callers $f"
+done | sort -n | head -30
+```
+
+Files with `0` callers outside themselves are candidates for deletion.
+
+**Step 3 — delete confirmed dead files:**
+
+Delete them via `git rm`. A file is safe to delete when:
+- 0 importers outside itself AND
+- It is not a shared utility (e.g. `clx.ts`, `Image.tsx`, `Icon.tsx`, `Seo.tsx` — keep these)
+
+**Step 4 — commit:**
+```bash
+git add -A && git commit -m "chore(cleanup): remove template dead code for <platform> site"
+```
+
 After: advance to `build-green`.
 
 ### porting (vtex-io / live-only)
