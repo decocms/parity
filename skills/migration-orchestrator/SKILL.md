@@ -34,7 +34,8 @@ whole message is JSON.
 ```
 discovery → reconcile → repo-setup → template-bootstrap → workflows
 → [migrate-script | porting] → cleanup → build-green → fallbacks → nav-strategy
-→ triage → fix → parity → [loop back to triage if score < target] → benchmark → done
+→ performance → triage → fix → parity → [loop back to triage if score < target]
+→ benchmark → done
 ```
 
 **Decision at porting fork:**
@@ -263,7 +264,24 @@ components usually ship plain `<a>` everywhere → every click is a full reload.
 2. Hand the plan to a `porter`/`fixer`: in the nav components, convert
    `<a href="X">` → `<Link to="X">` for routes marked `spa`; leave `<a>` for
    `reload`, external, and `#anchor` links.
-3. Rebuild, advance to `triage`.
+3. Rebuild, advance to `performance`.
+
+### performance (tanstack-deco)
+Turn Lighthouse/PageSpeed opportunities into fixes BEFORE parity, so the score
+reflects an optimized site. The `run` vitals are browser-measured and optimistic;
+Lighthouse (throttled) is what PageSpeed and real users see.
+
+1. **Get opportunities.** Run `parity benchmark` (or a `parity vitals` pass) via
+   `runner` — its Lighthouse pass writes `sides[].vitals[page].opportunities` to
+   `report.json` (render-block, unused-js, lcp-lazy, oversized images, etc.).
+2. **Apply the catalog.** Spawn `perf-optimizer` with those opportunities. It maps
+   each audit to a known transform: async font, eager+fetchpriority LCP image,
+   YouTube/embed facade, defer-until-visible for heavy below-fold embeds,
+   right-size images, `public/_headers` immutable, remove unused preconnect.
+3. **Never trade SEO/no-JS for score**: async the font not the content, facades
+   keep the crawlable thumbnail, don't lazy the main app.css, keep 3rd-party
+   parity scripts (GTM/FB) — defer, don't delete.
+4. Rebuild, re-measure, advance to `triage`.
 
 ### triage
 Spawn `triager`. It surveys the migrated repo and returns issue drafts.
