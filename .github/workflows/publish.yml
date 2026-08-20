@@ -1,92 +1,55 @@
 name: Publish
 
-# Triggers when a commit on `main` changes `package.json` version.
+# Auto-publish on every merge to `main`.
 #
-# Maintainer flow:
-#   1. Make changes, bump version manually:
-#        npm version patch    # or minor / major
-#      (this updates package.json AND creates a local commit)
-#   2. Push to main (or open a PR; bump can also be reviewed before merge).
-#   3. On push, this workflow compares `package.json` version vs the
-#      currently published npm version. If they differ, it publishes to
-#      npm with provenance and creates a `vX.Y.Z` GitHub release with
-#      auto-generated notes (commit log since the previous tag).
+# Model: each push to main publishes a new @decocms/parity version to npm — no
+# manual bump ceremony, so features never get stuck unpublished (the bug the
+# monorepo introduced: `npm version` at the root bumped the private wrapper, not
+# packages/parity, so the old path-gated trigger never fired).
 #
-# Why this shape (vs release-please):
-#   - GitHub's default `GITHUB_TOKEN` cannot create or approve pull
-#     requests on most orgs (org-level setting). release-please needs
-#     that permission for its "release PR" pattern and silently fails
-#     when the setting is off.
-#   - The version-in-package.json model avoids PR creation entirely:
-#     the bump IS the human-reviewed change, and the workflow only
-#     publishes + tags. Default `GITHUB_TOKEN` already has `contents:
-#     write` (for tags/releases) and we use OIDC trusted publishing
-#     for npm — no extra secrets, no PAT, no token rotation.
+# Version selection (computed in CI, see the "Compute next version" step):
+#   - If packages/parity/package.json version is GREATER than what's on npm, use
+#     it verbatim — this is how you cut an intentional minor/major: bump that file
+#     in the PR and CI respects it.
+#   - Otherwise auto-increment the PATCH from the latest published version.
+# Either way the next version is always > npm, so every merge publishes exactly
+# once. CI commits the resolved version + tag back to main (best-effort; a
+# GITHUB_TOKEN push does NOT re-trigger this workflow, so no loop).
 #
-# Monorepo note: the publishable package lives in `packages/parity`, so the
-# `paths` filter, the version probe and every npm step below are scoped there.
-# The repo root is a private workspace with no version — it must never publish.
-# DO NOT RENAME THIS FILE: the npm trusted-publisher rule below is bound to the
-# workflow *filename*, so renaming it breaks publishing (a working-directory
-# change is fine — npm does not match on the package directory).
+# DO NOT RENAME THIS FILE: the npm trusted-publisher rule is bound to the
+# workflow *filename* (publish.yml) — renaming it breaks OIDC publishing.
 #
-# OIDC trusted publishing prerequisites (one-time setup, already done):
-#   1. Trusted Publisher rule on npmjs.com → @decocms/parity → Access:
-#        Organization or user: decocms
-#        Repository:           parity
-#        Workflow filename:    publish.yml
-#        Environment name:     (blank)
-#        Allowed actions:      npm publish
-#   2. Workflow has `permissions: { id-token: write }` on the job (NOT
-#      workflow level — that wider scope can interact badly with the
-#      transition-from-token-auth case).
-#   3. npm CLI version on the runner must support the OIDC token-
-#      exchange code path (npm 11.x+). Node 22 ships npm 10.9.8 which
-#      DOES NOT — see the "Upgrade npm" step below.
+# OIDC trusted publishing (one-time setup, already done): Trusted Publisher rule
+# on npmjs.com → @decocms/parity → repo decocms/parity, workflow publish.yml,
+# blank environment, action npm publish. The publish job needs id-token: write.
 #
-# Manual break-glass:
-#   - `npm publish` from a maintainer machine with `npm login` if the
-#     workflow is wedged. The OIDC trusted publisher only fires from
-#     GitHub Actions; local publishes use the maintainer's npm account
-#     (this is how 0.1.0 through 0.4.0 were published).
+# Manual break-glass: `npm publish` from packages/parity on a maintainer machine
+# with `npm login` if the workflow is wedged.
 
 on:
   push:
     branches: [main]
-    paths:
-      - "packages/parity/package.json"
   workflow_dispatch:
 
-# Workflow-level permissions intentionally MINIMAL. The publish job
-# below declares the exact permissions it needs (`contents: write` for
-# the GitHub release / tag, `id-token: write` for the npm OIDC token).
-# Keeping `id-token` declared at the job level (not workflow level) is
-# what every other decocms package that successfully publishes via
-# OIDC does (e.g. `decocms/deco-start/.github/workflows/release.yml`),
-# and it scopes the OIDC token's lifetime + visibility exactly to the
-# step that consumes it — npm's trusted-publisher matcher has been
-# observed to be sensitive to that scoping in transition cases.
 permissions:
   contents: read
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # `workflow_dispatch` exposes a branch picker in the GitHub UI, so
-    # without this guard a maintainer could accidentally run the
-    # workflow against a feature branch and publish whatever `package.json`
-    # version lives there. The `paths` filter only constrains `push`
-    # triggers — explicit ref check is needed for dispatch.
-    if: github.ref == 'refs/heads/main'
+    # workflow_dispatch exposes a branch picker; guard so it only ever runs
+    # against main. Skip our own release commit as belt-and-suspenders (a
+    # GITHUB_TOKEN push already won't re-trigger, but a manual re-run might).
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      !startsWith(github.event.head_commit.message, 'chore(release):')
     permissions:
-      contents: write   # for creating tags + releases
+      contents: write   # for the version commit + tag + release
       id-token: write   # for npm OIDC / provenance
     steps:
       - uses: actions/checkout@v4
         with:
-          # Need history so `gh release create --generate-notes` can
-          # include the commits since the previous tag.
-          fetch-depth: 0
+          fetch-depth: 0   # history for --generate-notes + push-back
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -94,100 +57,79 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # Match `decocms/deco-start/.github/workflows/release.yml` (Node
-          # 22), the sibling decocms package that publishes successfully
-          # via OIDC. Node 20 ships an older npm; aligning Node version
-          # eliminates one variable when diagnosing OIDC handshake failures.
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Check if package.json version is already published
-        id: check
+      - name: Compute next version
+        id: version
         shell: bash
         run: |
           set -euo pipefail
-          PKG_NAME=$(node -p "require('./packages/parity/package.json').name")
-          PKG_VERSION=$(node -p "require('./packages/parity/package.json').version")
-          echo "package: $PKG_NAME"
-          echo "local version: $PKG_VERSION"
-          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$PKG_VERSION" >> "$GITHUB_OUTPUT"
+          NEXT=$(node -e '
+            const cp = require("node:child_process");
+            const local = require("./packages/parity/package.json").version;
+            let npmv = "0.0.0";
+            try {
+              const o = cp.execSync("npm view @decocms/parity version", {
+                encoding: "utf8", stdio: ["pipe", "pipe", "ignore"],
+              }).trim();
+              if (o) npmv = o;
+            } catch {}
+            const parts = (v) => v.split("-")[0].split(".").map(Number);
+            const cmp = (a, b) => {
+              const A = parts(a), B = parts(b);
+              for (let i = 0; i < 3; i++) if ((A[i]||0) !== (B[i]||0)) return (A[i]||0) - (B[i]||0);
+              return 0;
+            };
+            let next;
+            if (cmp(local, npmv) > 0) next = local;             // intentional minor/major bump
+            else { const p = parts(npmv); p[2]++; next = p.join("."); }  // auto-patch
+            console.log(next);
+          ')
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Publishing @decocms/parity@$NEXT"
 
-          # Probe the EXACT version, not the `latest` dist-tag — comparing
-          # against `latest` breaks intentional reverts to an older version
-          # that's already published (would trigger a 403 from npm on
-          # republish). `npm view PKG@VER version` succeeds (prints VER)
-          # when the version exists, fails with E404 when not, and fails
-          # with other codes for network / auth / registry-5xx errors.
-          # Conflate "doesn't exist" with success; loud-fail everything
-          # else so a transient registry hiccup doesn't suppress a real
-          # error and trigger an accidental publish.
-          set +e
-          PROBE_OUT=$(npm view "$PKG_NAME@$PKG_VERSION" version 2>&1)
-          PROBE_RC=$?
-          set -e
-
-          if [ "$PROBE_RC" -eq 0 ] && [ "$PROBE_OUT" = "$PKG_VERSION" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "⏭️  $PKG_NAME@$PKG_VERSION already published, nothing to do"
-            exit 0
-          fi
-
-          # Treat "package never published" or "version not found" (both
-          # surface as E404 from npm view) as "publishable". Any other
-          # failure is real and must abort the run.
-          if echo "$PROBE_OUT" | grep -qE "E404|code 404|404 Not Found"; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "✅ $PKG_NAME@$PKG_VERSION not on registry, will publish"
-            exit 0
-          fi
-
-          echo "::error::Unexpected response from \`npm view\` (rc=$PROBE_RC):"
-          echo "$PROBE_OUT"
-          exit 1
-
-      # Node 22 ships npm 10.9.8 which does NOT have the trusted-publishing
-      # OIDC token-exchange code path (added in a newer npm minor — the
-      # silly-level log of the failed run shows zero requests to
-      # `/-/npm/v1/oidc/token-exchange`, npm goes straight to the publish
-      # PUT with empty auth, which the registry rejects as a disguised 401
-      # → 404). Force the latest stable npm so we get the OIDC client.
+      # Node 22 ships npm 10.x, which lacks the OIDC token-exchange path needed
+      # for trusted publishing. Force latest npm (11.x+) so `npm publish` gets
+      # the OIDC client instead of a disguised-401 → 404 on the publish PUT.
       - name: Upgrade npm to a version that supports OIDC trusted publishing
-        if: steps.check.outputs.changed == 'true'
-        run: |
-          echo "npm version before upgrade: $(npm --version)"
-          npm install -g npm@latest
-          echo "npm version after upgrade:  $(npm --version)"
+        run: npm install -g npm@latest
 
       - name: Install dependencies
-        if: steps.check.outputs.changed == 'true'
         run: bun install --frozen-lockfile
 
+      - name: Set version
+        working-directory: packages/parity
+        run: npm version "${{ steps.version.outputs.next }}" --no-git-tag-version --allow-same-version
+
       - name: Build
-        if: steps.check.outputs.changed == 'true'
         working-directory: packages/parity
         run: bun run build
 
       - name: Publish to npm
-        if: steps.check.outputs.changed == 'true'
         # MUST run from the package dir: `npm publish` at the repo root would
-        # target the private workspace wrapper, not @decocms/parity.
+        # target the private workspace wrapper, not @decocms/parity. Trusted
+        # publishing supplies access + provenance from package.json/OIDC.
         working-directory: packages/parity
-        # Per https://docs.npmjs.com/trusted-publishers: when trusted
-        # publishing is correctly configured, `--access` and `--provenance`
-        # flags are NOT needed — `publishConfig.access` in package.json
-        # sets the access level, and provenance attestations are auto-
-        # generated by npm for OIDC publishes from public repos.
         run: npm publish
 
+      - name: Commit version bump + tag back to main
+        # Best-effort: npm is the source of truth. If the push is rejected
+        # (branch protection / main advanced), the publish already happened —
+        # warn, don't fail. Next merge recomputes from npm regardless.
+        continue-on-error: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): ${{ steps.version.outputs.next }} [skip ci]" || echo "nothing to commit"
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "HEAD:main" --follow-tags || echo "::warning::could not push version bump back to main; npm already has ${{ steps.version.outputs.next }}"
+
       - name: Create GitHub release
-        if: steps.check.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # --generate-notes asks GitHub to auto-build release notes
-          # from PR titles since the previous tag, which is what we
-          # want for our Conventional-Commits squash-merge workflow.
-          gh release create "${{ steps.check.outputs.tag }}" \
-            --title "${{ steps.check.outputs.tag }}" \
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.tag }}" \
             --generate-notes
