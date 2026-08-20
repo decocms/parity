@@ -178,22 +178,34 @@ export async function resolveContentPaths(opts: {
 /**
  * Make the target's anchor reachable so navigateWithHover takes the hover→prefetch
  * path instead of a cold goto. Leaf pages often live behind a dropdown (e.g.
- * "Especialidades" → Colorretal) or a mobile hamburger; reveal them by opening the
- * hamburger and hovering each top-level nav item to expand its submenu. Returns
- * true once the target anchor is visible.
+ * "Especialidades" → Colorretal) or a mobile hamburger. Deco dropdowns open on
+ * CLICK (not hover) — the parent anchor's click is intercepted to toggle the
+ * submenu instead of navigating. So: open the hamburger, then CLICK each dropdown
+ * trigger until the target leaf is visible, backing out if a click navigates away.
+ * Returns true once the target anchor is visible (submenu left open).
  */
-async function revealLink(page: import("playwright").Page, path: string): Promise<boolean> {
+async function revealLink(page: import("playwright").Page, base: string, path: string): Promise<boolean> {
   const sel = `a[href="${path}"], a[href^="${path}?"]`;
   const isVis = () => page.locator(sel).first().isVisible({ timeout: 400 }).catch(() => false);
   if (await isVis()) return true;
-  await openMenu(page).catch(() => undefined); // mobile hamburger
+  await openMenu(page).catch(() => undefined); // mobile hamburger (click-based)
   if (await isVis()) return true;
-  // Desktop dropdowns: hover each top-level nav item to open its submenu.
-  const parents = page.locator("header nav > *, header > nav > *, header ul > li");
-  const n = Math.min(await parents.count().catch(() => 0), 10);
+  // Dropdown triggers: header items that own a submenu (aria-haspopup, a
+  // .dropdown container, or an <li> with a nested <ul>). Click each to open.
+  const triggers = page.locator(
+    "header [aria-haspopup] , header .dropdown > a, header .dropdown > button, header li:has(> ul) > a, header li:has(> ul) > button",
+  );
+  const n = Math.min(await triggers.count().catch(() => 0), 12);
   for (let i = 0; i < n; i++) {
-    await parents.nth(i).hover({ timeout: 800 }).catch(() => undefined);
-    await page.waitForTimeout(250);
+    const before = page.url();
+    await triggers.nth(i).click({ timeout: 1_500 }).catch(() => undefined);
+    await page.waitForTimeout(300);
+    if (page.url() !== before && !page.url().includes(path)) {
+      // The click navigated somewhere unrelated — go back and keep trying.
+      await page.goto(base, { waitUntil: "domcontentloaded", timeout: 15_000 }).catch(() => undefined);
+      await waitReady(page).catch(() => undefined);
+      continue;
+    }
     if (await isVis()) return true;
   }
   return false;
@@ -247,7 +259,7 @@ async function contentPass(
     // navigateWithHover takes the hover→prefetch path, not a cold goto. Leaf pages
     // behind the "Especialidades" dropdown are only prefetchable once the submenu
     // is open. Mirrors the real flow: open menu/dropdown → hover → click.
-    await revealLink(page, path).catch(() => undefined);
+    await revealLink(page, base, path).catch(() => undefined);
     const { ok, navMs, landed, viaFallback } = await navigateWithHover(page, target, false);
     steps.push({
       step: key,
