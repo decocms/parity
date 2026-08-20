@@ -176,21 +176,29 @@ for f in src/sections/**/*.tsx src/sections/*.tsx; do
 done
 ```
 
-**Step 3 — find hooks/UI components not imported by any needed section:**
+**Step 3 — find hooks/UI components not imported by any CMS-referenced section:**
+
+Extract the unique set of section filenames from step 1, then check each
+`src/components/ui/` and `src/hooks/` file for imports:
+
 ```bash
-# For each file in src/components/ui/ and src/hooks/:
-for f in src/components/ui/*.tsx src/hooks/*.ts; do
-  basename_no_ext=$(basename "$f" | sed 's/\.[^.]*$//')
-  # Check if any needed section imports it
-  callers=$(grep -r "$basename_no_ext" src/sections/ \
-            --include="*.tsx" -l 2>/dev/null | wc -l)
+# For each candidate UI component/hook:
+find src/components/ui src/hooks -name "*.tsx" -o -name "*.ts" | while read f; do
+  bn=$(basename "$f" | sed 's/\.[^.]*$//')
+  # Never delete framework primitives
+  echo "$bn" | grep -qE "^(Image|Icon|Seo|Video|Picture|Section|Slider|Theme)$" && continue
+  
+  # Check if any CMS-referenced section imports it
+  callers=0
+  for section in <unique_section_filenames_from_step1>; do
+    grep -q "$bn" "src/sections/$section" 2>/dev/null && callers=$((callers+1))
+  done
   [ "$callers" -eq 0 ] && echo "DEAD: $f"
 done
 ```
 
-Never delete shared primitives regardless of caller count:
-`Image.tsx`, `Icon.tsx`, `Seo.tsx`, `Video.tsx`, `Picture.tsx`, `Section.tsx`,
-`Slider.tsx`, `Theme.tsx` — these are wired by the framework or used indirectly.
+Never delete: `Image.tsx`, `Icon.tsx`, `Seo.tsx`, `Video.tsx`, `Picture.tsx`,
+`Section.tsx`, `Slider.tsx`, `Theme.tsx` — framework primitives wired indirectly.
 
 **Step 4 — delete and commit:**
 ```bash
