@@ -33,7 +33,7 @@ whole message is JSON.
 
 ```
 discovery → reconcile → repo-setup → template-bootstrap → workflows
-→ [migrate-script | porting] → build-green → triage → fix → parity
+→ [migrate-script | porting] → build-green → nav-strategy → triage → fix → parity
 → [loop back to triage if score < target] → benchmark → done
 ```
 
@@ -168,6 +168,18 @@ After all `pending` are `done`: advance to `build-green`.
 Via `runner`: run the target's build command. If it fails, spawn a `builder`.
 Repeat until `runner` reports exit 0. Cap at 3 attempts before escalating to
 the user.
+
+### nav-strategy
+Migrated sites arrive with plain `<a href>` everywhere → every navigation is a
+full reload, never an SPA transition. Spawn `spa-strategist` with `target_dir`,
+`platform`, and the discovered routes. It returns a per-route plan
+(`{routes:[{path, mode:"spa"|"reload", reason}]}`). Hand the `spa` routes to a
+`porter`/`fixer` to convert `<a>`→`<Link>` (leave externals, `#anchor`, and
+downloads as `<a>`). Skip this phase entirely if the site has a single route.
+
+Also watch for **soft-404s**: a catch-all `$.tsx` that returns HTTP 200 with a
+404 page for a nonexistent route is a separate bug — note it for `triage` so a
+`fixer` sets the correct status.
 
 ### triage
 Spawn `triager`. It surveys the migrated repo and returns issue drafts.
