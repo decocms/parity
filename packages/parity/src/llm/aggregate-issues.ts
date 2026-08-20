@@ -104,7 +104,11 @@ export async function aggregateIssues(input: AggregateInput): Promise<Issue[]> {
     },
   });
   if (!parsed) return fallbackAggregate(input);
-  return (parsed.issues ?? [])
+  // The LLM tool call can return `issues` as a non-array (missing, an object, or a
+  // string) — especially on timeout/partial responses. `?? []` only guards
+  // null/undefined, so a non-array would crash `.filter`. Fall back deterministically.
+  if (!Array.isArray(parsed.issues)) return fallbackAggregate(input);
+  return parsed.issues
     .filter((i) => i.id && i.severity && i.category && i.check && i.summary)
     .map(
       (i) =>
