@@ -39,5 +39,9 @@ check-name side.
 | **Cart reveal mode**          | prod/cand cart-reveal markup intent matches                            | e2e |
 | **SPA navigation** _(M2.5, issue #54)_ | F5-load a category, click to another route (client-side, not `page.goto`), then verify the SPA-navigated render didn't drop CMS sections vs a plain F5 of the same destination; also flags hydration-classified console errors during the nav itself | e2e |
 | **Server-fn hover flood** _(M2.5, issue #54)_ | Hovering ~8 product cards shouldn't fire more than a configurable budget (default 10) of `_serverFn`/preload-shaped requests — catches TanStack `preload="intent"` flooding the worker | e2e |
+| **Favicon parity** _(issue #240)_ | Missing `<link rel=icon\|manifest\|apple-touch-icon>` vs prod, and a SHA-256 mismatch of the primary favicon (catches a favicon from a different site) | seo |
+| **Font parity** _(issue #241)_ | prod loads web fonts and cand loads none → silent fallback to a system font (e.g. `Lato` declared but no `@font-face`) that a screenshot diff misses | html |
+| **SSR / no-JS** _(issue #244)_ | Plain `fetch` (no JS) returns the SSR HTML; a near-empty body → content is client-only and the page is blank without JS (high CLS, broken SEO/a11y) | html |
+| **Nav-links health** _(issue #247)_ | Dead same-page anchors (`#foo` with no matching `id`/`name`) and broken header/nav routes; prod-ok + cand-broken = high regression | seo |
 
 All results are aggregated (optionally via Claude) and ranked by severity. Each issue includes screenshots, reproduction, and a suggested fix.
