@@ -132,7 +132,17 @@ The target repo should be **born with CI/CD**. Where it comes from depends on th
 Never leave the repo without a deploy workflow — a migration that can't ship isn't done.
 
 ### migrate-script (deco-fresh only)
-Via `runner`: `bun run predev && npx -p @decocms/blocks-cli deco-migrate --verbose 2>&1 | tail -100`
+Via `runner` (run in SOURCE repo dir — deco-migrate transforms it in-place):
+```
+npx -p @decocms/blocks-cli deco-migrate --verbose 2>&1 | tail -100
+```
+Then run `bun run generate` to ensure all generated files (`.deco/sections.gen.ts`,
+`.deco/meta.gen.json`) are up-to-date before typecheck:
+```
+bun run generate 2>&1 | tail -20
+```
+Note: deco-fresh sites have no `package.json` — skip `bun run predev`. The
+Bootstrap phase of `deco-migrate` creates `package.json` and runs install.
 After: advance to `build-green`.
 
 ### porting (vtex-io / live-only)
