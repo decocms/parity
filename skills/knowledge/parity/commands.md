@@ -54,11 +54,22 @@ near target. Flags: `--plp <path>` pins the category, `--warmup-runs` (2),
 ## `parity vitals` — Web Vitals across many pages
 
 ```
-parity vitals --prod <prodUrl> --cand <candUrl> --limit 10
+parity vitals --prod <prodUrl> --cand <candUrl> --limit 10           # real (Lighthouse, default)
+parity vitals --prod <prodUrl> --cand <candUrl> --urls /p --no-lighthouse   # fast iteration
 ```
 
-LCP/FCP/TTFB/INP/CLS across N sampled pages. `--runs` (median), `--concurrency`
-(4), `--viewports`. Use to localize a vitals regression the run flagged.
+LCP/FCP/TTFB/TBT/CLS across N pages. **Measures via Lighthouse by default**
+(Slow 4G + 4× CPU — matches PageSpeed) and returns actionable `opportunities`
+(→ `vitals.json`, `report.json` `lhOpportunities`) for `perf-optimizer`. ~40s/page.
+`--no-lighthouse` = fast warm Playwright collector (~5s/page, unthrottled, NO
+opportunities — iteration only, NOT PageSpeed-comparable). `--lighthouse-concurrency`
+tunes the (low) Lighthouse parallelism; `--runs` (median), `--concurrency` (Playwright
+phase), `--viewports`. Page discovery falls back to the deco pages loader when a
+site ships no `sitemap.xml`. Fast-sweep to localize, then a scoped real pass to confirm.
+Lighthouse mode also captures the other three category scores (accessibility/
+best-practices/seo, prod-vs-cand chips + `lighthouse-scores` check that flags any
+category worse than prod — "equal or better") and a **Navegação agêntica** composite
+(agent-accessibility audits + llms.txt quality) in the Vitals tab.
 
 ## `parity cache` — CDN cache opportunities (cand-side)
 

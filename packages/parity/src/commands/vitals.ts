@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import chalk from "chalk";
 import ora from "ora";
@@ -6,10 +7,13 @@ import type { Browser, Page } from "playwright";
 import { cacheCoverage } from "../checks/cache-coverage.ts";
 import type { CheckContext } from "../checks/index.ts";
 import { pairCaptures } from "../checks/lib/pairing.ts";
+import { agenticNav } from "../checks/agentic-nav.ts";
+import { lighthouseScores } from "../checks/lighthouse-scores.ts";
 import { webVitalsMobile } from "../checks/web-vitals.ts";
 import { resolveSitemapUrls } from "../diff/sitemap.ts";
 import { launchBrowser, newContext } from "../engine/browser.ts";
 import { capturePage, installVitalsCollector } from "../engine/collect.ts";
+import { type LhSample, measureLighthouse } from "../engine/lighthouse.ts";
 import { computeVerdict } from "../engine/verdict.ts";
 import { renderHtmlReport } from "../report/render.ts";
 import { createRunDir, newRunId, writeRunReportHtml, writeRunReportJson } from "../storage/fs.ts";
@@ -21,9 +25,11 @@ import type {
   PageCapture,
   ParityIgnore,
   ParityRc,
+  LhOpportunity,
   Run,
   Side,
   Viewport,
+  WebVitals,
 } from "../types/schema.ts";
 
 export interface VitalsOptions {
@@ -35,6 +41,14 @@ export interface VitalsOptions {
   concurrency?: number;
   /** Repeat each page's vitals navigation N times, compare against the median. Default 1. Issue #179. */
   runs?: number;
+  /**
+   * Measure vitals via Lighthouse (Slow 4G + 4× CPU throttle) so numbers match
+   * PageSpeed instead of the optimistic warm Playwright collector. Default true.
+   * `--no-lighthouse` flips it off for fast iteration. #264.
+   */
+  lighthouse?: boolean;
+  /** Parallel Lighthouse processes. Low by default — Lighthouse *measures* CPU, so contention inflates results. */
+  lighthouseConcurrency?: number;
   output: string;
   open?: boolean;
 }
@@ -114,6 +128,51 @@ export async function vitalsCommand(opts: VitalsOptions): Promise<number> {
     });
     progress.succeed(`${total} capture(s) em ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
+    // Phase 2 — Lighthouse (Slow 4G + 4× CPU), default ON. Overrides the warm
+    // Playwright vitals with throttled numbers that match PageSpeed, and
+    // attaches the actionable audits (`lhOpportunities`) Lighthouse already
+    // computes so they reach the report + perf-optimizer agent. #264.
+    // Runs AFTER the Playwright context is gone (browser closed below is later,
+    // but these tasks own their own contexts and already closed them) and at
+    // LOW concurrency: Lighthouse *measures* CPU, so parallel runs contend and
+    // inflate the numbers.
+    if (opts.lighthouse !== false) {
+      const lhDir = join(paths.runDir, "lighthouse");
+      const lhCap =
+        opts.lighthouseConcurrency ??
+        Math.max(1, Math.min(2, Math.floor(availableParallelism() / 2)));
+      const done = tasks.filter((t): t is CaptureTask & { capture: PageCapture } => !!t.capture);
+      const lhT0 = Date.now();
+      let lhCompleted = 0;
+      const lhProgress = ora(
+        `Lighthouse 0/${done.length} (throttled Slow 4G + 4× CPU · ~40s/página · ${lhCap} paralelo)`,
+      ).start();
+      await runWithConcurrency(
+        done.map((task, i) => ({ task, i })),
+        lhCap,
+        async ({ task, i }) => {
+          const url = new URL(task.path, task.side === "prod" ? opts.prod : opts.cand).toString();
+          const result = await measureLighthouse(url, {
+            outDir: lhDir,
+            id: `${task.side}-${task.viewport}-${i}`,
+            formFactor: task.viewport === "desktop" ? "desktop" : "mobile",
+          });
+          if (!("error" in result)) {
+            task.capture.vitals = lhToWebVitals(result);
+            if (result.opportunities) task.capture.lhOpportunities = result.opportunities;
+            if (result.scores) task.capture.lhScores = result.scores;
+            if (result.agentA11y) task.capture.agentA11y = result.agentA11y;
+          }
+          lhCompleted++;
+          const elapsed = ((Date.now() - lhT0) / 1000).toFixed(0);
+          lhProgress.text = `Lighthouse ${lhCompleted}/${done.length} · ${elapsed}s · ${task.side === "prod" ? chalk.cyan("prod") : chalk.magenta("cand")} ${task.path} (${task.viewport})`;
+        },
+      );
+      lhProgress.succeed(
+        `Lighthouse ${done.length} página(s) em ${((Date.now() - lhT0) / 1000).toFixed(1)}s`,
+      );
+    }
+
     // Assemble canonical Run
     const allPageCaptures = tasks.map((t) => t.capture).filter((c): c is PageCapture => !!c);
     const flowCaptures: FlowCapture[] = [];
@@ -153,7 +212,9 @@ export async function vitalsCommand(opts: VitalsOptions): Promise<number> {
     // Run the checks that make sense for vitals-only crawl
     const vitalsResult: CheckResult = webVitalsMobile(checkCtx);
     const cacheResult: CheckResult = cacheCoverage(checkCtx);
-    const checks = [vitalsResult, cacheResult];
+    const scoresResult: CheckResult = lighthouseScores(checkCtx);
+    const agenticResult: CheckResult = await agenticNav(checkCtx);
+    const checks = [vitalsResult, cacheResult, scoresResult, agenticResult];
 
     const allIssues: Issue[] = checks.flatMap((c) => c.issues);
     const verdict = computeVerdict(checks, allIssues, {
@@ -189,6 +250,10 @@ export async function vitalsCommand(opts: VitalsOptions): Promise<number> {
           pagesAnalyzed: pagePaths.length,
           vitalsCheck: vitalsResult.data,
           cacheCheck: cacheResult.data,
+          scores: checkCtx.candPages
+            .filter((p) => p.lhScores)
+            .map((p) => ({ path: new URL(p.url).pathname, ...p.lhScores })),
+          opportunities: aggregateOpportunities(checkCtx.candPages),
         },
         null,
         2,
@@ -196,7 +261,7 @@ export async function vitalsCommand(opts: VitalsOptions): Promise<number> {
       "utf8",
     );
 
-    printSummary(vitalsResult, cacheResult);
+    printSummary(vitalsResult, cacheResult, scoresResult, agenticResult);
     console.log("");
     console.log(chalk.dim(`  → ${paths.reportHtml}`));
     console.log(chalk.dim(`  💡 use 'parity serve ${runId}' pra preview iframe`));
@@ -248,6 +313,32 @@ async function captureVitalsPage(
     await page.close().catch(() => undefined);
     await ctx.close().catch(() => undefined);
   }
+}
+
+/**
+ * Lighthouse sample → `WebVitals`. INP is `null` (Lighthouse can't measure a
+ * real interaction; TBT is its load-time proxy and is surfaced separately).
+ */
+function lhToWebVitals(s: LhSample): WebVitals {
+  return { lcp: s.lcp, cls: s.cls, fcp: s.fcp, ttfb: s.ttfb, inp: null, tbt: s.tbt ?? null };
+}
+
+/**
+ * Dedupe Lighthouse opportunities across pages by audit id, keeping the worst
+ * (max savings) instance — the same audit (render-blocking, unused JS…) repeats
+ * on every page. Biggest wins first. Focus on cand; prod is reference only.
+ */
+export function aggregateOpportunities(pages: PageCapture[]): LhOpportunity[] {
+  const byId = new Map<string, LhOpportunity>();
+  for (const p of pages) {
+    for (const o of p.lhOpportunities ?? []) {
+      const prev = byId.get(o.id);
+      if (!prev || o.savingsMs > prev.savingsMs) byId.set(o.id, o);
+    }
+  }
+  return [...byId.values()].sort(
+    (a, b) => b.savingsMs - a.savingsMs || b.savingsBytes - a.savingsBytes,
+  );
 }
 
 async function discoverPagePaths(prodUrl: string, opts: VitalsOptions): Promise<string[]> {
@@ -320,9 +411,16 @@ async function runWithConcurrency<T>(
   );
 }
 
-function printSummary(vitals: CheckResult, cache: CheckResult): void {
+function printSummary(
+  vitals: CheckResult,
+  cache: CheckResult,
+  scores: CheckResult,
+  agentic: CheckResult,
+): void {
   console.log("");
   console.log(chalk.bold("  Summary:"));
   console.log(`    ${vitals.summary}`);
   console.log(`    ${cache.summary}`);
+  if (scores.status !== "skipped") console.log(`    ${scores.summary}`);
+  if (agentic.status !== "skipped") console.log(`    ${agentic.summary}`);
 }

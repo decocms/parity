@@ -454,6 +454,15 @@ program
     (v) => Number(v),
     1,
   )
+  .option(
+    "--no-lighthouse",
+    "Skip Lighthouse and use the fast warm Playwright collector (unthrottled — NOT comparable to PageSpeed). For fast iteration only. Default: Lighthouse (Slow 4G + 4× CPU) so numbers match PageSpeed. #264.",
+  )
+  .option(
+    "--lighthouse-concurrency <n>",
+    "Parallel Lighthouse processes. Low by default (cores/2, capped 2) — Lighthouse measures CPU, so more parallelism inflates the numbers.",
+    (v) => Number(v),
+  )
   .option("--output <dir>", "Output directory", "./parity-output")
   .option("--open", "Open the HTML report when done", false)
   .action(async (opts) => {

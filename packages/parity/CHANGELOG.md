@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+* **Deco page-discovery fallback.** When a site ships no `/sitemap.xml` (404) — common on deco storefronts — `resolveSitemapUrls` falls back to the deco pages loader (`/live/invoke/website/loaders/pages.ts`) to discover CMS-configured content pages instead of collapsing to just the home page. Page-discovery callers (vitals/run/cache/benchmark) get it automatically; the SEO audit opts out (`decoFallback: false`) so it still sees — and reports — the true sitemap state. (#264)
+* **SEO absolute-gap insights** in `seo-deep-audit`, surfaced even when prod and cand share the gap (a migration is the moment to fix): `seo:sitemap-absent` (neither side serves `/sitemap.xml`), `seo:robots-no-sitemap-directive` (robots.txt declares no `Sitemap:`), `seo:llms-txt-absent` (no `/llms.txt` manifest for AI crawlers). SPA `index.html` fallbacks served for these routes are correctly treated as absent, not present. (#264)
+
+### Changed
+
+* **`parity vitals` now measures via Lighthouse by default** (Slow 4G + 4× CPU throttle), so its numbers match PageSpeed instead of the optimistic warm Playwright collector — the root cause of "run says 100 but PageSpeed fails". Runs in two ordered phases: a fast parallel Playwright pass (HTML/cache/network structure) then a low-concurrency Lighthouse pass (Lighthouse *measures* CPU, so parallel runs contend and inflate results). `--no-lighthouse` restores the fast unthrottled collector for iteration; `--lighthouse-concurrency <n>` tunes the cap (default cores/2, capped 2). (#264)
+* **Lighthouse category scores.** `parity vitals` (Lighthouse mode) now runs `accessibility`, `best-practices` and `seo` alongside `performance` (same run, cheap static audits) and surfaces all four as 0–100 PageSpeed-style chips (prod vs cand) in the Vitals tab + `report.json` `lhScores` + `vitals.json` `scores`. Previously it captured performance only. (#264)
+* **`lighthouse-scores` check — parity-or-better on every category.** Flags when a cand Lighthouse category score drops below prod (beyond 3-point jitter), not just performance — e.g. accessibility 90→76. Enforces the migration goal of equal-or-better across performance/accessibility/best-practices/seo. New `a11y` issue category. (#264)
+* **Vitals report polish.** Category scores now render as PageSpeed-style SVG ring gauges (cand as the gauge, `prod N · ▲/▼Δ` beneath so "equal or better" reads at a glance), matching the benchmark report's visual language. (#264)
+* **`agentic-nav` check + "Navegação agêntica" report panel.** A composite mirroring PageSpeed's in-development category: (1) agent accessibility — Lighthouse accessibility-tree audits an AI agent relies on (`button-name`, `link-name`, `label`, `image-alt`, `aria-*`), with failing elements listed; (2) llms.txt quality — a well-formed `/llms.txt` per llmstxt.org (H1 + sections/links; SPA HTML fallbacks rejected). Renders a passed/total tally + per-pillar detail in the Vitals tab. (#264)
+* **Lighthouse opportunities are now preserved and surfaced.** The actionable audits Lighthouse already computes (render-blocking, unused JS, oversized images, lazy LCP…) are deduped across cand pages, persisted on each `PageCapture.lhOpportunities` + in `vitals.json`, and rendered in the report's Vitals tab (biggest savings first) — reaching both the user and the `perf-optimizer` agent. TBT is now carried on `WebVitals` and shown when present. (#264)
+
 ## [0.22.0] — 2026-08-19
 
 ### Added

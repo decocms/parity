@@ -102,6 +102,7 @@ export async function seoDeepAudit(ctx: CheckContext): Promise<CheckResult> {
     pairs.map((p) => p.cand),
   );
   issues.push(...sitemapIssues);
+  issues.push(...(await checkLlmsTxt(state)));
 
   const seo: SeoSummary = {
     pages: pageSnapshots,
@@ -421,15 +422,49 @@ async function checkRobotsTxt(state: SeoState): Promise<Issue[]> {
       summary: `robots.txt em prod declara sitemap(s) ausente(s) em cand: ${diff.sitemapDiff.onlyProd.join(", ")}`,
     });
   }
+  // Absolute insight: cand's robots.txt declares no `Sitemap:` at all. Crawlers
+  // use that line to locate the sitemap; without it discovery is weaker. The
+  // migration is the chance to add one.
+  if (parseRobots(candTxt).sitemaps.length === 0) {
+    out.push({
+      id: "seo:robots-no-sitemap-directive",
+      severity: "low",
+      category: "seo",
+      check: "seo-deep-audit",
+      summary: "robots.txt do cand não declara nenhum Sitemap:",
+      details:
+        "Adicione `Sitemap: https://<host>/sitemap.xml` ao robots.txt para acelerar a descoberta por crawlers.",
+    });
+  }
   return out;
 }
 
 async function checkSitemap(state: SeoState, candPages: PageCapture[]): Promise<Issue[]> {
   const out: Issue[] = [];
+  // decoFallback:false — the audit must see the TRUE sitemap state. With the
+  // fallback on, a site that serves no sitemap.xml would look like it has one
+  // (deco pages loader), masking the SEO gap this check exists to catch.
   const [prodUrls, candUrls] = await Promise.all([
-    resolveSitemapUrls(state.prodBaseUrl),
-    resolveSitemapUrls(state.candBaseUrl),
+    resolveSitemapUrls(state.prodBaseUrl, undefined, { decoFallback: false }),
+    resolveSitemapUrls(state.candBaseUrl, undefined, { decoFallback: false }),
   ]);
+
+  // Absolute insight: neither side serves a sitemap.xml at all. Not a parity
+  // regression (both lack it), but a real SEO gap — crawlers fall back to link
+  // discovery, and the migration is the moment to publish one. Worth surfacing
+  // even though prod is "reference".
+  if (prodUrls.length === 0 && candUrls.length === 0) {
+    out.push({
+      id: "seo:sitemap-absent",
+      severity: "medium",
+      category: "seo",
+      check: "seo-deep-audit",
+      summary: "Nenhum dos lados serve /sitemap.xml — lacuna de SEO",
+      details:
+        "Nem prod nem cand respondem em /sitemap.xml. Crawlers dependem de descoberta por links (menos confiável para páginas profundas). Publique um sitemap.xml no cand e declare-o no robots.txt — a migração é a hora de corrigir.",
+    });
+    return out;
+  }
 
   if (prodUrls.length > 0 && candUrls.length === 0) {
     out.push({
@@ -492,6 +527,56 @@ async function checkSitemap(state: SeoState, candPages: PageCapture[]): Promise<
   return out;
 }
 
+/**
+ * `/llms.txt` (https://llmstxt.org) is the manifest that steers LLM crawlers to
+ * a site's key content. Flag when cand doesn't serve one — an SEO-for-AI gap the
+ * migration can close. HTML bodies are rejected: SPA fallbacks serve index.html
+ * for unknown routes, which would otherwise read as a false positive.
+ */
+async function checkLlmsTxt(state: SeoState): Promise<Issue[]> {
+  const [prod, cand] = await Promise.all([
+    hasLlmsTxt(state.prodBaseUrl),
+    hasLlmsTxt(state.candBaseUrl),
+  ]);
+  if (cand) return [];
+  return [
+    {
+      id: "seo:llms-txt-absent",
+      severity: "low",
+      category: "seo",
+      check: "seo-deep-audit",
+      summary: prod
+        ? "/llms.txt presente em prod mas ausente em cand"
+        : "Nenhum dos lados serve /llms.txt — oportunidade de SEO para IA",
+      details:
+        "llms.txt orienta crawlers de LLM sobre o conteúdo do site (https://llmstxt.org). Publicá-lo no cand melhora a descoberta por assistentes de IA — a migração é a hora de adicionar.",
+    },
+  ];
+}
+
+async function hasLlmsTxt(baseUrl: string, timeoutMs = 10_000): Promise<boolean> {
+  const url = new URL("/llms.txt", baseUrl).toString();
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: { "User-Agent": "parity-cli/0.1" },
+    });
+    if (!res.ok) return false;
+    const ct = res.headers.get("content-type") ?? "";
+    const body = await res.text();
+    // Reject SPA index.html fallbacks served for unknown routes.
+    if (ct.includes("text/html") || body.trimStart().startsWith("<")) return false;
+    return body.trim().length > 0;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 async function checkRobotsTxtStructured(
   state: SeoState,
 ): Promise<{ issues: Issue[]; robotsTxt: SeoRobotsTxt }> {
@@ -522,8 +607,8 @@ async function checkSitemapStructured(
 ): Promise<{ issues: Issue[]; sitemap: SeoSitemap }> {
   const issues = await checkSitemap(state, candPages);
   const [prodUrls, candUrls] = await Promise.all([
-    resolveSitemapUrls(state.prodBaseUrl),
-    resolveSitemapUrls(state.candBaseUrl),
+    resolveSitemapUrls(state.prodBaseUrl, undefined, { decoFallback: false }),
+    resolveSitemapUrls(state.candBaseUrl, undefined, { decoFallback: false }),
   ]);
   const diff = diffSitemap(prodUrls, candUrls);
   return {

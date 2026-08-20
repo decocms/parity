@@ -21,7 +21,9 @@ check-name side.
 | Image loading health          | Missing alt text, no srcset, broken `<img>`                            | html |
 | Lazy section presence         | Deco `/deco/render` and `/_loader/*` routes responding; downgrades to low+intentional-eager when cand renders everything inline by design | html |
 | **Banner aspect ratio**       | Hero/banner images keep the same aspect ratio prod vs cand (CLS/crop regressions) | visual |
-| SEO deep audit                | robots.txt, sitemap, noindex regressions                               | seo |
+| SEO deep audit                | robots.txt, sitemap, noindex regressions — plus absolute gaps surfaced even when both sides share them: `seo:sitemap-absent` (neither serves `/sitemap.xml`), `seo:robots-no-sitemap-directive` (robots.txt has no `Sitemap:`), `seo:llms-txt-absent` (no `/llms.txt` for AI crawlers). The migration is the moment to fix these. | seo |
+| **Lighthouse category scores** | `parity vitals` (Lighthouse mode): flags any category (performance/accessibility/best-practices/seo) where cand scores below prod — enforces parity-or-better, not just performance | a11y/perf/seo |
+| **Navegação agêntica** _(#264)_ | Composite for AI-agent navigability: agent-accessibility tree audits (`button-name`, `link-name`, `label`, `image-alt`, `aria-*`) + `/llms.txt` quality (llmstxt.org shape). Passed/total tally in the Vitals tab | a11y/seo |
 | Cache coverage                | Cache hit rate, opportunities to cache                                 | cache |
 | **Search presence**           | Search input reachable from home in both                               | e2e |
 | **Search autocomplete**       | Typing reveals suggestions; cand keeps parity with prod                | e2e |

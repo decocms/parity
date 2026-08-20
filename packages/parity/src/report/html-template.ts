@@ -399,6 +399,33 @@ export const REPORT_CSS = `
   .delta-bad { color: var(--state-bad); font-weight: 600; }
   .delta-neutral { color: var(--text-muted); }
 
+  /* Lighthouse category score chips */
+  .lh-scores { margin-bottom: 14px; }
+  .lh-score { display: inline-block; min-width: 34px; padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: 13px; text-align: center; }
+  .lh-good { background: #e6f4ea; color: #137333; }
+  .lh-avg  { background: #fef7e0; color: #b06000; }
+  .lh-poor { background: #fce8e6; color: #c5221f; }
+  .lh-na   { background: var(--border-default); color: var(--text-muted); }
+
+  /* Lighthouse category rings (PageSpeed-style) */
+  .lh-rings { display: flex; flex-wrap: wrap; gap: 28px; margin: 4px 0 22px; }
+  .ring-cell { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 84px; }
+  .ring { display: block; }
+  .ring-track { stroke: rgba(255,255,255,0.10); }
+  .ring-arc { stroke: currentColor; transition: stroke-dasharray .3s; }
+  .ring-num { fill: currentColor; font-weight: 700; font-size: 19px; font-variant-numeric: tabular-nums; }
+  .ring-good { color: #32d583; }
+  .ring-avg  { color: #fdb022; }
+  .ring-poor { color: #f97066; }
+  .ring-na   { color: var(--text-muted); }
+  .ring-label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+  .ring-sub { font-size: 11px; font-variant-numeric: tabular-nums; }
+
+  /* Agentic navigation */
+  .agentic-head { margin-bottom: 6px; }
+  .agentic-pillar { margin-top: 14px; }
+  .agentic-pillar-head { font-weight: 600; margin-bottom: 6px; }
+
   /* Side-by-side iframes */
   .sbs-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
   .sbs-toolbar button { background: var(--surface-overlay); color: var(--text-primary); border: 1px solid var(--border-default); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }

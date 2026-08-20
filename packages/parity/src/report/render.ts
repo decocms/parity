@@ -3,6 +3,7 @@ import type {
   CheckResult,
   Issue,
   NetworkEntry,
+  PageCapture,
   Run,
   SeoPageMeta,
   VisualDiffPage,
@@ -508,9 +509,7 @@ function renderStepDiagnostics(d: StepType["diagnostics"]): string {
   const missing = d.probes?.filter((p) => !p.present) ?? [];
   const rows = [
     `<div>esperou ${d.elapsedMs}ms / orçamento ${d.budgetMs}ms (${d.pollCount} poll(s))</div>`,
-    ...hidden.map(
-      (p) => `<div>⚠️ presente porém oculto: <code>${esc(p.selector)}</code></div>`,
-    ),
+    ...hidden.map((p) => `<div>⚠️ presente porém oculto: <code>${esc(p.selector)}</code></div>`),
     ...missing.map((p) => `<div>não encontrado no DOM: <code>${esc(p.selector)}</code></div>`),
   ];
   return `<div class="step-diagnostics">${rows.join("")}</div>`;
@@ -579,14 +578,23 @@ function renderVitalsPanel(run: Run): string {
   // Aggregation: pair pages by (path, viewport) and side
   const byPage = new Map<string, { prod: number | null; cand: number | null }[]>();
   type Vitals = NonNullable<(typeof run.flowCaptures)[number]["pages"][number]["vitals"]>;
-  const pageVitals = new Map<string, { prod?: Vitals; cand?: Vitals; viewport: string }>();
+  type Scores = PageCapture["lhScores"];
+  const pageVitals = new Map<
+    string,
+    { prod?: Vitals; cand?: Vitals; prodScores?: Scores; candScores?: Scores; viewport: string }
+  >();
   for (const fc of run.flowCaptures) {
     if (fc.viewport !== "mobile") continue;
     for (const p of fc.pages) {
       const key = pathOf(p.url);
       const entry = pageVitals.get(key) ?? { viewport: p.viewport };
-      if (p.side === "prod") entry.prod = p.vitals;
-      else entry.cand = p.vitals;
+      if (p.side === "prod") {
+        entry.prod = p.vitals;
+        entry.prodScores = p.lhScores;
+      } else {
+        entry.cand = p.vitals;
+        entry.candScores = p.lhScores;
+      }
       pageVitals.set(key, entry);
     }
   }
@@ -632,6 +640,7 @@ function renderVitalsPanel(run: Run): string {
     return `
     <div class="card">
       <h2>${esc(title)}</h2>
+      ${renderCategoryScores(entry.prodScores, entry.candScores)}
       <table class="vitals-table">
         <thead>
           <tr>
@@ -646,13 +655,182 @@ function renderVitalsPanel(run: Run): string {
           ${metricRow("FCP (First Contentful Paint)", entry.prod?.fcp, entry.cand?.fcp, "ms", true)}
           ${metricRow("TTFB (Time to First Byte)", entry.prod?.ttfb, entry.cand?.ttfb, "ms", true)}
           ${metricRow("INP (Interaction to Next Paint)", entry.prod?.inp, entry.cand?.inp, "ms", true)}
+          ${entry.prod?.tbt != null || entry.cand?.tbt != null ? metricRow("TBT (Total Blocking Time)", entry.prod?.tbt, entry.cand?.tbt, "ms", true) : ""}
           ${metricRow("CLS (Cumulative Layout Shift)", entry.prod?.cls, entry.cand?.cls, "score", true)}
         </tbody>
       </table>
       <div class="hint">prod = Fresh (source of truth) · cand = TanStack · green Δ = cand better than prod · red Δ = regression</div>
     </div>`;
   });
-  return cards.join("");
+  return renderAgenticNav(run) + cards.join("") + renderVitalsOpportunities(run);
+}
+
+/**
+ * "Navegação agêntica" panel — reads the agentic-nav check's structured data:
+ * a passed/total tally chip + one block per pillar (agent accessibility with
+ * failing audits + elements, llms.txt quality). Empty when the check didn't run.
+ */
+function renderAgenticNav(run: Run): string {
+  const data = run.checks?.find((c) => c.name === "agentic-nav")?.data as
+    | {
+        agentic?: {
+          passed: number;
+          total: number;
+          pillars: Array<{
+            key: string;
+            label: string;
+            ok: boolean;
+            applicable: boolean;
+            note?: string;
+            failingAudits?: Array<{
+              id: string;
+              title: string;
+              elements: Array<{ selector: string; snippet: string }>;
+            }>;
+          }>;
+        };
+      }
+    | undefined;
+  const a = data?.agentic;
+  if (!a || a.total === 0) return "";
+  const tallyCls = a.passed === a.total ? "lh-good" : a.passed === 0 ? "lh-poor" : "lh-avg";
+  const blocks = a.pillars
+    .map((p) => {
+      const icon = !p.applicable ? "—" : p.ok ? "✅" : "▲";
+      const auditRows = (p.failingAudits ?? [])
+        .map(
+          (au) => `
+        <tr>
+          <td>${esc(au.title)}</td>
+          <td>${au.elements
+            .map((e) => `<code>${esc(e.selector || e.snippet.slice(0, 80))}</code>`)
+            .join("<br>")}</td>
+        </tr>`,
+        )
+        .join("");
+      const table = auditRows
+        ? `<table class="vitals-table"><thead><tr><th>Failed audit</th><th>Failing element</th></tr></thead><tbody>${auditRows}</tbody></table>`
+        : "";
+      return `
+      <div class="agentic-pillar">
+        <div class="agentic-pillar-head">${icon} ${esc(p.label)}${p.note ? ` <span class="hint">(${esc(p.note)})</span>` : ""}</div>
+        ${table}
+      </div>`;
+    })
+    .join("");
+  return `
+    <div class="card">
+      <div class="agentic-head">
+        <span class="lh-score ${tallyCls}">${a.passed}/${a.total}</span>
+        <h2 style="display:inline;margin-left:10px">Agentic navigation</h2>
+      </div>
+      <div class="hint">Checks that keep the site navigable by AI agents (agent accessibility + llms.txt). Category still in development.</div>
+      ${blocks}
+    </div>`;
+}
+
+/** PageSpeed-style score band. Green ≥90, amber 50–89, red <50. */
+function scoreBand(v: number): "good" | "avg" | "poor" {
+  return v >= 90 ? "good" : v >= 50 ? "avg" : "poor";
+}
+
+/** A PageSpeed-style SVG donut gauge for a 0..100 score (cand). */
+function scoreRing(value: number | null | undefined): string {
+  if (value == null) {
+    return `<svg class="ring ring-na" viewBox="0 0 64 64" width="60" height="60" aria-hidden="true"><circle class="ring-track" cx="32" cy="32" r="26" fill="none" stroke-width="6"/><text x="32" y="32" class="ring-num" text-anchor="middle" dominant-baseline="central">—</text></svg>`;
+  }
+  const r = 26;
+  const circ = 2 * Math.PI * r;
+  const dash = (value / 100) * circ;
+  return `<svg class="ring ring-${scoreBand(value)}" viewBox="0 0 64 64" width="60" height="60" role="img">
+    <circle class="ring-track" cx="32" cy="32" r="${r}" fill="none" stroke-width="6"/>
+    <circle class="ring-arc" cx="32" cy="32" r="${r}" fill="none" stroke-width="6" stroke-linecap="round" stroke-dasharray="${dash.toFixed(1)} ${(circ - dash).toFixed(1)}" transform="rotate(-90 32 32)"/>
+    <text x="32" y="32" class="ring-num" text-anchor="middle" dominant-baseline="central">${value}</text>
+  </svg>`;
+}
+
+/**
+ * Lighthouse category scores (performance/accessibility/best-practices/seo,
+ * 0..100) as PageSpeed-style rings — cand as the gauge, prod + signed delta
+ * beneath ("equal or better" at a glance). Only rendered when Lighthouse ran.
+ */
+function renderCategoryScores(
+  prod: PageCapture["lhScores"],
+  cand: PageCapture["lhScores"],
+): string {
+  if (!prod && !cand) return "";
+  const cats = [
+    ["Performance", "performance"],
+    ["Accessibility", "accessibility"],
+    ["Best Practices", "bestPractices"],
+    ["SEO", "seo"],
+  ] as const;
+  const cells = cats
+    .map(([label, key]) => {
+      const c = cand?.[key];
+      const p = prod?.[key];
+      let sub = `<span class="ring-sub dim">—</span>`;
+      if (c != null && p != null) {
+        const d = c - p;
+        const tone = d < -3 ? "delta-bad" : d > 3 ? "delta-good" : "delta-neutral";
+        const arrow = d > 0 ? "▲" : d < 0 ? "▼" : "=";
+        sub = `<span class="ring-sub ${tone}">prod ${p} · ${arrow}${d > 0 ? "+" : ""}${d}</span>`;
+      } else if (p != null) {
+        sub = `<span class="ring-sub dim">prod ${p}</span>`;
+      }
+      return `
+      <div class="ring-cell">
+        ${scoreRing(c)}
+        <span class="ring-label">${label}</span>
+        ${sub}
+      </div>`;
+    })
+    .join("");
+  return `<div class="lh-rings">${cells}</div>`;
+}
+
+/**
+ * Lighthouse actionable audits for cand, deduped by id (worst instance kept),
+ * biggest savings first. Only rendered when Lighthouse ran (`--no-lighthouse`
+ * leaves `lhOpportunities` empty). Focus on cand — prod is reference only.
+ */
+function renderVitalsOpportunities(run: Run): string {
+  const byId = new Map<string, NonNullable<PageCapture["lhOpportunities"]>[number]>();
+  for (const fc of run.flowCaptures) {
+    if (fc.side !== "cand") continue;
+    for (const p of fc.pages) {
+      for (const o of p.lhOpportunities ?? []) {
+        const prev = byId.get(o.id);
+        if (!prev || o.savingsMs > prev.savingsMs) byId.set(o.id, o);
+      }
+    }
+  }
+  if (byId.size === 0) return "";
+  const opps = [...byId.values()].sort(
+    (a, b) => b.savingsMs - a.savingsMs || b.savingsBytes - a.savingsBytes,
+  );
+  const rows = opps
+    .map(
+      (o) => `
+      <tr>
+        <td>${esc(o.title)}</td>
+        <td class="num">${o.savingsMs > 0 ? `${o.savingsMs}ms` : "—"}</td>
+        <td class="num">${o.savingsBytes > 0 ? `${(o.savingsBytes / 1024).toFixed(0)} KB` : "—"}</td>
+        <td>${o.displayValue ? esc(o.displayValue) : ""}</td>
+      </tr>`,
+    )
+    .join("");
+  return `
+    <div class="card">
+      <h2>⚡ Lighthouse opportunities (cand)</h2>
+      <div class="hint">Actionable audits from the throttled Lighthouse pass, deduped across pages, biggest wins first. What to fix to close the gap with PageSpeed.</div>
+      <table class="vitals-table">
+        <thead>
+          <tr><th>Opportunity</th><th class="num">Est. savings</th><th class="num">Bytes</th><th>Detail</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
 
 function formatVital(v: number | null, unit: "ms" | "score"): string {

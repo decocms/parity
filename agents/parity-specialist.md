@@ -34,8 +34,35 @@ guess flags.
 | section | selectors differ | `parity section --prod <prod+path> --cand <cand+path> --selector "<prodSel>" --cand-selector "<candSel>" --prompt` |
 | health | no prod baseline (validate the migrated build) | `parity e2e --url <candUrl> --flows=purchase-journey` |
 | benchmark | always | `parity benchmark --prod <prodUrl> --cand <candUrl>` (add `--plp <path>` when the category path isn't the default) |
-| vitals | localize a vitals regression | `parity vitals --prod <prodUrl> --cand <candUrl> --limit 10` |
+| vitals | **iterating** on one page's perf (quick regression signal between edits) | `parity vitals --prod <prodUrl> --cand <candUrl> --urls <path> --no-lighthouse` |
+| vitals | **final** validation / need PageSpeed-comparable numbers + opportunities to feed `perf-optimizer` | `parity vitals --prod <prodUrl> --cand <candUrl> --urls <path>` (Lighthouse is the default) |
+| vitals | localize a vitals regression across the site | `parity vitals --prod <prodUrl> --cand <candUrl> --limit 10 --no-lighthouse` (fast sweep to find WHERE), then re-run the worst page(s) without `--no-lighthouse` |
 | cache | candidate shipping uncached assets | `parity cache --cand <candUrl> --pages 30` |
+
+## Fast vs real vitals — the fork that matters
+
+`parity vitals` measures via **Lighthouse by default** (Slow 4G + 4× CPU) so numbers
+match PageSpeed AND it returns the actionable `opportunities` the `perf-optimizer`
+agent consumes. That pass is ~40s/page. `--no-lighthouse` swaps to the warm
+Playwright collector: ~5s/page, but **unthrottled — NOT comparable to PageSpeed**,
+and produces **no opportunities**.
+
+Pick by where you are in the loop:
+- **Optimizing a page (iterating):** `--no-lighthouse`. You want a fast "did that
+  edit help / did I regress?" signal. Cheap enough to run after every change.
+- **Closing out a page (final):** default (Lighthouse). This is the pass whose
+  numbers you report and whose `opportunities` you hand to `perf-optimizer`. Run it
+  once the page looks done, and again after `perf-optimizer` applies fixes to confirm
+  the savings landed.
+- **Don't know WHICH page is slow yet:** fast sweep with `--limit N --no-lighthouse`
+  to localize, then a real Lighthouse pass on just the worst page(s) via `--urls`.
+
+Never run the full-site Lighthouse sweep (`--limit 20` without `--no-lighthouse`)
+during iteration — that's ~13 min. Scope real passes to specific `--urls`.
+
+If page discovery returns only the home (deco sites often ship no `sitemap.xml`),
+`resolveSitemapUrls` now falls back to the deco pages loader automatically — but you
+can always pass `--urls /,/path-a,/path-b` to scope explicitly.
 
 ## Output
 

@@ -7,7 +7,7 @@
 | `parity audit` | Single-site absolute audit (console + vitals + SEO + images) |
 | `parity e2e` | Single-site functional end-to-end: all flows + all checks |
 | `parity journey` | CI-friendly: only the purchase journey, with JUnit / GitHub annotations |
-| `parity vitals` | Crawl N pages, compare Web Vitals prod vs cand |
+| `parity vitals` | Crawl N pages, compare Web Vitals prod vs cand — **via Lighthouse by default** (Slow 4G + 4× CPU, matches PageSpeed) plus its actionable opportunities. `--no-lighthouse` uses the fast unthrottled collector. |
 | `parity benchmark` | User Navigation Benchmark: warm before/after story (home → PLP → paginate → PDP → shelf), single shareable HTML |
 | `parity cache` | CDN cache analysis, opportunities, request categorization |
 | `parity serve` | Local HTTP server with iframe proxy so side-by-side tab works for any site |

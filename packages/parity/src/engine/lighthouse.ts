@@ -14,22 +14,9 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { AgentA11yAudit, LhOpportunity, LhScores } from "../types/schema.ts";
 
-/** One actionable Lighthouse audit (opportunity or failing diagnostic). */
-export interface LhOpportunity {
-  /** Audit id, e.g. "render-blocking-resources", "unused-javascript". */
-  id: string;
-  /** Human title from the report. */
-  title: string;
-  /** Estimated wall-clock savings (ms), when the audit reports it. */
-  savingsMs: number;
-  /** Estimated byte savings, when the audit reports it. */
-  savingsBytes: number;
-  /** Lighthouse's own short value, e.g. "Potential savings of 690 ms". */
-  displayValue?: string;
-  /** 0..1 audit score (lower = worse); null for informative audits. */
-  score: number | null;
-}
+export type { AgentA11yAudit, LhOpportunity, LhScores };
 
 export interface LhSample {
   lcp: number | null;
@@ -39,6 +26,46 @@ export interface LhSample {
   tbt: number | null;
   /** Actionable audits (render-block, unused JS, lazy LCP, oversized images…). */
   opportunities?: LhOpportunity[];
+  /** Category scores (performance/accessibility/best-practices/seo), 0..100. */
+  scores?: LhScores;
+  /** Agent-relevant accessibility-tree audits (for "Navegação agêntica"). */
+  agentA11y?: AgentA11yAudit[];
+}
+
+// Accessibility-tree audits that matter most for an AI agent parsing/operating a
+// page: it needs discernible names for interactive elements and labeled inputs.
+// These are a curated subset of Lighthouse's accessibility category. #264.
+const AGENT_A11Y_AUDIT_IDS = [
+  "button-name",
+  "link-name",
+  "label",
+  "image-alt",
+  "input-image-alt",
+  "select-name",
+  "aria-required-attr",
+  "aria-valid-attr",
+  "aria-valid-attr-value",
+  "aria-command-name",
+  "aria-input-field-name",
+  "aria-toggle-field-name",
+  "form-field-multiple-labels",
+] as const;
+
+/** Extract the agent-relevant a11y audits (with a few failing element samples). */
+export function extractAgentA11y(audits: Record<string, LhAudit>): AgentA11yAudit[] {
+  const out: AgentA11yAudit[] = [];
+  for (const id of AGENT_A11Y_AUDIT_IDS) {
+    const a = audits[id];
+    if (!a) continue;
+    const score = typeof a.score === "number" ? a.score : null;
+    const elements = (a.details?.items ?? [])
+      .map((it) => it?.node)
+      .filter((n): n is { selector?: string; snippet?: string } => !!n)
+      .slice(0, 5)
+      .map((n) => ({ selector: n.selector ?? "", snippet: n.snippet ?? "" }));
+    out.push({ id, title: a.title ?? id, score, elements });
+  }
+  return out;
 }
 
 // Curated set of actionable audits worth reporting even when Lighthouse doesn't
@@ -101,7 +128,11 @@ interface LhAudit {
   score?: number | null;
   numericValue?: number;
   displayValue?: string;
-  details?: { overallSavingsMs?: number; overallSavingsBytes?: number };
+  details?: {
+    overallSavingsMs?: number;
+    overallSavingsBytes?: number;
+    items?: Array<{ node?: { selector?: string; snippet?: string } }>;
+  };
 }
 
 export type LhResult = LhSample | { error: string };
@@ -150,7 +181,10 @@ async function measureLighthouseOnce(
     url,
     "--output=json",
     `--output-path=${outPath}`,
-    "--only-categories=performance",
+    // performance + the three static-ish categories Lighthouse computes in the
+    // same run (accessibility/best-practices/seo are mostly DOM audits — cheap
+    // relative to the perf trace already running). #264.
+    "--only-categories=performance,accessibility,best-practices,seo",
     `--form-factor=${formFactor}`,
     // Desktop form-factor requires matching screen emulation — Lighthouse
     // defaults screenEmulation to mobile and errors ("mobile setting (true)
@@ -183,6 +217,7 @@ async function measureLighthouseOnce(
   });
   let report: {
     audits: Record<string, LhAudit>;
+    categories?: Record<string, { score?: number | null }>;
     runtimeError?: { code: string; message: string };
   };
   try {
@@ -206,6 +241,10 @@ async function measureLighthouseOnce(
   if (lcp === null) {
     return { error: "no LCP value despite no runtimeError" };
   }
+  // Lighthouse scores are 0..1; surface as 0..100 to match PageSpeed's UI.
+  const cat = report.categories ?? {};
+  const pct = (c?: { score?: number | null }): number | null =>
+    typeof c?.score === "number" ? Math.round(c.score * 100) : null;
   return {
     lcp,
     cls: audits["cumulative-layout-shift"]?.numericValue ?? null,
@@ -213,5 +252,12 @@ async function measureLighthouseOnce(
     ttfb: audits["server-response-time"]?.numericValue ?? null,
     tbt: audits["total-blocking-time"]?.numericValue ?? null,
     opportunities: extractOpportunities(audits),
+    scores: {
+      performance: pct(cat.performance),
+      accessibility: pct(cat.accessibility),
+      bestPractices: pct(cat["best-practices"]),
+      seo: pct(cat.seo),
+    },
+    agentA11y: extractAgentA11y(audits),
   };
 }
