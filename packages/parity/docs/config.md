@@ -133,9 +133,28 @@ Noise suppression for visual diff, network filters, and console messages.
 {
   "ignoreSelectorsVisual": [".banner-rotativo", "#trustvox-trustbar"],
   "ignoreRequestPatterns": ["*.gif?t=*", "**/pixel*"],
-  "ignoreConsolePatterns": ["ERR_BLOCKED_BY_CLIENT"]
+  "ignoreConsolePatterns": ["ERR_BLOCKED_BY_CLIENT"],
+  "expectedDivergences": [
+    { "match": "ProductShelf", "note": "better shelf, brought over from the other storefront" }
+  ]
 }
 ```
+
+### `expectedDivergences` — decided, not suppressed (#296)
+
+For a component where the candidate is **deliberately different**, usually because a better one was
+brought in from elsewhere. prod stops being the reference for it, so without this the same
+difference is reported on every run, the score never reaches its target, and the reader learns to
+ignore the visual module.
+
+`match` is a case-insensitive substring, tested against the section name, the region label and the
+LLM's description — one rule per decision, not three. `note` is required: an accepted divergence
+with no written reason is indistinguishable from a forgotten gap.
+
+**It reclassifies, it does not silence.** The finding is still produced and still shown, marked
+`inconclusive`, which keeps it out of the score (`engine/verdict.ts`) and off the blocking path.
+Suppressing the region instead would hide a real regression *inside* the improved component just as
+effectively as it hides the expected difference.
 
 ## Environment variables
 
