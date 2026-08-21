@@ -34,6 +34,18 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Serialize publishes. The version is computed by reading what is currently on npm, and that read
+# is not atomic: two pushes landing close together both read npm before either has published,
+# both compute the same patch, and the second dies with
+# `You cannot publish over the previously published versions`. Observed with four merges inside
+# five minutes (issue #299) — three published, the fourth failed and needed a manual re-run.
+#
+# `cancel-in-progress: false` is load-bearing: cancelling a queued run would skip publishing that
+# commit entirely, which is worse than waiting. The job is short, so the queue is short.
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
