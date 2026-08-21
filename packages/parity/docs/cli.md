@@ -29,6 +29,28 @@
 | `parity plan verify` | Record that a component was actually compared, and against what |
 | `parity plan merge` | Bring a freshly captured plan into the canonical one keeping every recorded decision — use instead of copying the file |
 
+### Missing selectors (#72)
+
+When a step cannot find its element — the default cascade, any `.parityrc.json` override and LLM
+recovery all failed — the run does one of two things depending on who is watching:
+
+- **TTY + no LLM provider** → prompts for the selector and writes it to `.parityrc.json` under
+  `selectors.<key>`, so a re-run is deterministic. Disable with `--no-interactive`.
+- **Anything else (an agent, CI)** → writes one JSON line to **stderr**:
+
+  ```json
+  {"kind":"missing-selector","selectorKey":"buyButton","intendedAction":"clicar em comprar",
+   "alreadyTried":["[data-testid=add-to-cart]","..."],"pageUrl":"https://cand.example/p",
+   "htmlSnapshot":"…2000 chars…","suggestedRcPath":"/repo/.parityrc.json"}
+  ```
+
+  The point is that a caller who already knows the site can answer directly instead of asking an
+  agent to rediscover it with no context: write the selector into `suggestedRcPath` and re-run.
+
+One record per selector key per process — the same key fails on every viewport and every flow, and
+repeating it would bury the rest of the log. Keys with no `.parityrc.json` slot to write into emit
+nothing, since there would be nowhere to put the answer.
+
 ### Run caveats (`report.json.caveats`, #292)
 
 Every run records the conditions that limit how far its own numbers can be trusted, and both the
