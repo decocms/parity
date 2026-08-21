@@ -17,9 +17,12 @@ import { learnedStats, learnedValidate } from "./commands/learned.ts";
 import { listCommand, listModulesCommand } from "./commands/list.ts";
 import { migrateCommand } from "./commands/migrate.ts";
 import {
+  planPageCommand,
   planSetPageStatusCommand,
+  planSetReferenceCommand,
   planSetStatusCommand,
   planStatusCommand,
+  planVerifyCommand,
 } from "./commands/plan.ts";
 import { prCommand } from "./commands/pr.ts";
 import { promptCommand } from "./commands/prompt.ts";
@@ -332,9 +335,11 @@ program
   .description("Inspect/update the migration-plan.json component contract")
   .addCommand(
     new Command("set-status")
-      .description("Mark a component pending|partial|done|skipped as the orchestrator ports it")
+      .description(
+        "Mark a component's outcome as the orchestrator works. `as-is` = divergence accepted (prod is still the reference); `upgrade` = the target is deliberately ahead, so prod is NOT the reference — pair it with `plan set-reference`.",
+      )
       .argument("<name>", "Component name (case- and separator-insensitive)")
-      .argument("<status>", "pending | partial | done | skipped")
+      .argument("<status>", "pending | partial | done | as-is | upgrade | skipped")
       .option(
         "--dir <path>",
         "Directory holding migration-plan.json (default: the target repo's .parity/)",
@@ -371,6 +376,67 @@ program
       .option("--json", "Emit structured JSON instead of human-readable text", false)
       .action((opts) => {
         process.exit(planStatusCommand(opts.dir, Boolean(opts.json)));
+      }),
+  )
+  .addCommand(
+    new Command("page")
+      .description(
+        "Per-page worksheet: every component the capture saw on this page, what to do about it (build | validate | upgrade | as-is | settled), and a runnable `parity section` command for the checkable ones. The unit of work a migration closes is a page, not a global queue.",
+      )
+      .argument("<path>", "Page path, e.g. / or /refrigeracion")
+      .option(
+        "--dir <path>",
+        "Directory holding migration-plan.json (default: the target repo's .parity/)",
+        ".parity",
+      )
+      .option("--cand <url>", "Candidate base URL — required for runnable validation commands")
+      .option("--json", "Emit structured JSON instead of human-readable text", false)
+      .action((path, opts) => {
+        process.exit(
+          planPageCommand(opts.dir, path, { cand: opts.cand, json: Boolean(opts.json) }),
+        );
+      }),
+  )
+  .addCommand(
+    new Command("set-reference")
+      .description(
+        "Point a component's comparison at something other than prod (a site the better component came from), and record WHY it diverges. Without this, an intentional improvement is reported as a defect on every run.",
+      )
+      .argument("<name>", "Component name (case- and separator-insensitive)")
+      .requiredOption("--note <why>", "Why this component diverges — required, not decoration")
+      .option("--url <url>", "Reference site base URL (default: the plan's prod URL)")
+      .option("--selector <sel>", "Selector on the reference site, when it differs")
+      .option(
+        "--dir <path>",
+        "Directory holding migration-plan.json (default: the target repo's .parity/)",
+        ".parity",
+      )
+      .action((name, opts) => {
+        process.exit(
+          planSetReferenceCommand(opts.dir, name, {
+            url: opts.url,
+            selector: opts.selector,
+            note: opts.note,
+          }),
+        );
+      }),
+  )
+  .addCommand(
+    new Command("verify")
+      .description(
+        "Record that a component was actually compared against its reference. A `done` row with no verification only means the code exists.",
+      )
+      .argument("<name>", "Component name (case- and separator-insensitive)")
+      .argument("<verdict>", "pass | fail")
+      .option("--note <text>", "What was seen")
+      .option("--at <iso>", "Timestamp (default: now)")
+      .option(
+        "--dir <path>",
+        "Directory holding migration-plan.json (default: the target repo's .parity/)",
+        ".parity",
+      )
+      .action((name, verdict, opts) => {
+        process.exit(planVerifyCommand(opts.dir, name, verdict, { note: opts.note, at: opts.at }));
       }),
   );
 

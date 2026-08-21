@@ -9,15 +9,19 @@
 import chalk from "chalk";
 import {
   type ComponentStatus,
+  type Disposition,
   type PageStatus,
   loadPlan,
+  pagePlan,
   planProgress,
   savePlan,
+  setComponentReference,
   setComponentStatus,
+  setComponentVerified,
   setPageStatus,
 } from "../migrate/plan.ts";
 
-const STATUSES: ComponentStatus[] = ["pending", "partial", "done", "skipped"];
+const STATUSES: ComponentStatus[] = ["pending", "partial", "done", "as-is", "upgrade", "skipped"];
 const PAGE_STATUSES: PageStatus[] = ["pending", "code", "done", "skipped"];
 
 export function planSetStatusCommand(dir: string, name: string, status: string): number {
@@ -37,6 +41,16 @@ export function planSetStatusCommand(dir: string, name: string, status: string):
   }
   savePlan(dir, plan);
   console.log(`${chalk.green("✓")} ${component.name} → ${status}`);
+  // An accepted divergence with no recorded reason is indistinguishable from a forgotten gap.
+  if ((status === "upgrade" || status === "as-is") && !component.reference) {
+    console.log(
+      chalk.yellow(
+        `  no reason recorded — run \`parity plan set-reference ${component.name} --note "<why>"${
+          status === "upgrade" ? " --url <reference site>" : ""
+        }\``,
+      ),
+    );
+  }
   return 0;
 }
 
@@ -57,6 +71,148 @@ export function planSetPageStatusCommand(dir: string, path: string, status: stri
   }
   savePlan(dir, plan);
   console.log(`${chalk.green("✓")} ${page.path} → ${status}`);
+  return 0;
+}
+
+const DISPOSITION_STYLE: Record<Disposition, (s: string) => string> = {
+  build: chalk.red,
+  validate: chalk.yellow,
+  upgrade: chalk.cyan,
+  "as-is": chalk.gray,
+  settled: chalk.green,
+};
+
+/**
+ * `parity plan set-reference` — point a component's comparison at something other than prod, or
+ * just record why it diverges. This is what keeps an intentional improvement from being reported
+ * as a defect forever: `parity section --prod <url>` accepts any URL, so the reference site
+ * becomes the thing the component is checked against.
+ */
+export function planSetReferenceCommand(
+  dir: string,
+  name: string,
+  opts: { url?: string; selector?: string; note: string },
+): number {
+  const plan = loadPlan(dir);
+  if (!plan) {
+    console.error(chalk.red(`No migration-plan.json found in ${dir}`));
+    return 1;
+  }
+  const component = setComponentReference(plan, name, {
+    url: opts.url ?? plan.url,
+    selector: opts.selector ?? null,
+    note: opts.note,
+  });
+  if (!component) {
+    console.error(chalk.red(`No component matching "${name}" in the plan`));
+    return 1;
+  }
+  savePlan(dir, plan);
+  console.log(`${chalk.green("✓")} ${component.name} → reference ${component.reference?.url}`);
+  return 0;
+}
+
+/**
+ * `parity plan verify` — record that a component was actually compared, and against what. A
+ * `done` row with no verification only means the code exists.
+ */
+export function planVerifyCommand(
+  dir: string,
+  name: string,
+  verdict: string,
+  opts: { note?: string; at?: string },
+): number {
+  if (verdict !== "pass" && verdict !== "fail") {
+    console.error(chalk.red(`Invalid verdict "${verdict}". Use pass or fail.`));
+    return 1;
+  }
+  const plan = loadPlan(dir);
+  if (!plan) {
+    console.error(chalk.red(`No migration-plan.json found in ${dir}`));
+    return 1;
+  }
+  const component = setComponentVerified(
+    plan,
+    name,
+    verdict,
+    opts.at ?? new Date().toISOString(),
+    opts.note,
+  );
+  if (!component) {
+    console.error(chalk.red(`No component matching "${name}" in the plan`));
+    return 1;
+  }
+  savePlan(dir, plan);
+  const mark = verdict === "pass" ? chalk.green("✓") : chalk.red("✗");
+  console.log(`${mark} ${component.name} → ${verdict} (against ${component.verified?.against})`);
+  return 0;
+}
+
+/**
+ * `parity plan page <path>` — the per-page worksheet. The unit of work a migration actually
+ * closes is a page, not a global queue: without this the orchestrator triages the whole repo and
+ * files whatever it finds, so no page ever finishes.
+ */
+export function planPageCommand(
+  dir: string,
+  path: string,
+  opts: { cand?: string; json?: boolean },
+): number {
+  const plan = loadPlan(dir);
+  if (!plan) {
+    console.error(chalk.red(`No migration-plan.json found in ${dir}`));
+    return 1;
+  }
+  const page = pagePlan(plan, path, opts.cand);
+  if (!page) {
+    console.error(chalk.red(`No page matching "${path}" in the plan`));
+    console.error(chalk.gray(`  known pages: ${plan.pages.map((p) => p.path).join(", ")}`));
+    return 1;
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify(page, null, 2));
+    return 0;
+  }
+
+  console.log(
+    chalk.bold(`\n${page.path} ${chalk.gray(`(${page.kind})`)} — ${page.status}`) +
+      (page.ready ? chalk.green("  ready") : ""),
+  );
+
+  if (page.tasks === null) {
+    console.log(
+      chalk.yellow(
+        "\n  This plan has no page/component edges — it predates them. Re-run `parity migrate` to get per-page work.\n",
+      ),
+    );
+    return 0;
+  }
+
+  if (page.tasks.length === 0) {
+    console.log(chalk.gray("\n  The capture saw no components on this page.\n"));
+    return 0;
+  }
+
+  const order: Disposition[] = ["build", "validate", "upgrade", "as-is", "settled"];
+  for (const d of order) {
+    const rows = page.tasks.filter((t) => t.disposition === d);
+    if (!rows.length) continue;
+    console.log(`\n${DISPOSITION_STYLE[d](chalk.bold(d))} (${rows.length})`);
+    for (const t of rows) {
+      console.log(`  ${t.name} ${chalk.gray(`(${t.scope}, ${t.origin}, ${t.status})`)}`);
+      if (t.note) console.log(chalk.gray(`    why: ${t.note}`));
+      if (t.against?.kind === "reference") {
+        console.log(chalk.cyan(`    reference: ${t.against.url}`));
+      }
+      if (t.command) console.log(chalk.gray(`    $ ${t.command}`));
+    }
+  }
+
+  if (page.counts.validate > 0 && !opts.cand) {
+    console.log(chalk.yellow("\n  Pass --cand <url> to get runnable `parity section` commands."));
+  }
+  console.log("");
   return 0;
 }
 
@@ -93,8 +249,18 @@ export function planStatusCommand(dir: string, asJson: boolean): number {
       `${chalk.green(`${c.byStatus.done} done`)}, ` +
       `${chalk.yellow(`${c.byStatus.partial} partial`)}, ` +
       `${chalk.red(`${c.byStatus.pending} pending`)}, ` +
+      `${chalk.cyan(`${c.byStatus.upgrade} upgrade`)}, ` +
+      `${chalk.gray(`${c.byStatus["as-is"]} as-is`)}, ` +
       `${chalk.gray(`${c.byStatus.skipped} skipped`)}`,
   );
+  // Reported apart from `settled`: "we tolerated a difference" and "we did it better" are the
+  // two lines a stakeholder asks about, and both look like "not equal" to the visual diff.
+  if (c.accepted.upgrade.length) {
+    console.log(chalk.cyan(`  deliberately ahead of prod: ${c.accepted.upgrade.join(", ")}`));
+  }
+  if (c.accepted.asIs.length) {
+    console.log(chalk.gray(`  divergence accepted: ${c.accepted.asIs.join(", ")}`));
+  }
   if (c.settled.length) {
     console.log(chalk.gray(`  no work needed: ${c.settled.join(", ")}`));
   }
