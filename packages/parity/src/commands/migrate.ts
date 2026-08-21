@@ -34,8 +34,8 @@ import {
   savePlan,
   syntheticSourceComponents,
 } from "../migrate/plan.ts";
-import { buildFastStoreTheme } from "../migrate/targets/faststore-v4.ts";
-import { getTargetPlaybook, TARGET_NAMES } from "../migrate/targets/index.ts";
+
+import { getTargetPlaybook, getTargetTheme, TARGET_NAMES } from "../migrate/targets/index.ts";
 import {
   detectSource,
   getSource,
@@ -447,9 +447,11 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
         "utf8",
       );
     }
-    // FastStore-specific starter theme (deterministic token mapping).
-    if (opts.target === "faststore") {
-      writeFileSync(resolve(runDir, "custom-theme.scss"), buildFastStoreTheme(theme), "utf8");
+    // Starter theme, declared by the target rather than hardcoded here — that hardcoding is why
+    // faststore-next and tanstack-deco silently produced no theme at all (#309).
+    const targetTheme = opts.target ? getTargetTheme(opts.target) : null;
+    if (targetTheme) {
+      writeFileSync(resolve(runDir, targetTheme.filename), targetTheme.build(theme), "utf8");
     }
     // VTEX IO → FastStore component map (when the block tree was read).
     if (bundle.vtex) {

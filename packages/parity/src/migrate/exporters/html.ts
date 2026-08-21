@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { componentDirName } from "../../extract/naming.ts";
 import type { MigrationBundle } from "../../types/migrate.ts";
+import { getTargetTheme } from "../targets/index.ts";
 import { countContentImages } from "../vtex/content-assets.ts";
 import type { MigrateExporter } from "./types.ts";
 
@@ -255,10 +256,20 @@ ${favSrc ? `<link rel="icon" href="${esc(favSrc)}">` : ""}
     <h2>Files</h2>
     <a href="MIGRATION_PROMPT.md">MIGRATION_PROMPT.md</a>
     <a href="index.md">index.md</a>
-    ${b.target === "faststore" ? '<a href="custom-theme.scss">custom-theme.scss</a>' : ""}
+    ${themeLink(b.target)}
     ${b.vtex ? '<a href="component-map.json">component-map.json</a> <a href="blocks.json">blocks.json</a>' : ""}
     <a href="manifest.json">manifest.json (full)</a>
   </section>
 
 </main></body></html>`;
+}
+
+/**
+ * Link to whichever starter theme the target declared. Was hardcoded to the v4 filename and gated
+ * on the v4 target, so the other targets' theme files were written and then never linked (#309).
+ */
+function themeLink(target: string | undefined | null): string {
+  const theme = target ? getTargetTheme(target) : null;
+  if (!theme) return "";
+  return `<a href="${theme.filename}">${theme.filename}</a>`;
 }
