@@ -127,7 +127,7 @@ function originOf(pages: { url: string }[]): string | null {
  * starting with an `# H1` title, ideally a summary and `## ` sections with
  * `[links](…)`. Rejects SPA index.html fallbacks (served for unknown routes).
  */
-export async function fetchLlmsTxtQuality(
+async function fetchLlmsTxtQuality(
   origin: string,
   timeoutMs = 10_000,
 ): Promise<{ present: boolean; wellFormed: boolean; reason: string }> {

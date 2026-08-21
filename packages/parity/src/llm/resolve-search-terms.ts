@@ -155,6 +155,3 @@ export async function resolveSearchTerms(
   // 4. Fallback
   return { withResults: FALLBACK_TERMS[0]!, noResults };
 }
-
-/** Exposed for tests. */
-export const __TEST__ = { FALLBACK_TERMS, makeNoResults };

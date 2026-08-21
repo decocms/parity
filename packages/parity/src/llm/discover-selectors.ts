@@ -63,7 +63,7 @@ export type DiscoveredSelectors = z.infer<typeof DiscoveredSelectorsSchema>;
  *   - `htmlFingerprint` differs from the current page's structural fingerprint
  *   - JSON parse / schema validation failure (file is deleted + warned)
  */
-export const SelectorCacheEntrySchema = z.object({
+const SelectorCacheEntrySchema = z.object({
   schemaVersion: z.number(),
   createdAt: z.string(),
   htmlFingerprint: z.string(),

@@ -21,7 +21,7 @@ export type Feature =
   | "explain"
   | "component-detection";
 
-export const ALL_FEATURES: readonly Feature[] = [
+const ALL_FEATURES: readonly Feature[] = [
   "selector-discovery",
   "step-recovery",
   "search-terms",
@@ -77,7 +77,7 @@ export const DEFAULT_FEATURE_TIER: Record<Feature, ModelTier> = {
  * defaults. Applied above `DEFAULT_FEATURE_TIER` but below an explicit
  * `--llm-tier-default`/per-feature override (issue #256).
  */
-export const PREMIUM_FEATURE_TIER: Partial<Record<Feature, ModelTier>> = {
+const PREMIUM_FEATURE_TIER: Partial<Record<Feature, ModelTier>> = {
   explain: "opus",
   "issue-aggregation": "opus",
   "visual-diff": "opus",

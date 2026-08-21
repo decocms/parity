@@ -7,7 +7,7 @@
     },
     "packages/parity": {
       "name": "@decocms/parity",
-      "version": "0.23.0",
+      "version": "0.26.4",
       "bin": {
         "parity": "dist/cli.js",
       },
@@ -27,7 +27,6 @@
       },
       "devDependencies": {
         "@biomejs/biome": "^1.9.4",
-        "@types/diff": "^8.0.0",
         "@types/node": "^22.10.0",
         "@types/pixelmatch": "^5.2.6",
         "@types/pngjs": "^6.0.5",
@@ -309,8 +308,6 @@
     "@stablelib/base64": ["@stablelib/base64@1.0.1", "", {}, "sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ=="],
 
     "@tybys/wasm-util": ["@tybys/wasm-util@0.10.2", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-RoBvJ2X0wuKlWFIjrwffGw1IqZHKQqzIchKaadZZfnNpsAYp2mM0h36JtPCjNDAHGgYez/15uMBpfGwchhiMgg=="],
-
-    "@types/diff": ["@types/diff@8.0.0", "", { "dependencies": { "diff": "*" } }, "sha512-o7jqJM04gfaYrdCecCVMbZhNdG6T1MHg/oQoRFdERLV+4d+V7FijhiEAbFu0Usww84Yijk9yH58U4Jk4HbtzZw=="],
 
     "@types/estree": ["@types/estree@1.0.8", "", {}, "sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w=="],
 

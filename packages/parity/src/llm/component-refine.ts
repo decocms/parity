@@ -67,10 +67,6 @@ besides hyphens. Return exactly one label per input selector, in the same
 order — never add, remove, merge, or split entries.
 `.trim();
 
-export function isComponentRefineLlmAvailable(): boolean {
-  return isLlmAvailable();
-}
-
 export async function refineComponentsWithLlm(
   page: Page,
   candidates: DetectedComponent[],

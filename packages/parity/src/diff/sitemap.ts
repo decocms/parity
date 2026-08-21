@@ -87,7 +87,7 @@ export function parseSitemap(xml: string): ParsedSitemap {
  * pages. Non-deco sites 404 here → returns `[]` harmlessly. Dynamic templates
  * (`:slug`, `*`, `{param}`) are skipped since we have no concrete param values.
  */
-export async function fetchDecoPages(baseUrl: string, timeoutMs = 15_000): Promise<string[]> {
+async function fetchDecoPages(baseUrl: string, timeoutMs = 15_000): Promise<string[]> {
   const url = new URL("/live/invoke/website/loaders/pages.ts", baseUrl).toString();
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);

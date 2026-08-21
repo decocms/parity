@@ -286,7 +286,7 @@ export function setPageStatus(
  * Locate a page by path: exact first, then leniently (trailing slash / missing leading slash),
  * so `home`, `/home` and `/home/` all hit the same row. Shared by every page-scoped read.
  */
-export function findPage(plan: MigrationPlan, path: string): PlanPage | null {
+function findPage(plan: MigrationPlan, path: string): PlanPage | null {
   const norm = (p: string) => `/${p.trim().replace(/^\/+|\/+$/g, "")}` || "/";
   const target = norm(path);
   return (

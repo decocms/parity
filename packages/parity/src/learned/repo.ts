@@ -82,7 +82,7 @@ function ageDays(entry: SelectorEntry): number {
  * validated in 90+ days have their effective rate halved so a recently
  * confirmed selector wins over a stale champion.
  */
-export function effectiveRate(entry: SelectorEntry): number {
+function effectiveRate(entry: SelectorEntry): number {
   const decay = ageDays(entry) > STALE_DECAY_DAYS ? 0.5 : 1;
   return entry.successRate * decay;
 }

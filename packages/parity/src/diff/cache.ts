@@ -142,7 +142,7 @@ export function classifyResource(entry: NetworkEntry, baseHost: string | null): 
   return "other";
 }
 
-export function classifyAll(entries: NetworkEntry[], baseUrl: string): ClassifiedRequest[] {
+function classifyAll(entries: NetworkEntry[], baseUrl: string): ClassifiedRequest[] {
   let baseHost: string | null = null;
   try {
     baseHost = new URL(baseUrl).hostname;
