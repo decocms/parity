@@ -58,6 +58,23 @@ state file does **not** duplicate it. Once `target.dir` exists (`repo-setup`),
 copy the plan there and treat that path as canonical for the rest of the run
 (it survives a resume — see `/parity:resume`).
 
+**Commit it.** `migration-plan.json` is the only parity artifact worth versioning: it is the
+record of what was done and what was decided, it is ~8 KB, and it makes decisions reviewable in a
+diff. Everything else parity writes is machine-local state or a regenerable multi-megabyte
+capture. If the target repo has no rule for it yet, add one:
+
+```gitignore
+# parity — commit .parity/migration-plan.json, ignore the rest
+.parity/*
+!.parity/migration-plan.json
+.parity-cache/
+parity-output/
+learned-selectors.json
+```
+
+Because it is committed, treat it like code: it changes through the CLI, and a re-capture must
+merge (step 3 of `reconcile`), never overwrite.
+
 Never hand-edit the JSON. Flip a component's status through the CLI, via `runner`:
 
 ```
@@ -256,7 +273,10 @@ not porting. Say so to the user.
 2. If no source: run `parity migrate --url <prodUrl>`.
 3. `parity migrate` writes `migration-plan.json` (all rows `status: "pending"`)
    under its `--out` dir (`./parity-migrate/<host>/`). Once `target.dir` exists,
-   copy it to the canonical `<target.dir>/.parity/migration-plan.json`.
+   bring it to the canonical `<target.dir>/.parity/migration-plan.json` with
+   **`parity plan merge <out dir> --dir <target.dir>/.parity`** — never `cp`. A
+   copy reverts every recorded decision (ported / `as-is` / `upgrade` / verified),
+   and since the plan is committed, that revert lands as a diff nobody wrote.
    **HARD GATE — verify the file exists at that path before going further**
    (`ls <target.dir>/.parity/migration-plan.json` via `runner`). The plan is the
    spine of the whole run: it is the ONLY record of what exists vs what is

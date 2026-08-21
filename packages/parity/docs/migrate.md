@@ -268,6 +268,53 @@ Note that **global components (header, footer, nav) are not page members** in th
 capture, so they never appear in a page worksheet. Order globals first by
 `scope`, before walking pages, or a global fix reopens pages already closed.
 
+### What to commit
+
+**Commit `migration-plan.json`. Ignore everything else parity writes.**
+
+The plan is the only parity artifact that holds information no rerun can reproduce: what was
+ported, which divergence was accepted, which component is deliberately ahead of prod and the
+written reason why, what was verified against what. That is review material — "we marked the
+footer `upgrade` because it came from the other storefront" belongs in a diff, not in someone's
+memory. It is also small: a real 20-component / 10-page plan is **8 KB**.
+
+Everything else is either machine-local run state or a regenerable capture, and two of them are
+multi-megabyte:
+
+```gitignore
+# parity — commit .parity/migration-plan.json, ignore the rest
+.parity/*
+!.parity/migration-plan.json
+.parity-cache/
+parity-output/
+learned-selectors.json
+```
+
+| Artifact | Size (real run) | Commit? |
+| --- | --- | --- |
+| `migration-plan.json` | 8 KB | **yes** — decisions + progress |
+| `migration.json` (orchestrator state) | small | no — phase/round/budget, machine-local, conflicts on every run |
+| `manifest.json` | 7.1 MB | no — regenerable capture |
+| `capture.json` | 7.0 MB | no — regenerable capture |
+| `report.html` | 4.0 MB | no — regenerable, screenshots inlined |
+| `learned-selectors.json`, `.parity-cache/` | — | no — caches |
+
+### Re-capturing does not revert decisions
+
+`buildMigrationPlan` writes every row `pending`, because the capture is all it knows. Running
+`parity migrate` again therefore **would** wipe every recorded decision — and with the plan
+committed, that wipe lands as a diff nobody wrote.
+
+`migrate` now merges instead: the fresh capture owns the row *set*, the previous plan owns the
+*decisions*. It prints how many were carried, and warns by name when a component that had a
+decision is no longer in the capture — a decision disappearing should never be silent.
+
+Copying the plan between directories has the same hazard, so use the merge instead of `cp`:
+
+```bash
+parity plan merge <migrate output dir> --dir <target>/.parity
+```
+
 ### `parity plan status` — the inventory
 
 ```bash
