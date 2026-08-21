@@ -169,16 +169,60 @@ capture:
 
 - `origin` — `both` (in code and seen live), `source-only` (in code, not
   observed live), or `live-only` (seen live, no source file).
-- `status` — `pending` \| `partial` \| `done` \| `skipped`, all `pending` at
-  creation; the orchestrator flips it via `parity plan set-status <name> <status>
-  [--dir]` (default `.parity/`; case- and separator-insensitive name match)
-  rather than hand-editing the JSON. `partial` is for a half-wired target: on
-  FastStore a section needs component + CMS schema + whitelist entry, so a schema
-  with no `index.tsx` registration (or the reverse) is neither pending nor done —
-  reporting it as `pending` sends a porter to redo finished work. The plan lives
-  at `<target>/.parity/migration-plan.json` — the single source of truth for
-  components, so it survives a resume.
+- `status` — `pending` \| `partial` \| `done` \| `as-is` \| `upgrade` \|
+  `skipped`, all `pending` at creation; the orchestrator flips it via
+  `parity plan set-status <name> <status> [--dir]` (default `.parity/`; case- and
+  separator-insensitive name match) rather than hand-editing the JSON. `partial`
+  is for a half-wired target: on FastStore a section needs component + CMS schema
+  + whitelist entry, so a schema with no `index.tsx` registration (or the reverse)
+  is neither pending nor done — reporting it as `pending` sends a porter to redo
+  finished work. The plan lives at `<target>/.parity/migration-plan.json` — the
+  single source of truth for components, so it survives a resume.
 - `file` — repo-relative source path when the code defines the component.
+- `selector` — the captured CSS selector, so a per-component validation command
+  can be built without re-reading the capture.
+- `reference` — `{ url, selector, note }` when this component is **not** measured
+  against prod. See "Deliberate divergence" below.
+- `verified` — `{ at, verdict, against, note? }`, the last recorded comparison. A
+  `done` row with no `verified` only means the code exists.
+
+### Deliberate divergence — `as-is` vs `upgrade`
+
+Both mean "stop opening work for this", for opposite reasons, and the difference
+is the whole point:
+
+| status | What it says | Reference |
+| --- | --- | --- |
+| `as-is` | different from prod, accepted, not worth the work | still prod |
+| `upgrade` | the target is deliberately **ahead** — a better component brought in from elsewhere | **not prod** |
+
+`skipped` keeps its old meaning: not going to do it.
+
+An `upgrade` is not a label nuance, it is a change of reference. Point the
+component somewhere else and say why:
+
+```bash
+parity plan set-reference <name> --url https://other-site.example \
+  --selector ".hero-v2" --note "brought over from the other storefront"
+```
+
+`--note` is required. An `upgrade` with no written reason is indistinguishable
+from a forgotten gap six months later.
+
+This works because `parity section --prod <url>` takes any URL — nothing forces
+it to be the production site — so the component gets compared against where it
+actually came from. Do **not** reach for `.parityignore`'s
+`ignoreSelectorsVisual` for this: that blinds the diff to the selector, so a real
+regression in the improved component also stops being seen.
+
+Record the outcome of a comparison with:
+
+```bash
+parity plan verify <name> pass|fail [--note "<what was seen>"]
+```
+
+`against` is derived from the row (`reference` when one is set, otherwise
+`prod`), so a caller cannot record a pass against the wrong thing.
 
 Each `pages[]` row also carries a `status`, flipped via
 `parity plan set-page-status <path> <status>`:
@@ -189,6 +233,41 @@ Each `pages[]` row also carries a `status`, flipped via
   code-complete is not page-complete.
 - `done` — code AND content live. `skipped` — intentionally out of scope.
 
+Each `pages[]` row also carries `components[]` — the component names the capture
+saw on that page. This is what turns a flat component list into per-page work;
+without it there is no answer to "what is left on the PDP?". Plans written before
+these edges existed have no `components` key, which reads as *unknown*, not
+*none*.
+
+### `parity plan page <path>` — the per-page worksheet
+
+```bash
+parity plan page /some-product/p --dir <target>/.parity --cand http://localhost:3000
+parity plan page /some-product/p --dir <target>/.parity --json
+```
+
+Every component the capture saw on that page, grouped by what to do about it:
+
+| disposition | Derived from | Task |
+| --- | --- | --- |
+| `build` | `pending` / `partial` | port it |
+| `validate` | `done`, or `upgrade` **with** a reference, and never verified | run the printed `parity section` command |
+| `upgrade` | `upgrade` with **no** reference | human review — there is nothing to compare against |
+| `as-is` | `as-is` | none; listed so nobody re-raises it |
+| `settled` | verified, or `skipped` | none |
+
+Dispositions are **derived, never stored**: a second task store drifts from the
+plan on the first round and then neither is trustworthy. `--cand` is a flag
+rather than a plan field because the plan describes the capture, not whichever
+environment happens to be running.
+
+`ready: true` means nothing is left to build or validate on that page — the
+signal for `parity plan set-page-status <path> done`.
+
+Note that **global components (header, footer, nav) are not page members** in the
+capture, so they never appear in a page worksheet. Order globals first by
+`scope`, before walking pages, or a global fix reopens pages already closed.
+
 ### `parity plan status` — the inventory
 
 ```bash
@@ -198,7 +277,9 @@ parity plan status --dir <target>/.parity --json
 
 Prints what is settled (components needing no further work), what remains
 (`pending` + `partial`, with scope/origin), and which pages are awaiting CMS
-content. **Read this before triaging.** Without a plan there is no record of what
+content. `as-is` and `upgrade` are reported on their own lines rather than folded
+into "settled": "we tolerated a difference" and "we did it better" are the two
+lines a stakeholder asks about, and both look identical to a visual diff. **Read this before triaging.** Without a plan there is no record of what
 is missing, so a survey silently reports zero missing components and degenerates
 into a lint pass over whatever the repo happens to contain — filing polish issues
 (CSS tokens, bundle size, analytics) while unbuilt components and unpublished
