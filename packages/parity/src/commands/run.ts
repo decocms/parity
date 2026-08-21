@@ -70,6 +70,7 @@ import type {
   VisualDiffSummary,
 } from "../types/schema.ts";
 import { attachSpinnerHeartbeat } from "../util/heartbeat.ts";
+import { type RunCaveat, detectRunCaveats } from "../engine/run-context.ts";
 import { isLocalhost } from "../util/localhost.ts";
 import { TimingRegistry, buildFlowBreakdown, formatTimingsSummary } from "../util/timing.ts";
 import { serveRunAndBlock } from "./serve.ts";
@@ -303,6 +304,10 @@ export function pagesFlowsScopeWarning(
  * `noVisualDiff = true` in that case, or `--pages` becomes inert in
  * no-LLM environments on top of the flows-scoping gap this issue tracks.
  */
+function caveatsOrUndefined(caveats: RunCaveat[]): RunCaveat[] | undefined {
+  return caveats.length > 0 ? caveats : undefined;
+}
+
 export function applySmartDefaults(opts: RunOptions, llmAvailable: boolean): RunOptions {
   if (llmAvailable) return opts;
   if (opts.pages || opts.pagesFile) return opts;
@@ -1467,6 +1472,16 @@ export async function runCommand(rawOpts: RunOptions): Promise<number> {
       timings: runTimings,
       selectionReason: opts.why,
       moduleVerdicts: moduleVerdicts.length > 0 ? moduleVerdicts : undefined,
+      caveats: caveatsOrUndefined(
+        detectRunCaveats({
+          prodUrl: opts.prod,
+          candUrl: opts.cand,
+          prodPages: checkCtx.prodPages,
+          candPages: checkCtx.candPages,
+          verdict,
+          llmEnabled: llmStillAvailable,
+        }),
+      ),
     };
 
     const reportStart = performance.now();
@@ -1899,6 +1914,12 @@ function printSummary(
   console.log(
     `     issues: ${chalk.red(verdict.critical)} critical · ${chalk.yellow(verdict.high)} high · ${verdict.medium} medium · ${chalk.dim(`${verdict.low} low`)}`,
   );
+  // Right under the score, not at the end: a reader who sees the number and not its limits will
+  // quote the number. Issue #292.
+  for (const c of run.caveats ?? []) {
+    const mark = c.level === "warn" ? chalk.yellow("⚠") : chalk.dim("ℹ");
+    console.log(`     ${mark} ${c.summary}`);
+  }
   if (run.moduleVerdicts && run.moduleVerdicts.length > 0) {
     const perModule = run.moduleVerdicts
       .map((mv) => {

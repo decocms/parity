@@ -547,6 +547,19 @@ export const ModuleVerdict = z.object({
 });
 export type ModuleVerdict = z.infer<typeof ModuleVerdict>;
 
+/**
+ * A condition that makes this run's numbers less comparable than they look — a dev-server
+ * candidate, two sides on different paths, modules skipped for want of an LLM. Rendered as a
+ * banner rather than left for the reader to infer. Issue #292.
+ */
+export const RunCaveat = z.object({
+  id: z.string(),
+  level: z.enum(["warn", "info"]),
+  summary: z.string(),
+  detail: z.string(),
+});
+export type RunCaveat = z.infer<typeof RunCaveat>;
+
 export const Run = z.object({
   schemaVersion: z.literal("0.1"),
   id: z.string(),
@@ -595,6 +608,11 @@ export const Run = z.object({
   partial: z.boolean().optional(),
   /** Phase where partial=true was set. Useful for triage. */
   partialReason: z.string().optional(),
+  /**
+   * Conditions that limit how far this run's numbers can be trusted. Empty/absent means the run
+   * had none worth stating. See `detectRunCaveats`. Issue #292.
+   */
+  caveats: z.array(RunCaveat).optional(),
   /**
    * Per-phase wall-clock timing for the run. Lets users see where the
    * time actually went (e.g. checks took 60% of the run vs LLM 20%) so

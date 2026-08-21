@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import type { CheckResult, Issue, PageCapture } from "../types/schema.ts";
+import { isLocalhost } from "../util/localhost.ts";
 import type { CheckContext } from "./index.ts";
 
 /**
@@ -28,6 +29,15 @@ export async function ssrNoJs(ctx: CheckContext): Promise<CheckResult> {
   const prodHome = pickHome(ctx.prodPages);
   const prodText = prodHome ? await fetchSsrText(prodHome.finalUrl) : null;
 
+  // A dev server legitimately renders client-side in several frameworks, so an empty SSR body
+  // there is not evidence of a defect. Report it — the reader still wants to know — but as
+  // `inconclusive`, which keeps it out of the score and off the blocking path until someone
+  // reconfirms on a production build. Issue #292.
+  const candIsDevServer = isLocalhost(candHome.finalUrl);
+  const devServerNote = candIsDevServer
+    ? "\n\n⚠ Medido contra um dev server, onde várias frameworks renderizam client-side por padrão. Reconfirme num build de produção antes de tratar isto como defeito."
+    : "";
+
   if (candText.length < 200) {
     issues.push({
       id: "ssr:blank",
@@ -35,8 +45,8 @@ export async function ssrNoJs(ctx: CheckContext): Promise<CheckResult> {
       category: "functional",
       check: "ssr-no-js",
       summary: `SSR do candidato rende só ${candText.length} chars de texto — página em branco sem JS (CLS alto, SEO/acessibilidade quebrados)`,
-      details:
-        "Todo o conteúdo carrega client-side. Marque seções above-the-fold com `export const neverDefer = true` ou adicione LoadingFallback.",
+      details: `Todo o conteúdo carrega client-side. Marque seções above-the-fold com \`export const neverDefer = true\` ou adicione LoadingFallback.${devServerNote}`,
+      ...(candIsDevServer ? { inconclusive: true } : {}),
     });
   } else if (prodText !== null && prodText.length > 0 && candText.length < prodText.length * 0.3) {
     issues.push({
@@ -45,10 +55,13 @@ export async function ssrNoJs(ctx: CheckContext): Promise<CheckResult> {
       category: "functional",
       check: "ssr-no-js",
       summary: `SSR do candidato tem <30% do texto do prod (${candText.length} vs ${prodText.length} chars) — maioria do conteúdo é client-only`,
+      ...(candIsDevServer ? { inconclusive: true, details: devServerNote.trim() } : {}),
     });
   }
 
-  const status: CheckResult["status"] = issues.some((i) => i.severity === "critical")
+  const status: CheckResult["status"] = issues.some(
+    (i) => i.severity === "critical" && !i.inconclusive,
+  )
     ? "fail"
     : issues.length > 0
       ? "warn"
