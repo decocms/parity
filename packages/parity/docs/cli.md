@@ -11,7 +11,7 @@
 | `parity benchmark` | User Navigation Benchmark: warm before/after story (home → PLP → paginate → PDP → shelf), single shareable HTML |
 | `parity cache` | CDN cache analysis, opportunities, request categorization |
 | `parity serve` | Local HTTP server with iframe proxy so side-by-side tab works for any site |
-| `parity report` | Reopen a saved run's HTML report. With `--section <name>`: extract one tab to stdout |
+| `parity report` | Reopen a saved run's HTML report. With `--section <name>`: extract one tab to stdout. With `--deck`: render the presentation deck instead |
 | `parity compare` | Compare a run against a baseline |
 | `parity baseline` | Manage baselines (`set`, `list`, `unset`) |
 | `parity list` | List saved runs |

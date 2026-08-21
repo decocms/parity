@@ -9,6 +9,7 @@ without carrying an asset folder.
 | `runs/<runId>/report.html` | `parity run`, `parity audit` | Dark dashboard, sidebar + tab per module |
 | `runs/<runId>/report.html` | `parity benchmark` | Light editorial page, viewport tabs, PT/EN toggle |
 | `<outDir>/report.html` | `parity migrate` | Light card stack: theme, assets, block mapping, per-page inventory |
+| `runs/<runId>/deck.html` | `parity report <runId> --deck` | Presentation deck: one topic per full-viewport page, advanced sideways |
 
 Distinguish a `run` report from a `benchmark` report by the `<title>`.
 
@@ -24,6 +25,31 @@ The design system as a normal vertical page: tokens, editorial serif numbers, st
 comparison bars, the vitals table, device-framed screenshots, the info modal and the PT/EN
 toggle. Open it in a browser to see every component rendered, then view source and copy what
 you need.
+
+### `parity report <runId> --deck` — the generated deck
+
+```bash
+parity report <runId> --deck                       # writes deck.html in the run dir
+parity report <runId> --deck --out /tmp/deck.html --lang pt --open
+```
+
+Built from `report.json` via `buildDeckModel` (`src/report/deck-model.ts`) and
+`renderDeckHtml` (`src/report/deck-html.ts`). Pages, in order — each one omitted when it has
+nothing to say, because an empty page in a deck is a dead beat:
+
+1. **Cover** — hosts, score, verdict, date
+2. **How to read this run** — `report.json.caveats` (#292), only when the run has any
+3. **Executive summary** — headline tiles plus per-module scores
+4. **Findings** — ranked from `topIssues`, capped at 12 with the overflow **stated**, and an
+   `inconclusive` finding labelled rather than presented as a defect
+5. **Visual parity** — only when the visual module ran
+
+What it deliberately does **not** do is invent narrative. Section prose, the before/after mapping
+and the "why" column are human judgment; a generator that guesses them produces a document nobody
+trusts. Use the template below when you want to write those by hand.
+
+The CSS and JS live in `src/report/deck-template.ts` and are kept byte-identical to the template
+file by a drift test — editing one without the other fails CI.
 
 ### `templates/report-deck.html` — the presentation shell
 

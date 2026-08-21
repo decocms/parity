@@ -1,6 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import chalk from "chalk";
 import open from "open";
+import { renderDeckHtml } from "../report/deck-html.ts";
+import { buildDeckModel } from "../report/deck-model.ts";
 import { type ReportSection, extractReportSection } from "../report/extract-section.ts";
 import { getRunPaths, loadRun } from "../storage/fs.ts";
 
@@ -11,6 +14,14 @@ export interface ReportCommandOptions {
   section?: ReportSection;
   /** Pair with --section to emit JSON instead of HTML. */
   json?: boolean;
+  /** Render the presentation deck instead of opening the dashboard. Issue #290. */
+  deck?: boolean;
+  /** Where to write the deck. Defaults to `deck.html` inside the run dir. */
+  out?: string;
+  /** Initial deck language; the in-page toggle still switches live. */
+  lang?: "pt" | "en";
+  /** Open the rendered deck in the browser. */
+  open?: boolean;
 }
 
 /**
@@ -21,6 +32,26 @@ export interface ReportCommandOptions {
  */
 export async function reportCommand(runId: string, opts: ReportCommandOptions): Promise<number> {
   const paths = getRunPaths(opts.output, runId);
+
+  if (opts.deck) {
+    let run: ReturnType<typeof loadRun>;
+    try {
+      run = loadRun(opts.output, runId);
+    } catch (err) {
+      console.error(chalk.red(`failed to load run: ${(err as Error).message}`));
+      return 1;
+    }
+    const html = renderDeckHtml(buildDeckModel(run), opts.lang ?? "en");
+    const dest = opts.out ?? join(paths.runDir, "deck.html");
+    writeFileSync(dest, html, "utf8");
+    console.log(`${chalk.green("✓")} deck → ${dest}`);
+    if (opts.open) {
+      await open(dest).catch((err) => {
+        console.error(chalk.red(`failed to open: ${(err as Error).message}`));
+      });
+    }
+    return 0;
+  }
 
   if (opts.section) {
     if (opts.json) {
