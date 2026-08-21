@@ -1,4 +1,9 @@
 import type { BrowserContext, Locator, Page } from "playwright";
+import {
+  buildStructuredError,
+  isInteractiveMode,
+  promptForSelector,
+} from "../interactive-selector-prompt.ts";
 import type { Platform } from "../../learned/platform.ts";
 import type { LearnedSelectors } from "../../learned/repo.ts";
 import { pickCategoryLink } from "../../llm/pick-plp.ts";
@@ -468,6 +473,52 @@ export async function findElement(
       return { ...recovered, recoveredByLlm: true };
     }
   }
+
+  // Everything failed. Issue #72 built both exits for this moment and neither was ever wired:
+  // a TTY human gets asked for the selector, and anyone else (an agent, CI) gets a machine-readable
+  // record instead of a bare "element not found" with no context to act on.
+  if (opts.key) {
+    const supplied = await resolveMissingSelector(page, opts.key, opts.intent, tried);
+    if (supplied) {
+      const el = page.locator(supplied).first();
+      if (await el.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        return { locator: el, selector: supplied, recoveredByLlm: false };
+      }
+    }
+  }
+  return null;
+}
+
+/** One report per selector key per process — the same key fails on every viewport and every flow. */
+const reportedMissing = new Set<string>();
+
+/**
+ * Ask for the missing selector, or emit the structured error. Returns a selector when a human typed
+ * one (already persisted to `.parityrc.json` by the prompt), otherwise null.
+ */
+async function resolveMissingSelector(
+  page: Page,
+  key: SelectorKey,
+  intent: string,
+  tried: string[],
+): Promise<string | null> {
+  const input = {
+    selectorKey: key,
+    intendedAction: intent,
+    alreadyTried: tried,
+    pageUrl: page.url(),
+    htmlSnapshot: await page.content().catch(() => ""),
+  };
+
+  if (isInteractiveMode()) {
+    return await promptForSelector(input).catch(() => null);
+  }
+
+  if (reportedMissing.has(key)) return null;
+  reportedMissing.add(key);
+  // stderr as one JSON line: an agent reads it without parsing the whole run log, and it does not
+  // pollute stdout for callers piping structured output.
+  process.stderr.write(`${JSON.stringify(buildStructuredError(input))}\n`);
   return null;
 }
 
