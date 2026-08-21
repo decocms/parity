@@ -8,7 +8,7 @@
  * Pure — takes a `DeckModel`, returns a string. All CSS/JS comes from `deck-template.ts`.
  */
 
-import type { DeckFinding, DeckModel, DeckTile } from "./deck-model.ts";
+import type { DeckFinding, DeckModel, DeckTile, I18nText } from "./deck-model.ts";
 import { DECK_CSS, DECK_JS } from "./deck-template.ts";
 
 export type DeckLang = "pt" | "en";
@@ -28,22 +28,38 @@ function esc(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/** Bilingual span, same contract the templates use: `.i18n` swaps textContent from data-pt/data-en. */
+/**
+ * Bilingual span, same contract the templates use: `.i18n` swaps textContent from data-pt/data-en.
+ *
+ * Both locales are asserted non-empty. A blank one is invisible until someone flips the toggle, and
+ * then it renders as an empty label — so it fails here instead, at render time. `same()` is the
+ * escape hatch for the cases where one string legitimately serves both. Issue #293.
+ */
 function L(pt: string, en: string, lang: DeckLang): string {
+  if (!pt.trim() || !en.trim()) {
+    throw new Error(
+      `deck i18n: both locales required, got pt=${JSON.stringify(pt)} en=${JSON.stringify(en)}. Use same("...") when one string serves both.`,
+    );
+  }
   const initial = lang === "pt" ? pt : en;
   return `<span class="i18n" data-pt="${esc(pt)}" data-en="${esc(en)}">${esc(initial)}</span>`;
+}
+
+/** Render an {@link I18nText} from the model. */
+function T(text: I18nText, lang: DeckLang): string {
+  return L(text.pt, text.en, lang);
 }
 
 function tiles(items: DeckTile[], lang: DeckLang): string {
   const cells = items
     .map(
       (t) =>
-        `<div class="tile"><div class="tile-val ${TONE_CLASS[t.tone]}">${esc(t.value)}</div>` +
-        `<div class="tile-label">${esc(t.label)}</div>` +
-        `<div class="tile-sub">${esc(t.sub)}</div></div>`,
+        `<div class="tile"><div class="tile-val ${TONE_CLASS[t.tone]}">${esc(t.value)}</div><div class="tile-label">${T(
+          t.label,
+          lang,
+        )}</div>${t.sub ? `<div class="tile-sub">${T(t.sub, lang)}</div>` : ""}</div>`,
     )
     .join("");
-  void lang;
   return `<div class="stat-grid">${cells}</div>`;
 }
 
@@ -90,7 +106,7 @@ function findingsTable(findings: DeckFinding[], omitted: number, lang: DeckLang)
           lang,
         )}</p>`
       : "";
-  return `<table class="grid compact"><thead><tr><th>Sev</th><th>${L(
+  return `<table class="grid compact"><thead><tr><th>${L("Sev", "Sev", lang)}</th><th>${L(
     "Categoria",
     "Category",
     lang,
@@ -182,20 +198,20 @@ export function renderDeckHtml(model: DeckModel, lang: DeckLang = "en"): string 
           [
             {
               value: String(model.visual.pagesChecked),
-              label: "páginas comparadas",
-              sub: "",
+              label: { pt: "páginas comparadas", en: "pages compared" },
+              sub: null,
               tone: "neutral",
             },
             {
               value: String(model.visual.pagesPassed),
-              label: "sem diferenças",
-              sub: "",
+              label: { pt: "sem diferenças", en: "no differences" },
+              sub: null,
               tone: "good",
             },
             {
               value: String(model.visual.pagesWithDiffs),
-              label: "com diferenças",
-              sub: "",
+              label: { pt: "com diferenças", en: "with differences" },
+              sub: null,
               tone: model.visual.pagesWithDiffs > 0 ? "warn" : "good",
             },
           ],

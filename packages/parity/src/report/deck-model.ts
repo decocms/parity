@@ -13,10 +13,25 @@
 
 import type { Issue, Run, RunCaveat, Severity } from "../types/schema.ts";
 
+/**
+ * A string in both locales. The deck is bilingual end to end, so a label that exists in only one
+ * language is a bug the renderer refuses at build time rather than a blank cell after someone
+ * flips the toggle. Issue #293.
+ */
+export interface I18nText {
+  pt: string;
+  en: string;
+}
+
+/** A term that reads the same in both languages (`critical`, `Pix`, `FAQ`). */
+export function same(text: string): I18nText {
+  return { pt: text, en: text };
+}
+
 export interface DeckTile {
   value: string;
-  label: string;
-  sub: string;
+  label: I18nText;
+  sub: I18nText | null;
   tone: "good" | "warn" | "bad" | "neutral";
 }
 
@@ -86,27 +101,35 @@ export function buildDeckModel(run: Run): DeckModel {
     headline: [
       {
         value: `${v.score}/100`,
-        label: "score parity",
-        sub: v.pagesAnalyzed ? `${v.pagesAnalyzed} páginas analisadas` : "",
+        label: { pt: "score parity", en: "parity score" },
+        sub: v.pagesAnalyzed
+          ? {
+              pt: `${v.pagesAnalyzed} páginas analisadas`,
+              en: `${v.pagesAnalyzed} pages analyzed`,
+            }
+          : null,
         tone: toneForStatus(v.status),
       },
       {
         value: String(v.critical),
-        label: "critical",
-        sub: "bloqueiam launch",
+        label: same("critical"),
+        sub: { pt: "bloqueiam launch", en: "block launch" },
         tone: v.critical > 0 ? "bad" : "good",
       },
       {
         value: String(v.high),
-        label: "high",
-        sub: "corrigir antes de produção",
+        label: same("high"),
+        sub: { pt: "corrigir antes de produção", en: "fix before production" },
         tone: v.high > 0 ? "warn" : "good",
       },
       {
         value: `${v.checksPassed}/${v.checksRun}`,
-        label: "checks passados",
+        label: { pt: "checks passados", en: "checks passed" },
         // A skipped check is not a passing one, so it is stated rather than folded into the ratio.
-        sub: v.checksSkipped > 0 ? `${v.checksSkipped} pulados` : "",
+        sub:
+          v.checksSkipped > 0
+            ? { pt: `${v.checksSkipped} pulados`, en: `${v.checksSkipped} skipped` }
+            : null,
         tone: v.checksFailed > 0 ? "bad" : "good",
       },
     ],
