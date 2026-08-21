@@ -63,6 +63,7 @@ For agents driving `parity` in a loop, the stable surface is:
 | Generate visual-fix bundle | `parity fix --prod X --cand Y --selector S` | Markdown + screenshots + computed-styles diff |
 
 See [`docs/cli.md`](./docs/cli.md) for every command, [`docs/checks.md`](./docs/checks.md) for every check.
+See [`docs/reports.md`](./docs/reports.md) for the HTML outputs and the two report template kits.
 
 ## LLM providers
 

@@ -34,6 +34,7 @@
   },
   "files": [
     "dist",
+    "templates",
     "scripts/postinstall.cjs",
     "README.md",
     "AGENTS.md",
