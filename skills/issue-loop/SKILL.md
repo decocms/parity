@@ -22,6 +22,33 @@ fi
 The `parity-migrate` label is the dedup boundary. Same title = same issue.
 Never create a duplicate — it creates noise and confuses the fixer.
 
+## Title convention
+
+```
+[<page path>] <component>: <problem>
+```
+
+Because dedup is by **title**, the page has to be in it. `ProductShelf: does not
+match prod` collides across every page that has a shelf: the first one files, the
+rest are silently swallowed as duplicates, and those pages can never be closed.
+`[/p] ProductShelf: …` and `[/] ProductShelf: …` are two issues, which is
+correct — they are two pieces of work.
+
+Omit the prefix only for findings that genuinely have no page (repo-wide config,
+build setup).
+
+## Never file these
+
+Read the component's `status` in `.parity/migration-plan.json` first:
+
+- `as-is` — the divergence is accepted. Not a bug, not even `low`.
+- `upgrade` — the target is deliberately ahead of prod. A "does not match prod"
+  issue here is wrong by construction; prod is not its reference. If it has a
+  `reference` and diverges from *that*, file it normally.
+- `skipped` — out of scope.
+
+Filing one of these re-opens a decision the user already made, every round.
+
 ## Issue body template
 
 ```markdown
