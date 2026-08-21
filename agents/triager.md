@@ -20,8 +20,8 @@ mention it in one line as deferred and move on.
 
 | stage | run checks | skip |
 |---|---|---|
-| `components` | 1, 2, 3, 4, 5, 7, 11 | 6, 8, 9, 12 (polish) |
-| `pages` | 1, 2, 3, 4, 5, 7, 10, 11 | 6, 8, 9, 12 (polish) |
+| `components` | 1, 2, 3, 4, 5, 7, 11 | 6, 8, 9, 12, 13 (polish) |
+| `pages` | 1, 2, 3, 4, 5, 7, 10, 11 | 6, 8, 9, 12, 13 (polish) |
 | `polish` | ALL | — |
 
 Also skip by platform:
@@ -160,6 +160,21 @@ one call that makes a real gap invisible, and it is not yours to make.
       for that key — e.g. always one of 3 literal strings) should be a
       union/enum instead, so Studio renders a picker, not a text box a
       typo can silently break. File `low`, category `content`.
+13. **Eager third-party embeds without a facade** (polish stage; any platform):
+    grep the sections for embed iframes rendered unconditionally —
+    `<iframe` whose `src` contains `youtube.com/embed`, `youtube-nocookie`,
+    `player.vimeo.com`, `maps.google`/`maps.googleapis`, or an equivalent heavy
+    third-party player. Flag it when the `<iframe>` is NOT gated behind component
+    state (`{playing && <iframe …>}`, a `useState` set by a click) and there is no
+    thumbnail acting as a facade. `loading="lazy"` does NOT count as a fix: it is
+    ignored for anything in the viewport, which is exactly where a hero video sits.
+    Issue `high`, `category: "performance"`: "embed 3rd-party eager — usar facade
+    (thumbnail + click→iframe)". One issue per section file, and say how many
+    iframes it renders — in a carousel each slide multiplies the cost (a single
+    YouTube embed pulls ~800KB of `base.js`; five slides pulled 4.2MB on the run
+    that produced this check). The transform itself is `perf-optimizer.md`'s
+    `youtube-facade` row — do not restate it in the issue body, point at it.
+
 
 ## Output
 
