@@ -151,6 +151,31 @@ icons**. For those, the extracted **theme tokens** map to the target's design
 tokens and the **raw computed styles** (in `manifest.json`) are the exact-value
 source of truth; the `faststore` playbook spells this out.
 
+### Starter theme per target
+
+Every target declares its own starter theme in `src/migrate/targets/index.ts`, and `migrate` writes
+whichever the `--target` resolves to:
+
+| target | file | shape |
+| --- | --- | --- |
+| `faststore` / `faststore-v4` | `custom-theme.scss` | SCSS `--fs-*` tokens — `@faststore/cli` mandates that contract |
+| `faststore-next` | `theme.css` | Tailwind v4 `@theme` block |
+| `tanstack` / `tanstack-deco` | `theme.css` | Tailwind v4 `@theme` block |
+
+The declaration lives in the registry rather than in the command on purpose: theme generation used
+to be hardcoded to the v4 target, so `--target faststore-next` and `--target tanstack-deco` produced
+**no theme at all, silently** (#309). A target may legitimately have none — but then it says so in
+the registry instead of a caller forgetting it, and a test asserts every registered target declares
+one.
+
+Both Tailwind targets share one builder; only the header comment differs, because what the agent
+should do with the file differs. The Deco one says *reconcile* — a Deco site already declares tokens
+in `tailwind.css` and possibly in a CMS-editable Theme block, and three parallel token sets is worse
+than none.
+
+Omitting `--target` still writes no theme: without a target there is no way to know which shape to
+emit.
+
 ## Source & the migration plan
 
 `--source <dir>` points at the original repo (the input mirror of `--target`).
