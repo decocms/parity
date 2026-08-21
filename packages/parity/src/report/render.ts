@@ -1822,6 +1822,7 @@ export function renderHtmlReport(run: Run, runDir: string): string {
       </div>
     </header>
     ${run.partial ? `<div style="background:#7c2d12;color:#fed7aa;padding:12px 24px;border-bottom:2px solid #ea580c;font-weight:600">⚠ Partial run — interrupted${run.partialReason ? ` (${esc(run.partialReason)})` : ""}. Verdict, top-issues, and some sections may be incomplete.</div>` : ""}
+    ${renderCaveats(run)}
     ${countHiddenLlmTabs(run) > 0 ? `<div class="llm-disabled-banner">LLM disabled — ${countHiddenLlmTabs(run)} tab${countHiddenLlmTabs(run) !== 1 ? "s" : ""} hidden (Visual Diff, LLM Prompt). Set <code>ANTHROPIC_API_KEY</code> or log in to the local <code>claude</code> CLI and re-run for semantic analysis.</div>` : ""}
     ${renderTimingsBar(run)}
     <main class="app-main">
@@ -1930,5 +1931,27 @@ function renderTimingsBar(run: Run): string {
       <span style="color:#64748b;font-size:12px">per-phase breakdown</span>
     </div>
     <div style="display:flex;flex-direction:column;gap:4px">${rows}</div>
+  </div>`;
+}
+
+/**
+ * Run caveats, immediately under the header — the conditions that make the score below less
+ * comparable than it looks. Deliberately above the fold rather than a footnote: a reader who sees
+ * a number and not its limits will quote the number. Issue #292.
+ */
+function renderCaveats(run: Run): string {
+  const caveats = run.caveats ?? [];
+  if (caveats.length === 0) return "";
+  const rows = caveats
+    .map((c) => {
+      const warn = c.level === "warn";
+      return `<li style="margin:4px 0"><b style="color:${warn ? "#fca5a5" : "#93c5fd"}">${
+        warn ? "⚠" : "ℹ"
+      } ${esc(c.summary)}</b> <span style="opacity:.85">— ${esc(c.detail)}</span></li>`;
+    })
+    .join("");
+  return `<div style="background:#1c1917;color:#e7e5e4;padding:12px 24px;border-bottom:1px solid #44403c;font-size:13px">
+    <div style="font-weight:600;margin-bottom:4px">Como ler este run</div>
+    <ul style="margin:0;padding-left:18px;list-style:none">${rows}</ul>
   </div>`;
 }

@@ -28,6 +28,23 @@
 | `parity plan set-reference` | Point a component's comparison at a non-prod reference and record why it diverges — keeps an intentional improvement from being reported as a defect on every run |
 | `parity plan verify` | Record that a component was actually compared, and against what |
 | `parity plan merge` | Bring a freshly captured plan into the canonical one keeping every recorded decision — use instead of copying the file |
+
+### Run caveats (`report.json.caveats`, #292)
+
+Every run records the conditions that limit how far its own numbers can be trusted, and both the
+CLI summary and the HTML report show them next to the score rather than in a footnote:
+
+| caveat | Why it matters |
+| --- | --- |
+| `cand-dev-server` / `prod-dev-server` | A dev server has no minification and no edge cache — vitals, cache and bundle numbers are not comparable to production |
+| `paths-differ` | Paired pages live at different paths, so the visual module is comparing different content, not two renderings of the same thing |
+| `llm-disabled` | Visual diff and issue ranking were skipped — no visual findings does **not** mean visual parity |
+| `checks-skipped` | A skipped check is not a passing check |
+| `partial-run` | The run was interrupted; what did not run did not pass |
+
+The field is absent when a run has none. Findings whose validity depends on one of these are
+marked `inconclusive`, which already keeps them out of the score (`engine/verdict.ts`) and off the
+blocking path — see the SSR / no-JS row in `docs/checks.md`.
 | `parity plan set-status <name> <status>` | Mark a component `pending`/`partial`/`done`/`skipped` in `migration-plan.json` (`--dir`, default `.parity/`) — the orchestrator's API instead of hand-editing JSON. See `docs/migrate.md` |
 | `parity plan set-page-status <path> <status>` | Mark a page `pending`/`code`/`done`/`skipped` (`code` = route built, CMS content missing). See `docs/migrate.md` |
 | `parity prompt` | Export issues as a Markdown prompt for any LLM |
