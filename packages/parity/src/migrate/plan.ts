@@ -22,10 +22,31 @@ export type ComponentOrigin = "both" | "source-only" | "live-only";
 
 /**
  * Porting status, owned by the orchestrator (not `parity migrate`). Written as
- * `"pending"` for every row at creation time; the plugin flips it to `"done"`
- * or `"skipped"` in-place via {@link savePlan} as it ports each component.
+ * `"pending"` for every row at creation time; the plugin flips it in-place via
+ * {@link savePlan} as it ports each component.
+ *
+ * `partial` exists because a target can be half-wired: on FastStore a section
+ * needs component + CMS schema + whitelist entry, so a schema with no
+ * `index.tsx` registration (or the reverse) is neither pending nor done.
+ * Reporting those as `pending` sends a porter to redo finished work.
  */
-export type ComponentStatus = "pending" | "done" | "skipped";
+export type ComponentStatus = "pending" | "partial" | "done" | "skipped";
+
+/**
+ * Page readiness. A migrated storefront page is only live when BOTH the code
+ * (route + sections) and the CMS content exist — on FastStore the code can be
+ * complete while the page renders empty because content was never published.
+ * Tracking that explicitly is what lets the orchestrator answer "which pages
+ * are actually done?" instead of guessing from component status.
+ */
+export type PageStatus = "pending" | "code" | "done" | "skipped";
+
+export interface PlanPage {
+  path: string;
+  kind: string;
+  /** Absent in plans written before page tracking — read as `"pending"`. */
+  status?: PageStatus;
+}
 
 export interface PlanComponent {
   name: string;
@@ -42,7 +63,7 @@ export interface MigrationPlan {
   timestamp: string;
   source: { kind: string; label: string; dir: string | null; notes: string[] };
   target: { name: string | null };
-  pages: { path: string; kind: string }[];
+  pages: PlanPage[];
   components: PlanComponent[];
 }
 
@@ -95,7 +116,7 @@ export function buildMigrationPlan(input: {
     timestamp: bundle.timestamp,
     source: { kind: source.kind, label: source.label, dir: source.dir, notes: inventory.notes },
     target: { name: bundle.target ?? null },
-    pages: bundle.pages.map((p) => ({ path: p.path, kind: p.kind })),
+    pages: bundle.pages.map((p) => ({ path: p.path, kind: p.kind, status: "pending" as const })),
     components,
   };
 }
@@ -131,6 +152,94 @@ export function setComponentStatus(
   if (!component) return null;
   component.status = status;
   return component;
+}
+
+/**
+ * Flip one page's readiness. Paths match exactly, then leniently (trailing
+ * slash / missing leading slash), so `home`, `/home` and `/home/` all hit the
+ * same row. Mutates in place; returns the matched row or null.
+ */
+export function setPageStatus(
+  plan: MigrationPlan,
+  path: string,
+  status: PageStatus,
+): PlanPage | null {
+  const norm = (p: string) => `/${p.trim().replace(/^\/+|\/+$/g, "")}` || "/";
+  const target = norm(path);
+  const page =
+    plan.pages.find((p) => p.path === path) ?? plan.pages.find((p) => norm(p.path) === target);
+  if (!page) return null;
+  page.status = status;
+  return page;
+}
+
+export interface PlanProgress {
+  components: {
+    total: number;
+    byStatus: Record<ComponentStatus, number>;
+    /** Names that need no further work — `done` + `skipped`. */
+    settled: string[];
+    /** Names still to build — `pending` + `partial` (partial flagged separately). */
+    remaining: { name: string; status: ComponentStatus; scope: string; origin: ComponentOrigin }[];
+  };
+  pages: {
+    total: number;
+    byStatus: Record<PageStatus, number>;
+    /** Pages with code but no published content — the usual FastStore blocker. */
+    awaitingContent: string[];
+    remaining: { path: string; kind: string; status: PageStatus }[];
+  };
+}
+
+/**
+ * The migration's real state at a glance: what is settled, what remains, and
+ * which pages have code but no content. This is the inventory the orchestrator
+ * must read BEFORE triaging anything — without it, "what's missing" is unknown
+ * and a survey degenerates into a lint pass over whatever the repo happens to
+ * contain. Pure — unit-tested.
+ */
+export function planProgress(plan: MigrationPlan): PlanProgress {
+  const compByStatus: Record<ComponentStatus, number> = {
+    pending: 0,
+    partial: 0,
+    done: 0,
+    skipped: 0,
+  };
+  const settled: string[] = [];
+  const remaining: PlanProgress["components"]["remaining"] = [];
+  for (const c of plan.components) {
+    compByStatus[c.status] = (compByStatus[c.status] ?? 0) + 1;
+    if (c.status === "done" || c.status === "skipped") settled.push(c.name);
+    else
+      remaining.push({
+        name: c.name,
+        status: c.status,
+        scope: c.scope ?? "page",
+        origin: c.origin,
+      });
+  }
+
+  const pageByStatus: Record<PageStatus, number> = { pending: 0, code: 0, done: 0, skipped: 0 };
+  const awaitingContent: string[] = [];
+  const pagesRemaining: PlanProgress["pages"]["remaining"] = [];
+  for (const p of plan.pages) {
+    const status = p.status ?? "pending";
+    pageByStatus[status] = (pageByStatus[status] ?? 0) + 1;
+    if (status === "code") awaitingContent.push(p.path);
+    if (status !== "done" && status !== "skipped") {
+      pagesRemaining.push({ path: p.path, kind: p.kind, status });
+    }
+  }
+
+  return {
+    components: { total: plan.components.length, byStatus: compByStatus, settled, remaining },
+    pages: {
+      total: plan.pages.length,
+      byStatus: pageByStatus,
+      awaitingContent,
+      remaining: pagesRemaining,
+    },
+  };
 }
 
 /**

@@ -169,12 +169,40 @@ capture:
 
 - `origin` — `both` (in code and seen live), `source-only` (in code, not
   observed live), or `live-only` (seen live, no source file).
-- `status` — `pending` \| `done` \| `skipped`, all `pending` at creation; the
-  orchestrator flips it via `parity plan set-status <name> <status> [--dir]`
-  (default `.parity/`; case- and separator-insensitive name match) rather than
-  hand-editing the JSON. The plan lives at `<target>/.parity/migration-plan.json`
-  — the single source of truth for components, so it survives a resume.
+- `status` — `pending` \| `partial` \| `done` \| `skipped`, all `pending` at
+  creation; the orchestrator flips it via `parity plan set-status <name> <status>
+  [--dir]` (default `.parity/`; case- and separator-insensitive name match)
+  rather than hand-editing the JSON. `partial` is for a half-wired target: on
+  FastStore a section needs component + CMS schema + whitelist entry, so a schema
+  with no `index.tsx` registration (or the reverse) is neither pending nor done —
+  reporting it as `pending` sends a porter to redo finished work. The plan lives
+  at `<target>/.parity/migration-plan.json` — the single source of truth for
+  components, so it survives a resume.
 - `file` — repo-relative source path when the code defines the component.
+
+Each `pages[]` row also carries a `status`, flipped via
+`parity plan set-page-status <path> <status>`:
+
+- `pending` — no route/sections for it yet.
+- `code` — route + sections exist but the CMS has no published content, so the
+  page renders empty. **On FastStore this is the most common real state** —
+  code-complete is not page-complete.
+- `done` — code AND content live. `skipped` — intentionally out of scope.
+
+### `parity plan status` — the inventory
+
+```bash
+parity plan status --dir <target>/.parity      # human-readable
+parity plan status --dir <target>/.parity --json
+```
+
+Prints what is settled (components needing no further work), what remains
+(`pending` + `partial`, with scope/origin), and which pages are awaiting CMS
+content. **Read this before triaging.** Without a plan there is no record of what
+is missing, so a survey silently reports zero missing components and degenerates
+into a lint pass over whatever the repo happens to contain — filing polish issues
+(CSS tokens, bundle size, analytics) while unbuilt components and unpublished
+pages go unreported.
 
 `source-only` components also join the lean artifact as **synthetic** entries
 (empty capture, flagged in the component's README and prompt row) so an agent

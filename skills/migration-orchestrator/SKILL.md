@@ -88,6 +88,26 @@ discovery → reconcile → repo-setup → template-bootstrap → workflows
 - Source is `deco-fresh` → `migrate-script` (runs `deco-migrate`)
 - Source is `vtex-io` or `live-only` → `porting` (one `porter` per component)
 
+## Stage — what the run is allowed to care about
+
+A migration is not one undifferentiated pile of work. `state.stage` scopes what
+`triage` reports and what gets imported from the target's backlog, so the run
+works on the CURRENT goal instead of everything at once. Ask the user which
+stage they are in when resuming an existing migration; default `components`.
+
+| stage | goal | triage reports ONLY | explicitly deferred |
+|---|---|---|---|
+| `components` | build the missing sections | build failures, runtime errors, missing/partial components, FastStore 3-point invariant breaks | CSS tokens, i18n, CLS, perf, bundle, analytics/GTM, SEO, a11y contrast |
+| `pages` | assemble pages + get content published | above, plus pages `pending`/`code` (route missing, or content unpublished), whitelist gaps blocking a page | same as above |
+| `polish` | parity/quality pass | everything: CSS tokens, i18n, CLS/LoadingFallback, perf/bundle, analytics, SEO, a11y | — |
+
+**Why this exists.** A mature target's repo and backlog are full of polish work.
+Run an unscoped survey on it and you get a queue of bundle-size, Lighthouse,
+GTM/analytics and color-contrast issues — real, but not what the user is doing
+right now — while "component X is not built" and "page Y has no content" never
+surface at all. Deferred items are NOT filed as issues: they stay in the backlog
+file until the stage reaches them. Say what was deferred; never silently drop it.
+
 **PR mode** (set at `discovery`, `budget.stackPrs`):
 - **merge** (default) — independent PRs off `main`, merged one at a time; the
   `fix → parity` loop re-scores after each round.
@@ -120,6 +140,7 @@ discovery → reconcile → repo-setup → template-bootstrap → workflows
   "pagePairs": [],                // [{prod, cand, kind}] for cross-path pairing
   // components + their porting status live in <target.dir>/.parity/migration-plan.json,
   // NOT here. Flip status via `parity plan set-status` (see "Plan file" above).
+  "stage": "components",          // components | pages | polish — scopes what triage reports
   "budget": { "fixRounds": 6, "used": 0, "stackPrs": false },
   "stack": [],                    // stack mode only: [{issue, pr, branch, base}] bottom→top
   "parity": { "lastScore": null, "target": 97, "reportPath": null }
@@ -163,6 +184,14 @@ not porting. Say so to the user.
 3. `parity migrate` writes `migration-plan.json` (all rows `status: "pending"`)
    under its `--out` dir (`./parity-migrate/<host>/`). Once `target.dir` exists,
    copy it to the canonical `<target.dir>/.parity/migration-plan.json`.
+   **HARD GATE — verify the file exists at that path before going further**
+   (`ls <target.dir>/.parity/migration-plan.json` via `runner`). The plan is the
+   spine of the whole run: it is the ONLY record of what exists vs what is
+   missing. With no plan, `triage` has nothing to compare against, silently
+   reports zero missing components, and the run degenerates into a CSS/perf lint
+   pass — burning fixer cycles on polish while the actual gap (unbuilt
+   components, unpublished pages) goes unreported. If the copy failed, fix it
+   here; never advance to `porting`/`triage` without it.
 4. If target already has work done (read `src/components/index.tsx`), mark each
    matching component done: `parity plan set-status <name> done --dir <target.dir>/.parity`.
    **Match by CONCEPT, not just string.** A live-only plan names components from
@@ -174,10 +203,31 @@ not porting. Say so to the user.
    yourself before flipping status — otherwise a mature target reads as ~2 done /
    25 pending and you dispatch porters to re-do finished work. Rows with no target
    equivalent stay `pending`; rows that are pure DOM plumbing → `skipped`.
-5. If target has a backlog file (`docs/todo-radar.md`), read it and import
-   open items as issues via `gh issue create` with label `parity-migrate` ONLY
-   if no issue with the same title already exists.
-6. `pendingComponents` = plan rows still `status: "pending"`.
+5. **Classify each page.** For every `pages[]` row, decide readiness and record
+   it: `parity plan set-page-status <path> <pending|code|done|skipped> --dir
+   <target.dir>/.parity`.
+   - `pending` — no route/sections for it yet.
+   - `code` — route + sections exist in the repo but the CMS has no published
+     content, so it renders empty. **On FastStore this is the most common real
+     state and the usual blocker** — code-complete is not page-complete.
+   - `done` — code AND content live.
+   Evidence: routes/templates in the repo for code; the CMS/CP entries (or a
+   fetch of the candidate page) for content. When you cannot verify content
+   access, mark `code` and say so — never guess `done`.
+6. **Backlog import is stage-gated.** If the target has a backlog file
+   (`docs/todo-radar.md`), read it — but import ONLY items matching the current
+   `stage` (below), and always skip items already open as issues (same title).
+   A mature target's backlog is mostly polish (bundle size, Lighthouse, CLS,
+   analytics/GTM, color-contrast). Importing all of it during the `components`
+   stage floods the queue with work you explicitly deferred and starves the
+   actual gap. Items that do not match the stage stay in the file — do not
+   import them "for later".
+7. **Report the inventory before doing any work.** Run
+   `parity plan status --dir <target.dir>/.parity` via `runner` and show the user:
+   components settled (no work needed) vs remaining, pages done vs awaiting CMS
+   content. This is the answer to "what's left?" — surface it, then pick the
+   stage with the user if it is not already set.
+8. `pendingComponents` = plan rows still `pending`/`partial`.
 
 ### repo-setup / template-bootstrap
 **Skip this whole phase in reconcile-only mode** (the target the user pointed at
@@ -305,10 +355,19 @@ Also watch for **soft-404s**: a catch-all `$.tsx` that returns HTTP 200 with a
 `fixer` sets the correct status.
 
 ### triage
-Spawn `triager`. It surveys the migrated repo and returns issue drafts.
-Create GitHub issues via `gh issue create --label parity-migrate` (skip if
-title already exists — check with `gh issue list --label parity-migrate`).
-Advance to `fix`.
+**Precondition:** `<target.dir>/.parity/migration-plan.json` must exist (the
+`reconcile` gate). Without it the triager cannot know what is missing and will
+only report lint-level findings.
+
+Spawn `triager` with `stage` (see "Stage" above) and the plan path, so it reports
+only what this stage is about. It surveys the migrated repo and returns issue
+drafts. Create GitHub issues via `gh issue create --label parity-migrate` (skip
+if title already exists — check with `gh issue list --label parity-migrate`).
+
+Order the queue by the stage's goal: missing/partial components and unpublished
+pages first, never polish while `stage !== "polish"`. If the triager returns
+nothing for the stage, say so and ask whether to advance the stage rather than
+inventing work. Advance to `fix`.
 
 ### fix
 Two modes, chosen by `budget.stackPrs` (see "PR mode" below). Default is **merge

@@ -16,7 +16,11 @@ import { journeyCommand } from "./commands/journey.ts";
 import { learnedStats, learnedValidate } from "./commands/learned.ts";
 import { listCommand, listModulesCommand } from "./commands/list.ts";
 import { migrateCommand } from "./commands/migrate.ts";
-import { planSetStatusCommand } from "./commands/plan.ts";
+import {
+  planSetPageStatusCommand,
+  planSetStatusCommand,
+  planStatusCommand,
+} from "./commands/plan.ts";
 import { prCommand } from "./commands/pr.ts";
 import { promptCommand } from "./commands/prompt.ts";
 import { reportCommand } from "./commands/report.ts";
@@ -328,9 +332,9 @@ program
   .description("Inspect/update the migration-plan.json component contract")
   .addCommand(
     new Command("set-status")
-      .description("Mark a component pending|done|skipped as the orchestrator ports it")
+      .description("Mark a component pending|partial|done|skipped as the orchestrator ports it")
       .argument("<name>", "Component name (case- and separator-insensitive)")
-      .argument("<status>", "pending | done | skipped")
+      .argument("<status>", "pending | partial | done | skipped")
       .option(
         "--dir <path>",
         "Directory holding migration-plan.json (default: the target repo's .parity/)",
@@ -338,6 +342,35 @@ program
       )
       .action((name, status, opts) => {
         process.exit(planSetStatusCommand(opts.dir, name, status));
+      }),
+  )
+  .addCommand(
+    new Command("set-page-status")
+      .description("Mark a page pending|code|done|skipped (code = route built, content missing)")
+      .argument("<path>", "Page path, e.g. / or /refrigeracion")
+      .argument("<status>", "pending | code | done | skipped")
+      .option(
+        "--dir <path>",
+        "Directory holding migration-plan.json (default: the target repo's .parity/)",
+        ".parity",
+      )
+      .action((path, status, opts) => {
+        process.exit(planSetPageStatusCommand(opts.dir, path, status));
+      }),
+  )
+  .addCommand(
+    new Command("status")
+      .description(
+        "Migration inventory: components settled vs remaining, pages done vs awaiting CMS content",
+      )
+      .option(
+        "--dir <path>",
+        "Directory holding migration-plan.json (default: the target repo's .parity/)",
+        ".parity",
+      )
+      .option("--json", "Emit structured JSON instead of human-readable text", false)
+      .action((opts) => {
+        process.exit(planStatusCommand(opts.dir, Boolean(opts.json)));
       }),
   );
 
