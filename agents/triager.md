@@ -7,9 +7,9 @@ tools: [Read, Grep, Glob]
 # triager — surveys the migrated repo and files issue drafts
 
 Read-only. You receive: `target_dir`, `build_ok` (bool), `dev_log_path` (opt),
-`conventions`, `platform` ("faststore-v4" | "tanstack-deco"), `stage`
-("components" | "pages" | "polish", default "components"), and `plan_path`
-(`.parity/migration-plan.json`).
+`conventions`, `platform` ("faststore-v4" | "faststore-next" | "tanstack-deco"),
+`stage` ("components" | "pages" | "polish", default "components"), and
+`plan_path` (`.parity/migration-plan.json`).
 
 ## Scope FIRST — `stage` decides what you may report
 
@@ -18,13 +18,19 @@ mention it in one line as deferred and move on.
 
 | stage | run checks | skip |
 |---|---|---|
-| `components` | 1, 2, 3, 4, 5, 7 | 6, 8, 9 (polish) |
-| `pages` | 1, 2, 3, 4, 5, 7, 10 | 6, 8, 9 (polish) |
+| `components` | 1, 2, 3, 4, 5, 7, 11 | 6, 8, 9, 12 (polish) |
+| `pages` | 1, 2, 3, 4, 5, 7, 10, 11 | 6, 8, 9, 12 (polish) |
 | `polish` | ALL | — |
 
-Also skip by platform: checks 5 and 8 read deco-fresh artifacts
-(`.deco/blocks/`, `.deco/sections.gen.ts`) — **skip both entirely when
-`platform === "faststore-v4"`**, those paths do not exist there.
+Also skip by platform:
+- Checks 5 and 8 read deco-fresh artifacts (`.deco/blocks/`,
+  `.deco/sections.gen.ts`) — **skip both entirely when
+  `platform === "faststore-v4"`**, those paths do not exist there.
+- Checks 4 and 6 read FastStore v4's CMS-schema tree (`cms/faststore/`) —
+  **skip both entirely when `platform !== "faststore-v4"`**.
+- Checks 11 and 12 read the Deco decofile model (`.deco/blocks/`,
+  `src/sections/`) — same condition as 5/8, **skip when
+  `platform === "faststore-v4"`**.
 
 **If `plan_path` is missing, STOP** and return a single `critical` issue saying
 the migration plan is absent so "what is missing" cannot be determined (running
@@ -81,6 +87,50 @@ the polish checks instead would misrepresent a scaffolding gap as code quality).
     (and, on FastStore, confirming the schema is uploaded + whitelisted), NOT
     editing components. Use `category: "content"` for these — a code fixer
     cannot resolve them.
+11. **Editability gate** (deco decofile model — `.deco/blocks/`, `src/sections/`;
+    skip on faststore-v4, see stage/platform table). A section that renders
+    correctly is not the same as a section a merchant can edit in Studio — none
+    of `parity`'s screenshot/HTML checks can see the difference, so this is the
+    one place it gets caught:
+    - **Orphan section**: every file in `src/sections/` must be the sole
+      importer chain into a component AND appear as an `__resolveType` in at
+      least one `.deco/blocks/*.json`. A shim with no decofile reference is
+      dead — either the port forgot to wire it into a page, or the page JSON
+      itself is missing. File `medium`, category `content`.
+    - **Hardcoded content**: a string literal >~25 chars inside
+      `src/components/sections/**` that is NOT a className/token/aria-label
+      and has no corresponding `Props` field feeding it. This is a component
+      that LOOKS ported (renders, passes a visual diff) but the merchant can
+      never change that copy in Studio. File `high`, category `content` —
+      name the literal and the file:line.
+    - **Trivial `Props`**: a section's exported `Props` type is `{}`,
+      `Record<string, never>`, or only has `className`. Usually means the
+      port re-skinned captured content as static JSX instead of wiring real
+      fields. File `medium`, category `content`.
+    - **Schema drift**: run `bun run generate:deco` (or the target's
+      equivalent) and diff `.deco/meta.gen.json` against the committed
+      version. Any diff means a `Props` type changed without regenerating —
+      `sectionShims.test.ts`-style key checks catch a renamed block key, NOT
+      a changed prop shape. File `high`, category `build`.
+12. **CMS accessibility for editors** (polish stage; deco decofile model,
+    same platform skip as check 11). A non-technical Studio editor has to be
+    able to use the form this schema produces — this is a legibility audit
+    of the schema itself, not of the rendered page:
+    - Every `Props` field that becomes a CMS input needs a JSDoc `@title`
+      (and, for anything non-obvious, a `@description`) — a field with
+      neither renders in Studio labeled by its raw camelCase property name.
+      Grep `Props`/exported types under `src/components/sections/**` for a
+      property with no preceding `/** @title ... */` block. File `low`,
+      category `content`, one issue per component (list the bare field
+      names, not one issue per field).
+    - A section with more than ~8 top-level `Props` fields and no grouping
+      (nested object/array types) reads as a wall of inputs in Studio. File
+      `low`, category `content`, suggest which fields cluster into a group.
+    - A field typed as a free-text `string` that is actually a closed set
+      (compare against the values already used across `.deco/blocks/*.json`
+      for that key — e.g. always one of 3 literal strings) should be a
+      union/enum instead, so Studio renders a picker, not a text box a
+      typo can silently break. File `low`, category `content`.
 
 ## Output
 
