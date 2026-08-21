@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateOpportunities } from "../../src/commands/vitals.ts";
+import { aggregateOpportunities } from "../../src/diff/lighthouse.ts";
 import type { LhOpportunity, PageCapture } from "../../src/types/schema.ts";
 
 function opp(over: Partial<LhOpportunity>): LhOpportunity {

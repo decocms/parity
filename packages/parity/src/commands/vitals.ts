@@ -8,11 +8,13 @@ import { cacheCoverage } from "../checks/cache-coverage.ts";
 import type { CheckContext } from "../checks/index.ts";
 import { pairCaptures } from "../checks/lib/pairing.ts";
 import { agenticNav } from "../checks/agentic-nav.ts";
+import { lighthouseOpportunities } from "../checks/lighthouse-opportunities.ts";
 import { lighthouseScores } from "../checks/lighthouse-scores.ts";
 import { webVitalsMobile } from "../checks/web-vitals.ts";
 import { resolveSitemapUrls } from "../diff/sitemap.ts";
 import { launchBrowser, newContext } from "../engine/browser.ts";
 import { capturePage, installVitalsCollector } from "../engine/collect.ts";
+import { aggregateOpportunities } from "../diff/lighthouse.ts";
 import { type LhSample, measureLighthouse } from "../engine/lighthouse.ts";
 import { computeVerdict } from "../engine/verdict.ts";
 import { renderHtmlReport } from "../report/render.ts";
@@ -213,8 +215,9 @@ export async function vitalsCommand(opts: VitalsOptions): Promise<number> {
     const vitalsResult: CheckResult = webVitalsMobile(checkCtx);
     const cacheResult: CheckResult = cacheCoverage(checkCtx);
     const scoresResult: CheckResult = lighthouseScores(checkCtx);
+    const oppsResult: CheckResult = lighthouseOpportunities(checkCtx);
     const agenticResult: CheckResult = await agenticNav(checkCtx);
-    const checks = [vitalsResult, cacheResult, scoresResult, agenticResult];
+    const checks = [vitalsResult, cacheResult, scoresResult, oppsResult, agenticResult];
 
     const allIssues: Issue[] = checks.flatMap((c) => c.issues);
     const verdict = computeVerdict(checks, allIssues, {
@@ -261,7 +264,7 @@ export async function vitalsCommand(opts: VitalsOptions): Promise<number> {
       "utf8",
     );
 
-    printSummary(vitalsResult, cacheResult, scoresResult, agenticResult);
+    printSummary(vitalsResult, cacheResult, scoresResult, oppsResult, agenticResult);
     console.log("");
     console.log(chalk.dim(`  → ${paths.reportHtml}`));
     console.log(chalk.dim(`  💡 use 'parity serve ${runId}' pra preview iframe`));
@@ -323,23 +326,6 @@ function lhToWebVitals(s: LhSample): WebVitals {
   return { lcp: s.lcp, cls: s.cls, fcp: s.fcp, ttfb: s.ttfb, inp: null, tbt: s.tbt ?? null };
 }
 
-/**
- * Dedupe Lighthouse opportunities across pages by audit id, keeping the worst
- * (max savings) instance — the same audit (render-blocking, unused JS…) repeats
- * on every page. Biggest wins first. Focus on cand; prod is reference only.
- */
-export function aggregateOpportunities(pages: PageCapture[]): LhOpportunity[] {
-  const byId = new Map<string, LhOpportunity>();
-  for (const p of pages) {
-    for (const o of p.lhOpportunities ?? []) {
-      const prev = byId.get(o.id);
-      if (!prev || o.savingsMs > prev.savingsMs) byId.set(o.id, o);
-    }
-  }
-  return [...byId.values()].sort(
-    (a, b) => b.savingsMs - a.savingsMs || b.savingsBytes - a.savingsBytes,
-  );
-}
 
 async function discoverPagePaths(prodUrl: string, opts: VitalsOptions): Promise<string[]> {
   if (opts.urls) return parseUrlList(opts.urls);
@@ -415,6 +401,7 @@ function printSummary(
   vitals: CheckResult,
   cache: CheckResult,
   scores: CheckResult,
+  opportunities: CheckResult,
   agentic: CheckResult,
 ): void {
   console.log("");
@@ -422,5 +409,6 @@ function printSummary(
   console.log(`    ${vitals.summary}`);
   console.log(`    ${cache.summary}`);
   if (scores.status !== "skipped") console.log(`    ${scores.summary}`);
+  if (opportunities.status !== "skipped") console.log(`    ${opportunities.summary}`);
   if (agentic.status !== "skipped") console.log(`    ${agentic.summary}`);
 }
