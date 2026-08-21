@@ -11,6 +11,10 @@ import type {
   VisualDiffSummary,
   VisualDifference,
 } from "../types/schema.ts";
+import {
+  matchExpectedDivergence,
+  partitionExpectedSections,
+} from "../diff/expected-divergence.ts";
 import type { CheckContext } from "./index.ts";
 import { type PagePair, pairCaptures } from "./lib/pairing.ts";
 import {
@@ -261,6 +265,7 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
   const diffDir = join(ctx.outDir, "screenshots");
   if (!existsSync(diffDir)) mkdirSync(diffDir, { recursive: true });
 
+  const expectedDivergences = ctx.ignore.expectedDivergences ?? [];
   const useLlm = isLlmAvailable();
   const maxLlmCalls = getMaxLlmCalls();
   let llmCallsUsed = 0;
@@ -489,15 +494,31 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
       cachedAt,
     });
 
-    if (p.sectionsOnlyInProd.length > 0) {
+    // Sections the team already decided about stay visible but stop counting as defects (#296).
+    const sectionSplit = partitionExpectedSections(p.sectionsOnlyInProd, expectedDivergences);
+    if (sectionSplit.accepted.length > 0) {
+      issues.push({
+        id: `visual:sections-expected:${p.pair.key}`,
+        severity: "low",
+        category: "visual",
+        page: p.pair.key,
+        check: "visual-regression-keyframes",
+        inconclusive: true,
+        summary: `${sectionSplit.accepted.length} section(s) ausente(s) em cand por decisão: ${sectionSplit.accepted
+          .map((a) => a.section)
+          .join(", ")}`,
+        details: sectionSplit.accepted.map((a) => `- ${a.section}: ${a.note}`).join("\n"),
+      });
+    }
+    if (sectionSplit.reportable.length > 0) {
       issues.push({
         id: `visual:sections:${p.pair.key}`,
         severity: "high",
         category: "visual",
         page: p.pair.key,
         check: "visual-regression-keyframes",
-        summary: `${p.sectionsOnlyInProd.length} section(s) ausente(s) em cand: ${p.sectionsOnlyInProd.join(", ")}`,
-        details: `Sections detectadas no DOM de prod via data-section, mas ausentes em cand:\n${p.sectionsOnlyInProd.map((s) => `- ${s}`).join("\n")}\n\nProvavelmente faltam em registerSections() em src/setup.ts, ou o CMS não está resolvendo essas keys em cand.`,
+        summary: `${sectionSplit.reportable.length} section(s) ausente(s) em cand: ${sectionSplit.reportable.join(", ")}`,
+        details: `Sections detectadas no DOM de prod via data-section, mas ausentes em cand:\n${sectionSplit.reportable.map((s) => `- ${s}`).join("\n")}\n\nProvavelmente faltam em registerSections() em src/setup.ts, ou o CMS não está resolvendo essas keys em cand.`,
         evidence: [
           { kind: "screenshot", path: p.pair.prod.screenshotPath, label: "prod" },
           { kind: "screenshot", path: p.pair.cand.screenshotPath, label: "cand" },
@@ -508,14 +529,18 @@ export async function visualRegressionKeyframes(ctx: CheckContext): Promise<Chec
       });
     }
     for (const [i, d] of differences.entries()) {
+      const accepted = matchExpectedDivergence([d.description, d.region], expectedDivergences);
       issues.push({
         id: `visual:semantic:${p.pair.key}:${i}`,
-        severity: severityForDiff(d),
+        severity: accepted ? "low" : severityForDiff(d),
         category: "visual",
         page: p.pair.key,
         check: "visual-regression-keyframes",
-        summary: `[${d.region}] ${d.description}`,
-        details: `Tipo: ${d.type}\nRegião: ${d.region}\nSeveridade: ${d.severity}`,
+        ...(accepted ? { inconclusive: true } : {}),
+        summary: `[${d.region}] ${d.description}${accepted ? " (divergência esperada)" : ""}`,
+        details: `Tipo: ${d.type}\nRegião: ${d.region}\nSeveridade: ${d.severity}${
+          accepted ? `\n\nDecisão registrada: ${accepted.note}` : ""
+        }`,
         evidence: [
           { kind: "screenshot", path: p.pair.prod.screenshotPath, label: "prod" },
           { kind: "screenshot", path: p.pair.cand.screenshotPath, label: "cand" },

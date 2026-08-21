@@ -789,8 +789,28 @@ export const ParityRc = z.object({
 });
 export type ParityRc = z.infer<typeof ParityRc>;
 
+/**
+ * A divergence the team has already decided about: the candidate is deliberately different, often
+ * because a better component was brought in from elsewhere, so prod is no longer the reference for
+ * it. Issue #296.
+ *
+ * This does NOT suppress the finding. Suppression would blind the diff to that region, so a real
+ * regression inside an improved component would stop being reported too. The finding is still
+ * produced and still shown - it is marked `inconclusive`, which keeps it out of the score and off
+ * the blocking path while staying visible with its reason attached.
+ */
+export const ExpectedDivergence = z.object({
+  /** Case-insensitive substring matched against the section name and the difference description. */
+  match: z.string(),
+  /** Why it diverges. Required: an accepted divergence with no reason is a forgotten gap. */
+  note: z.string(),
+});
+export type ExpectedDivergence = z.infer<typeof ExpectedDivergence>;
+
 export const ParityIgnore = z.object({
   ignoreSelectorsVisual: z.array(z.string()).default([]),
+  /** See {@link ExpectedDivergence}. Reclassifies, never silences. Absent = none. */
+  expectedDivergences: z.array(ExpectedDivergence).optional(),
   ignoreRequestPatterns: z.array(z.string()).default([]),
   ignoreConsolePatterns: z.array(z.string()).default([]),
   ignoreMetaKeys: z.array(z.string()).default([]),
