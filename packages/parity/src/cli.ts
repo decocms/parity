@@ -484,12 +484,24 @@ program
     "--json",
     "Pair with --section to emit a normalized JSON projection of the section (from report.json) instead of the raw HTML slice.",
   )
+  .option(
+    "--deck",
+    "Render the presentation deck instead: one topic per full-viewport page, advanced sideways, in a single self-contained HTML file. For showing the result to someone rather than debugging it. Issue #290.",
+    false,
+  )
+  .option("--out <path>", "Where to write the deck (default: deck.html in the run dir)")
+  .option("--lang <pt|en>", "Initial deck language; the in-page toggle still switches live", "en")
+  .option("--open", "Open the rendered deck in the browser", false)
   .action(async (runId, opts) => {
     process.exit(
       await reportCommand(runId, {
         output: opts.output,
         section: opts.section,
         json: opts.json,
+        deck: Boolean(opts.deck),
+        out: opts.out,
+        lang: opts.lang === "pt" ? "pt" : "en",
+        open: Boolean(opts.open),
       }),
     );
   });
