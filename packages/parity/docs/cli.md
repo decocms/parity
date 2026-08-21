@@ -27,6 +27,7 @@
 | `parity plan page` | Per-page worksheet: what to build, what to validate, what is deliberately divergent, with a runnable `parity section` per checkable component (`--cand`, `--json`) |
 | `parity plan set-reference` | Point a component's comparison at a non-prod reference and record why it diverges — keeps an intentional improvement from being reported as a defect on every run |
 | `parity plan verify` | Record that a component was actually compared, and against what |
+| `parity plan merge` | Bring a freshly captured plan into the canonical one keeping every recorded decision — use instead of copying the file |
 | `parity plan set-status <name> <status>` | Mark a component `pending`/`partial`/`done`/`skipped` in `migration-plan.json` (`--dir`, default `.parity/`) — the orchestrator's API instead of hand-editing JSON. See `docs/migrate.md` |
 | `parity plan set-page-status <path> <status>` | Mark a page `pending`/`code`/`done`/`skipped` (`code` = route built, CMS content missing). See `docs/migrate.md` |
 | `parity prompt` | Export issues as a Markdown prompt for any LLM |

@@ -184,6 +184,52 @@ export function buildMigrationPlan(input: {
   };
 }
 
+/**
+ * Carry human decisions from an existing plan onto a freshly built one.
+ *
+ * `buildMigrationPlan` writes every row `pending`, because it only knows the capture. But the
+ * plan also holds things no capture can reproduce: what was ported, what divergence was
+ * accepted, which component is deliberately ahead of prod and why, what was verified against
+ * what. Re-running `parity migrate` without merging silently reverts all of it — and once the
+ * plan is committed (which it should be), that lands as a diff nobody wrote.
+ *
+ * The fresh capture owns the row SET; the previous plan owns the decisions. Rows that vanished
+ * from the capture are reported rather than dropped quietly — a decision disappearing is exactly
+ * the kind of thing that should never be silent.
+ */
+export function mergePlanDecisions(
+  fresh: MigrationPlan,
+  previous: MigrationPlan | null,
+): { plan: MigrationPlan; carried: string[]; droppedWithDecisions: string[] } {
+  if (!previous) return { plan: fresh, carried: [], droppedWithDecisions: [] };
+
+  const prevByKey = new Map(previous.components.map((c) => [key(c.name), c]));
+  const carried: string[] = [];
+
+  for (const row of fresh.components) {
+    const prev = prevByKey.get(key(row.name));
+    if (!prev) continue;
+    if (prev.status !== "pending") row.status = prev.status;
+    if (prev.reference) row.reference = prev.reference;
+    if (prev.verified) row.verified = prev.verified;
+    if (prev.status !== "pending" || prev.reference || prev.verified) carried.push(row.name);
+  }
+
+  const freshKeys = new Set(fresh.components.map((c) => key(c.name)));
+  const droppedWithDecisions = previous.components
+    .filter((c) => !freshKeys.has(key(c.name)))
+    .filter((c) => c.status !== "pending" || Boolean(c.reference) || Boolean(c.verified))
+    .map((c) => c.name);
+
+  const prevPages = new Map(previous.pages.map((p) => [p.path, p]));
+  for (const page of fresh.pages) {
+    const prev = prevPages.get(page.path);
+    if (prev?.status && prev.status !== "pending") page.status = prev.status;
+  }
+
+  return { plan: fresh, carried, droppedWithDecisions };
+}
+
 const PLAN_FILE = "migration-plan.json";
 
 /** Statuses that mean "no further work", whatever the reason. */

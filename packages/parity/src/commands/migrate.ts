@@ -27,7 +27,13 @@ import { markdownExporter } from "../migrate/exporters/markdown.ts";
 import { htmlExporter } from "../migrate/exporters/html.ts";
 import { classifyLiveStack, describeStack, type StackSignals } from "../migrate/sources/classify.ts";
 import { buildMigrationPrompt } from "../migrate/prompt.ts";
-import { buildMigrationPlan, savePlan, syntheticSourceComponents } from "../migrate/plan.ts";
+import {
+  buildMigrationPlan,
+  loadPlan,
+  mergePlanDecisions,
+  savePlan,
+  syntheticSourceComponents,
+} from "../migrate/plan.ts";
 import { buildFastStoreTheme } from "../migrate/targets/faststore-v4.ts";
 import { getTargetPlaybook, TARGET_NAMES } from "../migrate/targets/index.ts";
 import {
@@ -399,12 +405,30 @@ export async function migrateCommand(opts: MigrateOptions): Promise<number> {
     // migration-plan.json — the contract the orchestration phases read (source
     // + target + reconciled component list). Always emitted, regardless of
     // --format, since it's machine input, not a human report.
-    const plan = buildMigrationPlan({
-      bundle,
-      source: { kind: source.kind, label: source.label, dir: opts.source ?? null },
-      inventory: sourceInventory,
-    });
+    // Re-capturing must not revert what a human decided. The fresh capture owns the row set;
+    // ported/accepted/upgraded/verified state carries over from whatever plan is already here.
+    const merged = mergePlanDecisions(
+      buildMigrationPlan({
+        bundle,
+        source: { kind: source.kind, label: source.label, dir: opts.source ?? null },
+        inventory: sourceInventory,
+      }),
+      loadPlan(runDir),
+    );
+    const plan = merged.plan;
     savePlan(runDir, plan);
+    if (merged.carried.length) {
+      console.log(
+        chalk.gray(`  plan: carried ${merged.carried.length} recorded decision(s) forward`),
+      );
+    }
+    if (merged.droppedWithDecisions.length) {
+      console.log(
+        chalk.yellow(
+          `  plan: ${merged.droppedWithDecisions.length} component(s) with recorded decisions are no longer in the capture — ${merged.droppedWithDecisions.join(", ")}`,
+        ),
+      );
+    }
     // Source-only components (in code, never seen live) join the bundle as
     // synthetic rows so the exporters + MIGRATION_PROMPT list them for porting.
     bundle.components.push(...syntheticSourceComponents(plan));

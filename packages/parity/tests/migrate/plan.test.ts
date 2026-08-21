@@ -6,6 +6,7 @@ import {
   type MigrationPlan,
   buildMigrationPlan,
   loadPlan,
+  mergePlanDecisions,
   pagePlan,
   planProgress,
   savePlan,
@@ -476,5 +477,93 @@ describe("planProgress — deliberate outcomes", () => {
     expect(p.components.remaining.map((r) => r.name)).toEqual(["d"]);
     expect(p.components.byStatus["as-is"]).toBe(1);
     expect(p.components.byStatus.upgrade).toBe(1);
+  });
+});
+
+describe("mergePlanDecisions", () => {
+  /** A freshly captured plan — every row `pending`, the way buildMigrationPlan writes it. */
+  function fresh(names: string[]): MigrationPlan {
+    return planWith(names);
+  }
+
+  it("returns the fresh plan untouched when there is nothing to merge", () => {
+    const f = fresh(["a"]);
+    const out = mergePlanDecisions(f, null);
+    expect(out.plan).toBe(f);
+    expect(out.carried).toEqual([]);
+    expect(out.droppedWithDecisions).toEqual([]);
+  });
+
+  it("carries status, reference and verification onto the fresh rows", () => {
+    const previous = fresh(["a", "b", "c"]);
+    setComponentStatus(previous, "a", "done");
+    setComponentStatus(previous, "b", "upgrade");
+    setComponentReference(previous, "b", {
+      url: "https://other.example",
+      selector: ".v2",
+      note: "better one from the other site",
+    });
+    setComponentVerified(previous, "b", "pass", "2026-08-21T00:00:00.000Z");
+
+    const out = mergePlanDecisions(fresh(["a", "b", "c"]), previous);
+    const a = out.plan.components.find((c) => c.name === "a");
+    const b = out.plan.components.find((c) => c.name === "b");
+
+    expect(a?.status).toBe("done");
+    expect(b?.status).toBe("upgrade");
+    expect(b?.reference?.note).toBe("better one from the other site");
+    expect(b?.verified?.against).toBe("reference");
+    expect(new Set(out.carried)).toEqual(new Set(["a", "b"]));
+    // Untouched rows stay pending.
+    expect(out.plan.components.find((c) => c.name === "c")?.status).toBe("pending");
+  });
+
+  it("never downgrades a fresh row using a previous `pending`", () => {
+    const previous = fresh(["a"]);
+    const f = fresh(["a"]);
+    setComponentStatus(f, "a", "done");
+
+    const out = mergePlanDecisions(f, previous);
+    expect(out.plan.components[0]?.status).toBe("done");
+    expect(out.carried).toEqual([]);
+  });
+
+  it("reports decisions whose component vanished from the capture instead of dropping them silently", () => {
+    const previous = fresh(["a", "gone", "also-gone"]);
+    setComponentStatus(previous, "gone", "as-is");
+    // `also-gone` was never decided, so its disappearance is not worth reporting.
+
+    const out = mergePlanDecisions(fresh(["a"]), previous);
+    expect(out.droppedWithDecisions).toEqual(["gone"]);
+    expect(out.plan.components.map((c) => c.name)).toEqual(["a"]);
+  });
+
+  it("carries page readiness across a re-capture", () => {
+    const previous = fresh(["a"]);
+    setPageStatus(previous, "/p", "code");
+
+    const out = mergePlanDecisions(fresh(["a"]), previous);
+    expect(out.plan.pages[0]?.status).toBe("code");
+  });
+
+  it("lets the fresh capture own the row set, so new components arrive pending", () => {
+    const previous = fresh(["a"]);
+    setComponentStatus(previous, "a", "done");
+
+    const out = mergePlanDecisions(fresh(["a", "brand-new"]), previous);
+    expect(out.plan.components.map((c) => c.name).sort()).toEqual(["a", "brand-new"]);
+    expect(out.plan.components.find((c) => c.name === "brand-new")?.status).toBe("pending");
+  });
+
+  it("matches names case- and separator-insensitively, like the reconciler", () => {
+    const previous = fresh(["product-shelf"]);
+    setComponentStatus(previous, "product-shelf", "done");
+
+    const f = planWith(["product-shelf"]);
+    const row = f.components[0];
+    if (row) row.name = "ProductShelf";
+
+    const out = mergePlanDecisions(f, previous);
+    expect(out.plan.components[0]?.status).toBe("done");
   });
 });

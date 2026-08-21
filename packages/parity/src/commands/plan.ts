@@ -12,6 +12,7 @@ import {
   type Disposition,
   type PageStatus,
   loadPlan,
+  mergePlanDecisions,
   pagePlan,
   planProgress,
   savePlan,
@@ -145,6 +146,37 @@ export function planVerifyCommand(
   savePlan(dir, plan);
   const mark = verdict === "pass" ? chalk.green("✓") : chalk.red("✗");
   console.log(`${mark} ${component.name} → ${verdict} (against ${component.verified?.against})`);
+  return 0;
+}
+
+/**
+ * `parity plan merge <source>` — bring a freshly captured plan into the canonical one without
+ * losing what was decided. The orchestrator copies the plan from the migrate output dir into the
+ * target repo; a plain copy would revert every ported/accepted/upgraded/verified row, and since
+ * the canonical plan is committed, that revert lands as a diff nobody wrote.
+ */
+export function planMergeCommand(dir: string, sourceDir: string): number {
+  const fresh = loadPlan(sourceDir);
+  if (!fresh) {
+    console.error(chalk.red(`No migration-plan.json found in ${sourceDir}`));
+    return 1;
+  }
+  const existing = loadPlan(dir);
+  const { plan, carried, droppedWithDecisions } = mergePlanDecisions(fresh, existing);
+  savePlan(dir, plan);
+
+  if (!existing) {
+    console.log(`${chalk.green("✓")} plan written to ${dir} (nothing to merge)`);
+    return 0;
+  }
+  console.log(`${chalk.green("✓")} merged into ${dir} — ${carried.length} decision(s) kept`);
+  if (droppedWithDecisions.length) {
+    console.log(
+      chalk.yellow(
+        `  no longer in the capture, decisions lost: ${droppedWithDecisions.join(", ")}`,
+      ),
+    );
+  }
   return 0;
 }
 

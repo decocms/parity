@@ -17,6 +17,7 @@ import { learnedStats, learnedValidate } from "./commands/learned.ts";
 import { listCommand, listModulesCommand } from "./commands/list.ts";
 import { migrateCommand } from "./commands/migrate.ts";
 import {
+  planMergeCommand,
   planPageCommand,
   planSetPageStatusCommand,
   planSetReferenceCommand,
@@ -419,6 +420,21 @@ program
             note: opts.note,
           }),
         );
+      }),
+  )
+  .addCommand(
+    new Command("merge")
+      .description(
+        "Bring a freshly captured plan into the canonical one, keeping every recorded decision (ported / as-is / upgrade / verified). Use this instead of copying the file — a copy reverts the decisions.",
+      )
+      .argument("<source>", "Directory holding the freshly captured migration-plan.json")
+      .option(
+        "--dir <path>",
+        "Destination directory holding the canonical migration-plan.json",
+        ".parity",
+      )
+      .action((source, opts) => {
+        process.exit(planMergeCommand(opts.dir, source));
       }),
   )
   .addCommand(
