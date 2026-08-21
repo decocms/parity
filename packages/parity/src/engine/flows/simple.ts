@@ -409,16 +409,35 @@ const PRODUCT_CARD_HEURISTIC_SELECTORS: string[] = [
  * `a[href*='/p/']` would.
  */
 export async function countProductCards(page: Page): Promise<number> {
-  for (const sel of PRODUCT_CARD_HEURISTIC_SELECTORS) {
-    const count = await withCap(
-      page
-        .locator(sel)
-        .count()
-        .catch(() => 0),
-      1_500,
-      0,
-    );
-    if (count > 0) return count;
-  }
-  return 0;
+  return (await measureProductCards(page)) ?? 0;
+}
+
+/**
+ * Same count, but `null` when the page could not be measured at all — a timeout or a detached
+ * frame, not an empty grid. Issue #273.
+ *
+ * `countProductCards` collapses that into `0`, which is right for its callers (they ask "are
+ * there products?") and wrong for anything watching for growth: an SPA that just received 2 MB of
+ * JSON and is rendering 24 cards saturates the main thread, the read times out, and a spurious
+ * `0` reads as "the grid is empty, pagination is over". The candidate then gets penalised twice —
+ * once for being slow, once for being reported as functionally broken.
+ *
+ * Counting happens in a single `evaluate` over all selectors rather than one `locator.count()`
+ * per selector: one protocol round-trip instead of up to ten, each of which paid per-element
+ * overhead. That alone removes the usual cause of the timeout.
+ */
+export async function measureProductCards(page: Page): Promise<number | null> {
+  return withCap(
+    page
+      .evaluate((selectors: string[]) => {
+        for (const sel of selectors) {
+          const n = document.querySelectorAll(sel).length;
+          if (n > 0) return n;
+        }
+        return 0;
+      }, PRODUCT_CARD_HEURISTIC_SELECTORS)
+      .catch(() => null),
+    2_500,
+    null,
+  );
 }

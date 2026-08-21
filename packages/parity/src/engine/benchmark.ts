@@ -37,7 +37,7 @@ import {
   selFor,
   withCap,
 } from "./flows/shared.ts";
-import { countProductCards, scrollPageInChunks } from "./flows/simple.ts";
+import { countProductCards, measureProductCards, scrollPageInChunks } from "./flows/simple.ts";
 import { type LhResult, measureLighthouse } from "./lighthouse.ts";
 
 export interface StepTiming {
@@ -180,7 +180,15 @@ async function waitForProductImage(
 /** Poll the product-card count until it GROWS past `before` (real pagination
  *  loaded more products) or the cap elapses. Returns the final count. Meaningful
  *  where `networkidle` isn't — it measures products appearing, not ad chatter. */
-async function waitForCardGrowth(
+/**
+ * Poll until the grid grows past `before`, or the cap runs out.
+ *
+ * Reads that FAILED are skipped rather than believed. A saturated main thread makes the count
+ * time out, and treating that as `0` used to look exactly like "the grid is empty" — which aborted
+ * the whole pagination run and reported a merely-slow candidate as broken (issue #273). The last
+ * successful count is what gets returned, so a failed read can never move the number backwards.
+ */
+export async function waitForCardGrowth(
   page: import("playwright").Page,
   before: number,
   capMs: number,
@@ -188,8 +196,11 @@ async function waitForCardGrowth(
   const deadline = Date.now() + capMs;
   let cur = before;
   while (Date.now() < deadline) {
-    cur = await countProductCards(page).catch(() => cur);
-    if (cur > before) return cur;
+    const measured = await measureProductCards(page).catch(() => null);
+    if (measured !== null) {
+      cur = measured;
+      if (cur > before) return cur;
+    }
     await page.waitForTimeout(400);
   }
   return cur;
