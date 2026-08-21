@@ -7,6 +7,7 @@ import type {
   ParityRc,
   Viewport,
 } from "../types/schema.ts";
+import { analyticsBeaconParity } from "./analytics-beacon-parity.ts";
 import { bannerAspectRatio } from "./banner-aspect-ratio.ts";
 import { cacheCoverage } from "./cache-coverage.ts";
 import { cartInteractionsFlow } from "./cart-interactions-flow.ts";
@@ -32,13 +33,16 @@ import { pictureMissingDims } from "./picture-missing-dims.ts";
 import { plpPagination } from "./plp-pagination.ts";
 import { plpSorting } from "./plp-sorting.ts";
 import { purchaseJourneyFlow } from "./purchase-journey-flow.ts";
+import { redirectsParity } from "./redirects-parity.ts";
 import { searchAutocomplete } from "./search-autocomplete.ts";
 import { searchNoResults } from "./search-no-results.ts";
 import { searchPresence } from "./search-presence.ts";
 import { searchResults } from "./search-results.ts";
+import { sectionOrderParity } from "./section-order-parity.ts";
 import { seoDeepAudit } from "./seo-deep-audit.ts";
 import { serverFnHoverFlood } from "./serverfn-hover-flood.ts";
 import { spaNavigationFlow } from "./spa-navigation-flow.ts";
+import { thirdPartyScriptsParity } from "./third-party-scripts-parity.ts";
 import { visualRegressionKeyframes } from "./visual-regression.ts";
 import { webVitalsMobile } from "./web-vitals.ts";
 
@@ -107,6 +111,11 @@ export const ALL_CHECKS: Check[] = [
   fontParity,
   ssrNoJs,
   navLinksHealth,
+  // Redirects/3p-scripts/analytics-beacon/section-order gaps
+  redirectsParity,
+  thirdPartyScriptsParity,
+  analyticsBeaconParity,
+  sectionOrderParity,
 ];
 
 /**
@@ -153,6 +162,10 @@ export const ALL_CHECKS_BY_NAME: Record<string, Check> = {
   "font-parity": fontParity,
   "ssr-no-js": ssrNoJs,
   "nav-links-health": navLinksHealth,
+  "redirects-parity": redirectsParity,
+  "third-party-scripts-parity": thirdPartyScriptsParity,
+  "analytics-beacon-parity": analyticsBeaconParity,
+  "section-order-parity": sectionOrderParity,
 };
 
 /**

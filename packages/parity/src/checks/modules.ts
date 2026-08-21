@@ -78,6 +78,7 @@ export const MODULES: Record<ModuleName, ModuleDef> = {
       "favicon-parity",
       "plp-pagination",
       "http-status-parity",
+      "redirects-parity",
     ],
     flows: ["homepage", "plp", "pdp"],
     needsSitemapPages: true,
@@ -120,13 +121,14 @@ export const MODULES: Record<ModuleName, ModuleDef> = {
       "picture-missing-dims",
       "font-parity",
       "ssr-no-js",
+      "section-order-parity",
     ],
     flows: ["homepage", "plp", "pdp"],
   },
   network: {
     name: "network",
     description: "Network request summary delta (counts, sizes, failures) between prod and cand",
-    checks: ["network-summary-delta"],
+    checks: ["network-summary-delta", "third-party-scripts-parity", "analytics-beacon-parity"],
     flows: ["homepage", "plp", "pdp"],
   },
 };

@@ -60,6 +60,16 @@ export interface DomSnapshot {
   };
   decoSectionsRendered: string[];
   /**
+   * Same `[data-section]` values as `decoSectionsRendered`, but IN DOCUMENT
+   * ORDER and NOT de-duplicated — `decoSectionsRendered` goes through
+   * `new Set(...)`, which is exactly right for presence comparison
+   * (`sectionsOnlyInProd`/`sectionsOnlyInCand` in visual-regression.ts) but
+   * throws away sequence. `section-order-parity.ts` is the one consumer
+   * that needs the raw order (a reordered page has the identical presence
+   * set, so the existing Set-based diff can't see it).
+   */
+  decoSectionsOrder: string[];
+  /**
    * Number of elements that look like skeleton/loader placeholders still
    * present in the captured HTML — `.skeleton`, `[aria-busy="true"]`,
    * `[class*="shimmer"]`, Tailwind `.animate-pulse`, etc. Non-zero means
@@ -200,6 +210,7 @@ export function snapshotDom(html: string): DomSnapshot {
     meta,
     imageStats,
     decoSectionsRendered: [...new Set(decoSectionsRendered)],
+    decoSectionsOrder: decoSectionsRendered,
     skeletonCount,
   };
 }
