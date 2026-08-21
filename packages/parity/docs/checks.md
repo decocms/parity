@@ -45,5 +45,9 @@ check-name side.
 | **Font parity** _(issue #241)_ | prod loads web fonts and cand loads none → silent fallback to a system font (e.g. `Lato` declared but no `@font-face`) that a screenshot diff misses | html |
 | **SSR / no-JS** _(issue #244)_ | Plain `fetch` (no JS) returns the SSR HTML; a near-empty body → content is client-only and the page is blank without JS (high CLS, broken SEO/a11y) | html |
 | **Nav-links health** _(issue #247)_ | Dead same-page anchors (`#foo` with no matching `id`/`name`) and broken header/nav routes; prod-ok + cand-broken = high regression | seo |
+| **Redirects parity**          | prod's `url` → `finalUrl` redirect destination (path only) still matches in cand — catches a legacy-URL redirect table that silently didn't port, even when both sides 200 | seo |
+| **Third-party scripts parity** | Distinct third-party origins in captured network requests (GTM, pixels, chat widgets, …) present in prod but missing in cand, or new in cand | network |
+| **Analytics beacon parity**   | Well-known analytics beacon URLs (GTM container, GA4 collect, Meta/TikTok/Pinterest pixels) firing in prod but not in cand — network-presence only, not a `dataLayer` event/payload diff | network |
+| **Section order parity**      | `[data-section]` sequence, not just presence — a reorder with the identical section set is invisible to the existing presence-only `Set` diff in visual-regression | html |
 
 All results are aggregated (optionally via Claude) and ranked by severity. Each issue includes screenshots, reproduction, and a suggested fix.
