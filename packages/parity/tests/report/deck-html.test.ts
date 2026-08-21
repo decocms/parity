@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { renderDeckHtml } from "../../src/report/deck-html.ts";
-import type { DeckModel } from "../../src/report/deck-model.ts";
+import { type DeckModel, same } from "../../src/report/deck-model.ts";
 import { DECK_CSS, DECK_JS } from "../../src/report/deck-template.ts";
 
 function model(over: Partial<DeckModel> = {}): DeckModel {
@@ -14,7 +14,14 @@ function model(over: Partial<DeckModel> = {}): DeckModel {
     score: 57,
     status: "fail",
     caveats: [],
-    headline: [{ value: "57/100", label: "score parity", sub: "5 páginas", tone: "bad" }],
+    headline: [
+      {
+        value: "57/100",
+        label: { pt: "score parity", en: "parity score" },
+        sub: { pt: "5 páginas", en: "5 pages" },
+        tone: "bad",
+      },
+    ],
     modules: [],
     findings: [],
     findingsOmitted: 0,
@@ -113,6 +120,36 @@ describe("renderDeckHtml (#290)", () => {
     expect(pt).toContain('data-pt="Achados"');
     expect(pt).toContain('data-en="Findings"');
     expect(renderDeckHtml(model(), "en")).toContain('<html lang="en">');
+  });
+});
+
+describe("deck i18n (#293)", () => {
+  it("refuses a label that exists in only one language", () => {
+    expect(() =>
+      renderDeckHtml(
+        model({
+          headline: [
+            { value: "1", label: { pt: "só português", en: "  " }, sub: null, tone: "neutral" },
+          ],
+        }),
+      ),
+    ).toThrow(/both locales required/);
+  });
+
+  it("accepts a term that legitimately reads the same in both", () => {
+    const html = renderDeckHtml(
+      model({
+        headline: [{ value: "2", label: same("critical"), sub: null, tone: "bad" }],
+      }),
+    );
+    expect(html).toContain('data-pt="critical" data-en="critical"');
+  });
+
+  it("omits a tile's sub line entirely instead of rendering an empty one", () => {
+    const html = renderDeckHtml(
+      model({ headline: [{ value: "3", label: same("high"), sub: null, tone: "warn" }] }),
+    );
+    expect(html).not.toContain('<div class="tile-sub">');
   });
 });
 

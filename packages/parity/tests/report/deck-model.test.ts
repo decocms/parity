@@ -50,7 +50,9 @@ describe("buildDeckModel (#289)", () => {
     const m = buildDeckModel(run());
     expect(m.headline.map((t) => t.value)).toEqual(["57/100", "2", "5", "6/34"]);
     expect(m.headline[0]?.tone).toBe("bad");
-    expect(m.headline[3]?.sub).toBe("13 pulados");
+    expect(m.headline[0]?.label).toEqual({ pt: "score parity", en: "parity score" });
+    expect(m.headline[1]?.label).toEqual({ pt: "critical", en: "critical" });
+    expect(m.headline[3]?.sub).toEqual({ pt: "13 pulados", en: "13 skipped" });
   });
 
   it("says nothing about skipped checks when none were skipped", () => {
@@ -59,7 +61,8 @@ describe("buildDeckModel (#289)", () => {
         verdict: { ...run().verdict, checksSkipped: 0, checksFailed: 0 },
       } as Partial<Run>),
     );
-    expect(m.headline[3]?.sub).toBe("");
+    // null, not an empty string: the renderer omits the line entirely rather than drawing a blank.
+    expect(m.headline[3]?.sub).toBeNull();
     expect(m.headline[3]?.tone).toBe("good");
   });
 
