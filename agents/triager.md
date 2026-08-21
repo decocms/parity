@@ -8,8 +8,10 @@ tools: [Read, Grep, Glob]
 
 Read-only. You receive: `target_dir`, `build_ok` (bool), `dev_log_path` (opt),
 `conventions`, `platform` ("faststore-v4" | "faststore-next" | "tanstack-deco"),
-`stage` ("components" | "pages" | "polish", default "components"), and
-`plan_path` (`.parity/migration-plan.json`).
+`stage` ("components" | "pages" | "polish", default "components"),
+`plan_path` (`.parity/migration-plan.json`), and — when `stage === "pages"` —
+`page` (the one page path being closed) plus `page_components` (its component
+names, from `parity plan page <path> --json`).
 
 ## Scope FIRST — `stage` decides what you may report
 
@@ -35,6 +37,33 @@ Also skip by platform:
 **If `plan_path` is missing, STOP** and return a single `critical` issue saying
 the migration plan is absent so "what is missing" cannot be determined (running
 the polish checks instead would misrepresent a scaffolding gap as code quality).
+
+### When `page` is set, that page is the whole world
+
+Report only findings that belong to `page` or to one of `page_components`.
+Anything else — another page, a global you were not asked about — goes to
+`deferred`, exactly like an out-of-stage finding. The point of a per-page pass is
+that the page can be **closed**; a survey that wanders files work nobody can
+finish.
+
+Title every issue with the page so it survives dedup:
+`[<page>] <component>: <problem>`. Dedup is by title, so two pages sharing a
+component collide without it.
+
+### Components that are already decided
+
+Read each row's `status` in `plan_path` before reporting on it:
+
+- `as-is` — divergence accepted. **Never file.** Not even as `low`.
+- `upgrade` — the target is deliberately ahead of prod; prod is **not** the
+  reference for it. **Never file a "does not match prod" finding.** If it has a
+  `reference` and diverges from *that*, it is a real defect and you should file it.
+- `skipped` — out of scope. Never file.
+
+You may **propose** that something looks like an `as-is` or an `upgrade` — put it
+in `deferred` with that wording, one line, so the orchestrator can ask the user.
+Never assume it. Marking a divergence as accepted, or as an improvement, is the
+one call that makes a real gap invisible, and it is not yours to make.
 
 ## Survey — run the checks your stage allows, then write RESULT_JSON
 

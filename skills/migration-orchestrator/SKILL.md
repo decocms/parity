@@ -61,10 +61,33 @@ copy the plan there and treat that path as canonical for the rest of the run
 Never hand-edit the JSON. Flip a component's status through the CLI, via `runner`:
 
 ```
-parity plan set-status <name> <pending|done|skipped> --dir <target.dir>/.parity
+parity plan set-status <name> <pending|partial|done|as-is|upgrade|skipped> --dir <target.dir>/.parity
+parity plan verify     <name> <pass|fail> [--note "<what you saw>"] --dir <target.dir>/.parity
+parity plan page       <path> --cand <cand url> --json              --dir <target.dir>/.parity
 ```
 
 Name matching is case- and separator-insensitive (`product-shelf` == `ProductShelf`).
+
+**"Not equal to prod" is three different things.** Treating them as one is how a
+run turns into a queue of findings nobody wants:
+
+| status | Meaning | Reference |
+|---|---|---|
+| (report it) | the target is worse or broken — a real defect | prod |
+| `as-is` | different, accepted, not worth the work | still prod |
+| `upgrade` | the target is deliberately **ahead** — usually a better component brought in from another site | **not prod** |
+
+`skipped` still means "not going to do it".
+
+An `upgrade` needs a reference, or parity keeps measuring it against the wrong
+thing forever:
+
+```
+parity plan set-reference <name> --url <site it came from> --selector "<sel>" --note "<why>" --dir <target.dir>/.parity
+```
+
+`--note` is required. Only the **user** decides `as-is` / `upgrade` — see "The
+page loop".
 
 ## Reading a `runner` reply
 
@@ -98,7 +121,7 @@ stage they are in when resuming an existing migration; default `components`.
 | stage | goal | triage reports ONLY | explicitly deferred |
 |---|---|---|---|
 | `components` | build the missing sections | build failures, runtime errors, missing/partial components, FastStore 3-point invariant breaks | CSS tokens, i18n, CLS, perf, bundle, analytics/GTM, SEO, a11y contrast |
-| `pages` | assemble pages + get content published | above, plus pages `pending`/`code` (route missing, or content unpublished), whitelist gaps blocking a page | same as above |
+| `pages` | close pages **one at a time** (see "The page loop") | above, plus pages `pending`/`code` (route missing, or content unpublished), whitelist gaps blocking a page — scoped to `state.currentPage` | same as above, plus anything belonging to another page |
 | `polish` | parity/quality pass | everything: CSS tokens, i18n, CLS/LoadingFallback, perf/bundle, analytics, SEO, a11y | — |
 
 **Why this exists.** A mature target's repo and backlog are full of polish work.
@@ -107,6 +130,55 @@ GTM/analytics and color-contrast issues — real, but not what the user is doing
 right now — while "component X is not built" and "page Y has no content" never
 surface at all. Deferred items are NOT filed as issues: they stay in the backlog
 file until the stage reaches them. Say what was deferred; never silently drop it.
+
+## The page loop — `stage: pages`
+
+While the stage is `pages`, the unit of work is **one page**, not a global queue.
+Set `state.currentPage` and work it to closure before moving on.
+
+**Why.** With a global queue you get five issues from five different places and
+no page ever finishes. The stage tells you what KIND of work counts; it never
+tells you WHERE. A page that closes is something you can show someone.
+
+**Order — globals first.** Global components (header, footer, nav) are NOT page
+members in the capture, so they never show up in a page worksheet. Settle every
+component with `scope: global` before walking pages, then go by `kind`:
+`home` → `plp` → `pdp` → the rest. Skip this and a global fix reopens pages you
+already closed.
+
+**The cycle**, per page, replacing the global `triage → fix` while the stage is
+`pages`:
+
+1. Read the worksheet, via `runner`:
+   `parity plan page <path> --dir <target.dir>/.parity --cand <cand url> --json`
+2. `build` rows → one `porter` each (same fork as `porting`). Flip each with
+   `parity plan set-status <name> done` when it lands.
+3. `validate` rows → run the `command` the worksheet already built for you (it is
+   a ready `parity section` invocation, pointed at the row's reference), then
+   record the outcome: `parity plan verify <name> pass|fail --note "<what you saw>"`.
+4. A `fail` becomes an issue. Title MUST carry the page (see `issue-loop`) — dedup
+   is by title, so two pages sharing a component would collide otherwise.
+5. `as-is` and `upgrade` rows → **no issue, ever**. They are decided. Report them
+   in the round summary so the user sees they were considered, not skipped.
+6. Page closes when the worksheet returns `ready: true`. Then set the page status:
+   `done` if content is live, `code` if the route works but the CMS has nothing
+   published.
+7. Next page.
+
+**Cap.** Same 5-issues-per-round ceiling as `fix`. What does not fit stays on the
+worksheet, which is derived from the plan and regenerates — it is not a queue that
+can go stale.
+
+**Never mark `as-is` or `upgrade` yourself.** Both mean "stop opening work for
+this", and only the user gets to say that. When a component looks deliberately
+different or deliberately better, **propose it and wait**:
+
+> `product-shelf` on `/` does not match prod. It looks like a deliberate
+> replacement rather than a defect. Should I mark it `upgrade` (and against which
+> reference site?), `as-is`, or file it as a defect?
+
+An agent that files these on its own is exactly how a real gap disappears from
+view.
 
 **PR mode** (set at `discovery`, `budget.stackPrs`):
 - **merge** (default) — independent PRs off `main`, merged one at a time; the
@@ -141,6 +213,7 @@ file until the stage reaches them. Say what was deferred; never silently drop it
   // components + their porting status live in <target.dir>/.parity/migration-plan.json,
   // NOT here. Flip status via `parity plan set-status` (see "Plan file" above).
   "stage": "components",          // components | pages | polish — scopes what triage reports
+  "currentPage": null,            // stage `pages` only: the ONE page being closed right now
   "budget": { "fixRounds": 6, "used": 0, "stackPrs": false },
   "stack": [],                    // stack mode only: [{issue, pr, branch, base}] bottom→top
   "parity": { "lastScore": null, "target": 97, "reportPath": null }
@@ -387,6 +460,12 @@ Spawn `triager` with `stage` (see "Stage" above) and the plan path, so it report
 only what this stage is about. It surveys the migrated repo and returns issue
 drafts. Create GitHub issues via `gh issue create --label parity-migrate` (skip
 if title already exists — check with `gh issue list --label parity-migrate`).
+
+When `stage: pages`, also pass `page` (`state.currentPage`) and that page's
+component list from the worksheet. Anything outside the page goes to the
+triager's `deferred` list — same mechanism the stage filter already uses. Do not
+let a survey of one page file work for another; that is how the queue goes global
+again.
 
 Order the queue by the stage's goal: missing/partial components and unpublished
 pages first, never polish while `stage !== "polish"`. If the triager returns
