@@ -34,7 +34,7 @@ const DISABLE_ANIMATIONS_CSS = `
  *
  * Use `userAgentFor(viewport)` from any non-Playwright call site.
  */
-export const USER_AGENT_BY_VIEWPORT: Record<Viewport, string> = {
+const USER_AGENT_BY_VIEWPORT: Record<Viewport, string> = {
   mobile:
     "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
   tablet:

@@ -63,20 +63,9 @@ export const CART_INTERACTIONS_STEP_LABELS: Record<string, string> = {
 /** Cart-interactions steps whose failure is critical. */
 export const CART_INTERACTIONS_CRITICAL_STEPS = new Set(["seed-cart", "remove-item"]);
 
-/** Human labels for the PLP-flow interactive pagination steps. */
-export const PLP_STEP_LABELS: Record<string, string> = {
-  "detect-pagination-mode": "Detectar modo de paginação",
-  paginate: "Paginar (próxima página / carregar mais / scroll)",
-  "verify-pagination": "Verificar resultado da paginação",
-  "hover-preload-budget": "Hover em product cards — orçamento de _serverFn preload",
-};
-
 /** Human labels for the spa-navigation flow steps (issue #54, M2.5). */
 export const SPA_NAVIGATION_STEP_LABELS: Record<string, string> = {
   "load-via-f5": "Carregar categoria via F5 (full page load)",
   "navigate-via-spa": "Navegar para outra categoria via SPA (client-side)",
   "verify-section-parity": "Verificar paridade de sections (SPA nav vs F5 do mesmo destino)",
 };
-
-/** spa-navigation steps whose failure is critical. */
-export const SPA_NAVIGATION_CRITICAL_STEPS = new Set(["verify-section-parity"]);

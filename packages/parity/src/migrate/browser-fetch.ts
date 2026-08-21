@@ -25,7 +25,7 @@ export async function browserFetchText(page: Page, url: string): Promise<string 
   return nodeFetchText(url);
 }
 
-export async function nodeFetchText(url: string): Promise<string | null> {
+async function nodeFetchText(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, {
       headers: {

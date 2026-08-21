@@ -4,7 +4,11 @@ import chalk from "chalk";
 import open from "open";
 import { renderDeckHtml } from "../report/deck-html.ts";
 import { buildDeckModel } from "../report/deck-model.ts";
-import { type ReportSection, extractReportSection } from "../report/extract-section.ts";
+import {
+  ALL_REPORT_SECTIONS,
+  type ReportSection,
+  extractReportSection,
+} from "../report/extract-section.ts";
 import { getRunPaths, loadRun } from "../storage/fs.ts";
 
 export interface ReportCommandOptions {
@@ -54,6 +58,15 @@ export async function reportCommand(runId: string, opts: ReportCommandOptions): 
   }
 
   if (opts.section) {
+    // Validate the NAME before asking the extractor. Without this an unknown name fell through to
+    // `section "x" not present in this report`, which reads as "missing from this run" rather than
+    // "no such section" — a typo looked like a broken report. `ALL_REPORT_SECTIONS` existed for
+    // exactly this and was never used.
+    if (!ALL_REPORT_SECTIONS.includes(opts.section)) {
+      console.error(chalk.red(`unknown section "${opts.section}"`));
+      console.error(chalk.gray(`  valid: ${ALL_REPORT_SECTIONS.join(", ")}`));
+      return 1;
+    }
     if (opts.json) {
       try {
         const run = loadRun(opts.output, runId);

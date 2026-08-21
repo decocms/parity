@@ -1,6 +1,12 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["src/cli.ts", "scripts/postbuild.ts", "tests/**/*.test.ts", "vitest.config.ts"],
+  "entry": [
+    "src/cli.ts",
+    "scripts/postbuild.ts",
+    "scripts/regen-report.ts",
+    "tests/**/*.test.ts",
+    "vitest.config.ts"
+  ],
   "project": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
   "ignore": ["dist/**", "parity-output/**", "coverage/**"],
   "ignoreDependencies": ["@biomejs/biome"]

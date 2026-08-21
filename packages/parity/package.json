@@ -78,7 +78,6 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "cheerio": "^1.0.0",
-    "@types/diff": "^8.0.0",
     "@types/node": "^22.10.0",
     "@types/pixelmatch": "^5.2.6",
     "@types/pngjs": "^6.0.5",

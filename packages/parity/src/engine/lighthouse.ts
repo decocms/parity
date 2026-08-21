@@ -52,7 +52,7 @@ const AGENT_A11Y_AUDIT_IDS = [
 ] as const;
 
 /** Extract the agent-relevant a11y audits (with a few failing element samples). */
-export function extractAgentA11y(audits: Record<string, LhAudit>): AgentA11yAudit[] {
+function extractAgentA11y(audits: Record<string, LhAudit>): AgentA11yAudit[] {
   const out: AgentA11yAudit[] = [];
   for (const id of AGENT_A11Y_AUDIT_IDS) {
     const a = audits[id];
@@ -97,7 +97,7 @@ const ACTIONABLE_AUDIT_IDS = new Set([
 ]);
 
 /** Extract actionable audits from a Lighthouse report's `audits` map. */
-export function extractOpportunities(
+function extractOpportunities(
   audits: Record<string, LhAudit>,
   minSavingsMs = 50,
 ): LhOpportunity[] {

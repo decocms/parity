@@ -20,9 +20,7 @@ export type { ImageInput, MessageCallParams, ToolCallParams } from "./types.ts";
  * @deprecated Use `resolveModel(feature, provider)` instead. Kept for back-compat with
  * external scripts; defaults to the sonnet tier on the anthropic provider.
  */
-export const LLM_MODEL_ANTHROPIC = PROVIDER_MODELS.anthropic.sonnet;
 /** @deprecated Use `resolveModel(feature, provider)` instead. */
-export const LLM_MODEL_OPENROUTER = PROVIDER_MODELS.openrouter.sonnet;
 
 let forcedProvider: Provider | null = null;
 let llmDisabled = false;
@@ -95,12 +93,6 @@ export function providerLabel(): string {
   return `${p} (selectors=${models["selector-discovery"]}, visual=${models["visual-diff"]}, fix=${models.explain})`;
 }
 
-/** Short human label without the per-feature model breakdown. */
-export function providerName(): string {
-  const p = getProvider();
-  return p ?? "none";
-}
-
 // Output language for LLM responses. Default `en`. Set to `pt` via the
 // `--pt` CLI flag — affects only LLM-generated content (responses + free-form
 // messages), not the static report HTML or CLI banners. Issue #67.
@@ -109,10 +101,6 @@ let llmLanguage: LlmLanguage = "en";
 
 export function setLlmLanguage(lang: LlmLanguage): void {
   llmLanguage = lang;
-}
-
-export function getLlmLanguage(): LlmLanguage {
-  return llmLanguage;
 }
 
 /**

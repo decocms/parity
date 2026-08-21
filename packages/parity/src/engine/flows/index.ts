@@ -7,7 +7,6 @@ import type { FlowContext } from "./shared.ts";
 import { flowHomepage, flowPdp, flowPlp } from "./simple.ts";
 import { flowSpaNavigation } from "./spa-navigation.ts";
 
-export { collectCandidateLinks, findElement } from "./shared.ts";
 export type { FlowContext, StepActionResult, StepProgressEvent } from "./shared.ts";
 
 /**

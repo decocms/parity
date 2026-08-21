@@ -43,7 +43,7 @@ interface WaterfallRow {
  * If no rows qualify, the panel falls back to the existing duration
  * table — see callers in `render.ts`.
  */
-export function buildWaterfallRows(entries: NetworkEntry[]): WaterfallRow[] {
+function buildWaterfallRows(entries: NetworkEntry[]): WaterfallRow[] {
   const rows: WaterfallRow[] = [];
   for (const e of entries) {
     if (typeof e.startMs !== "number" || typeof e.endMs !== "number") continue;

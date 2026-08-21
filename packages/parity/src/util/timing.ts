@@ -168,7 +168,7 @@ export function buildFlowBreakdown(
   return Array.from(byFlow.values());
 }
 
-export function formatMs(ms: number): string {
+function formatMs(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
   if (totalSec < 60) return `${totalSec}s`;
   const min = Math.floor(totalSec / 60);

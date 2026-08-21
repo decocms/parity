@@ -32,7 +32,7 @@ import type { CheckResult, Issue, Verdict } from "../types/schema.ts";
  * `inconclusive` issues contribute nothing (schema declares them
  * informational).
  */
-export const SEVERITY_WEIGHTS: Record<Issue["severity"], number> = {
+const SEVERITY_WEIGHTS: Record<Issue["severity"], number> = {
   critical: 20,
   high: 8,
   medium: 3,
@@ -43,7 +43,7 @@ export const SEVERITY_WEIGHTS: Record<Issue["severity"], number> = {
  * e-folding constant, calibrated on real migration runs whose penalty
  * density ranged 37-92 per page: density 9 ≈ 77, 40 ≈ 32, 90 ≈ 8.
  */
-export const DECAY_K = 35;
+const DECAY_K = 35;
 
 /**
  * Any FAIL verdict — a critical issue OR a failed check (checks like

@@ -9,9 +9,9 @@ import type { Source } from "./types.ts";
 import { vtexIo } from "./vtex-io.ts";
 
 /** Order matters: `detectSource` returns the first whose `detect` matches. */
-export const SOURCES: Source[] = [decoFresh, vtexIo];
+const SOURCES: Source[] = [decoFresh, vtexIo];
 
-export const SOURCE_BY_KIND: Record<string, Source> = Object.fromEntries(
+const SOURCE_BY_KIND: Record<string, Source> = Object.fromEntries(
   [...SOURCES, liveOnly].map((s) => [s.kind, s]),
 );
 

@@ -59,12 +59,3 @@ export function captureKey(c: PageCapture): string {
   }
   return `${path}::${c.viewport}`;
 }
-
-export function pageRoleHint(urlOrPath: string): string {
-  if (/\/p\b|\/p\/|\/products\//.test(urlOrPath)) return "pdp";
-  if (/\/c\/|\/category\/|\/collections\//.test(urlOrPath)) return "plp";
-  if (/\/search/.test(urlOrPath)) return "search";
-  if (/\/checkout/.test(urlOrPath)) return "checkout";
-  if (urlOrPath === "/" || /\/$/.test(urlOrPath)) return "home";
-  return "page";
-}
