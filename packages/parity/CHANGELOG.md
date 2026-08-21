@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.26.0] — 2026-08-21
+
+Fixes the failure mode found running the plugin on a mature FastStore target
+(electrolux-poc): the run filed 13 issues and opened 5 stacked PRs — i18n,
+`:global()`, `rgba()` tokens, GA4 analytics, JSON-LD — and **zero** about the
+work actually in progress (missing components, pages without content). Root
+cause: `.parity/migration-plan.json` was never persisted, so the triager had
+nothing to compare against, reported no missing components, and the orchestrator
+degenerated into a CSS/perf linter over whatever the repo contained — while
+reconcile imported the target's whole polish backlog as issues.
+
+### Added
+
+* **`parity plan status`** — the migration inventory. Prints components settled
+  (no work needed) vs remaining, and pages done vs **awaiting CMS content**,
+  with `--json` for the orchestrator. This is the "what's actually left?" view
+  that was missing.
+* **Page readiness tracking.** `pages[]` rows now carry a `status`
+  (`pending` \| `code` \| `done` \| `skipped`) flipped by **`parity plan
+  set-page-status <path> <status>`**. `code` means the route/sections exist but
+  the CMS has no published content — on FastStore the most common real state,
+  and previously not modeled at all (code-complete was indistinguishable from
+  page-complete). Plans written before this read as `pending`.
+* **`partial` component status.** A half-wired section (CMS schema with no
+  `index.tsx` registration, or the reverse) is neither pending nor done;
+  reporting it as `pending` sent a porter to redo finished work.
+* **Stage scoping (`state.stage`: `components` \| `pages` \| `polish`).** Scopes
+  what `triage` reports and what gets imported from the target's backlog, so a
+  run works on the current goal. In `components`/`pages`, CSS tokens, i18n, CLS,
+  perf/bundle, analytics/GTM, SEO and a11y contrast are **deferred, not filed**
+  (listed as deferred so nothing is silently dropped). (`migration-orchestrator`,
+  `triager`)
+
+### Changed
+
+* **Reconcile hard-gates on the plan.** The orchestrator must verify
+  `<target.dir>/.parity/migration-plan.json` exists before `porting`/`triage`,
+  classify every page's readiness, and report `parity plan status` to the user
+  before doing any work. Backlog import is now stage-filtered instead of
+  wholesale. (`migration-orchestrator`)
+* **`triager` is stage- and platform-scoped.** Runs only the checks the stage
+  allows, returns a `deferred` list for the rest, refuses to survey when the plan
+  is absent (returns one critical issue instead of lint findings), and skips the
+  deco-fresh-only checks (`.deco/blocks/`, `.deco/sections.gen.ts`) on
+  `faststore-v4` where those paths do not exist. Missing-section detection now
+  matches by concept and distinguishes `partial` from missing. (`triager`)
+
 ## [0.25.1] — 2026-08-20
 
 ### Fixed

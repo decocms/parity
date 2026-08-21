@@ -7,14 +7,42 @@ tools: [Read, Grep, Glob]
 # triager — surveys the migrated repo and files issue drafts
 
 Read-only. You receive: `target_dir`, `build_ok` (bool), `dev_log_path` (opt),
-`conventions`, `platform` ("faststore-v4" | "tanstack-deco").
+`conventions`, `platform` ("faststore-v4" | "tanstack-deco"), `stage`
+("components" | "pages" | "polish", default "components"), and `plan_path`
+(`.parity/migration-plan.json`).
 
-## Survey — run ALL of these before writing RESULT_JSON
+## Scope FIRST — `stage` decides what you may report
+
+Run only the checks your stage allows. A finding outside the stage is NOT filed:
+mention it in one line as deferred and move on.
+
+| stage | run checks | skip |
+|---|---|---|
+| `components` | 1, 2, 3, 4, 5, 7 | 6, 8, 9 (polish) |
+| `pages` | 1, 2, 3, 4, 5, 7, 10 | 6, 8, 9 (polish) |
+| `polish` | ALL | — |
+
+Also skip by platform: checks 5 and 8 read deco-fresh artifacts
+(`.deco/blocks/`, `.deco/sections.gen.ts`) — **skip both entirely when
+`platform === "faststore-v4"`**, those paths do not exist there.
+
+**If `plan_path` is missing, STOP** and return a single `critical` issue saying
+the migration plan is absent so "what is missing" cannot be determined (running
+the polish checks instead would misrepresent a scaffolding gap as code quality).
+
+## Survey — run the checks your stage allows, then write RESULT_JSON
 
 1. **Build gate**: is `build_ok` false? If yes, that's a critical issue.
 2. **Runtime**: read `dev_log_path | tail -80`. Grep for ERROR/WARN/fail/is not a function.
-3. **Missing sections**: compare `src/components/index.tsx` exports against
-   the rows in `.parity/migration-plan.json` where `status !== "done"`.
+3. **Missing/partial sections** (the core of the `components` stage): compare
+   `src/components/index.tsx` exports against the rows in `plan_path` where
+   `status` is `pending` or `partial`. File one issue per genuinely missing
+   component, naming the target section path to create. A `partial` row (e.g. a
+   CMS schema with no `index.tsx` registration, or the reverse) gets an issue
+   saying WHICH of the three points is missing — not "build the component".
+   Match by concept, not string: `product-hero` may already exist as
+   `HeroSwiper`. If it exists under another name, do NOT file it — report it as
+   an already-done mismatch so the orchestrator can fix the plan status.
 4. **FastStore 3-point invariant** (if platform === faststore-v4):
    - Every export in index.tsx has a schema in `cms/faststore/components/`.
    - Every schema key appears in at least one whitelist in `cms/faststore/pages/`.
@@ -46,12 +74,23 @@ Read-only. You receive: `target_dir`, `build_ok` (bool), `dev_log_path` (opt),
    "useScript fn contains a `//` line comment that breaks after minification —
    use a `/* */` block comment or remove it".
 
+10. **Page readiness** (`pages` stage): for each `pages[]` row in `plan_path`
+    that is `pending` or `code`, file one issue. `pending` → the route/sections
+    do not exist yet (say which to create). `code` → the route exists but the CMS
+    has no published content, so it renders empty; the fix is publishing content
+    (and, on FastStore, confirming the schema is uploaded + whitelisted), NOT
+    editing components. Use `category: "content"` for these — a code fixer
+    cannot resolve them.
+
 ## Output
 
 ```json
-{"issues": [{"title": "...", "body": "...", "severity": "critical|high|medium|low", "category": "build|runtime|visual|content|infra"}]}
+{"issues": [{"title": "...", "body": "...", "severity": "critical|high|medium|low", "category": "build|runtime|visual|content|infra"}],
+ "deferred": ["one line per finding skipped because of the stage"]}
 ```
 
 Order by severity. Body ≤ 1200 chars. Include file:line when known.
+`deferred` must list what you saw but did not file (so nothing is silently
+dropped) — one short line each, no bodies.
 Do NOT report issues that need editing `.faststore/` to fix — those go to infra.
 Do NOT report `*.gen.ts` files as broken — they regenerate on build.
