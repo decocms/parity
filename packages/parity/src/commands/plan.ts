@@ -7,6 +7,7 @@
  */
 
 import chalk from "chalk";
+import { studioConfigFromEnv, syncBoardToStudio } from "../board/studio.ts";
 import {
   type ComponentStatus,
   type Disposition,
@@ -337,7 +338,10 @@ const COLUMN_STYLE: Record<PageColumn, (s: string) => string> = {
  * components (see `pageColumn`), so the board cannot claim a page is done while a component it
  * needs is still missing. Read-only.
  */
-export function planBoardCommand(dir: string, opts: { cand?: string; json?: boolean }): number {
+export async function planBoardCommand(
+  dir: string,
+  opts: { cand?: string; json?: boolean; board?: string },
+): Promise<number> {
   const plan = loadPlan(dir);
   if (!plan) {
     console.error(chalk.red(`No migration-plan.json found in ${dir}`));
@@ -393,5 +397,33 @@ export function planBoardCommand(dir: string, opts: { cand?: string; json?: bool
     );
   }
   console.log("");
+
+  // The Studio push is reporting, never a gate: a board nobody can reach must not fail a
+  // migration, so every failure degrades to the terminal render above and still exits 0.
+  if (opts.board === "studio") {
+    const cfg = studioConfigFromEnv();
+    if (!cfg) {
+      console.log(
+        chalk.yellow(
+          "Studio board skipped — set PARITY_STUDIO_URL and PARITY_STUDIO_TOKEN. Showing the terminal board instead.\n",
+        ),
+      );
+      return 0;
+    }
+    try {
+      const synced = await syncBoardToStudio(board, cfg);
+      console.log(
+        chalk.green(
+          `Studio board synced — ${synced.created} created, ${synced.updated} updated, ${synced.skipped} skipped.\n`,
+        ),
+      );
+    } catch (err) {
+      console.log(
+        chalk.yellow(
+          `Studio board unavailable (${err instanceof Error ? err.message : String(err)}). Showing the terminal board instead.\n`,
+        ),
+      );
+    }
+  }
   return 0;
 }

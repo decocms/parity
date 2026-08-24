@@ -410,9 +410,20 @@ program
         ".parity",
       )
       .option("--cand <url>", "Candidate base URL — enriches cards with validation state")
+      .option(
+        "--board <where>",
+        "terminal (default) | studio — push one card per page to the deco Studio task board (needs PARITY_STUDIO_URL + PARITY_STUDIO_TOKEN; falls back to terminal when unset or unreachable)",
+        "terminal",
+      )
       .option("--json", "Emit structured JSON instead of human-readable text", false)
-      .action((opts) => {
-        process.exit(planBoardCommand(opts.dir, { cand: opts.cand, json: Boolean(opts.json) }));
+      .action(async (opts) => {
+        process.exit(
+          await planBoardCommand(opts.dir, {
+            cand: opts.cand,
+            json: Boolean(opts.json),
+            board: opts.board,
+          }),
+        );
       }),
   )
   .addCommand(

@@ -322,6 +322,29 @@ Two lists sit outside the lanes:
 
 The board covers the pages the capture **sampled**, not every URL on the site.
 
+#### Mirroring the board into the deco Studio
+
+```bash
+export PARITY_STUDIO_URL=https://<studio host>
+export PARITY_STUDIO_TOKEN=<token>
+parity plan board --dir <target>/.parity --board studio
+```
+
+One card per page in the org's task board, so a client watches progress without a
+terminal. Lanes map onto the board's five fixed columns — `triage`→`triage`,
+`backlog`→`todo`, `building`→`in_progress`, `review`→`in_review`, `done`→`done`;
+`skipped` gets no card.
+
+- **The token decides the organization.** The task board tools take no org
+  parameter and resolve it from the caller's auth, so pointing at another org means
+  using that org's token.
+- **The site goes in the card title** (`[host] /path`) because a task board item is
+  org-scoped and has no site field — two migrations in one org would collide.
+- **Re-running does not duplicate.** The sync lists first and matches on title, then
+  updates instead of creating. The board has no upsert of its own.
+- **It never fails the run.** Unset or unreachable Studio prints the terminal board
+  with a warning and exits 0. A board is reporting, not a gate.
+
 ### What to commit
 
 **Commit `migration-plan.json`. Ignore everything else parity writes.**

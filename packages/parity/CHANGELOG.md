@@ -20,6 +20,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   with no page association; listed rather than hidden). `--json` for the
   orchestrator. Plans predating page/component edges degrade to `triage` rather
   than claiming false readiness.
+* **`--board studio` — mirror the board into the deco Studio task board.** One card
+  per page in the client's org, so progress is visible without a terminal. Lanes map
+  onto the board's five fixed columns; `skipped` gets no card. Talks to the Studio's
+  `/mcp/self` endpoint with plain JSON-RPC over `fetch` (the MCP SDK would be a
+  dependency for one POST). The token decides the org — the task board tools take no
+  org parameter. Re-running does not duplicate: the sync lists first and matches on
+  title, then updates. **It never fails a run** — unset or unreachable Studio prints
+  the terminal board and exits 0.
+
+### Changed
+
+* **Orchestrator + plugin integration.** `reconcile` now shows the board next to the
+  inventory and uses it to pick what to work on (the page furthest along that is not
+  done — finishing a page beats starting three); the per-page cycle refreshes the
+  board when a page closes and holds to one page at a time. `discovery` asks where
+  the board goes (`terminal`/`studio`) and **always** asks which stage the run is in
+  rather than silently defaulting, which is how a team building components ended up
+  with a queue of bundle-size and analytics issues. It also asks for `target.dir`
+  when it cannot resolve one. New `--stage` and `--board` arguments on
+  `/parity:migrate`. (`migration-orchestrator`, `commands/migrate`)
 
 ## [0.26.0] — 2026-08-21
 

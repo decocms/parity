@@ -81,6 +81,7 @@ Never hand-edit the JSON. Flip a component's status through the CLI, via `runner
 parity plan set-status <name> <pending|partial|done|as-is|upgrade|skipped> --dir <target.dir>/.parity
 parity plan verify     <name> <pass|fail> [--note "<what you saw>"] --dir <target.dir>/.parity
 parity plan page       <path> --cand <cand url> --json              --dir <target.dir>/.parity
+parity plan board      [--board studio] [--json]                     --dir <target.dir>/.parity
 ```
 
 Name matching is case- and separator-insensitive (`product-shelf` == `ProductShelf`).
@@ -132,8 +133,13 @@ discovery → reconcile → repo-setup → template-bootstrap → workflows
 
 A migration is not one undifferentiated pile of work. `state.stage` scopes what
 `triage` reports and what gets imported from the target's backlog, so the run
-works on the CURRENT goal instead of everything at once. Ask the user which
-stage they are in when resuming an existing migration; default `components`.
+works on the CURRENT goal instead of everything at once.
+
+**Always ask which stage they are in** — on a fresh migration too, not only when
+resuming — unless `--stage` was passed. Silently defaulting is how a team that is
+building components gets a queue of bundle-size and analytics issues: the default
+is invisible, so nobody knows why the wrong work showed up. Show the table below
+when asking, so the choice states what gets deferred.
 
 | stage | goal | triage reports ONLY | explicitly deferred |
 |---|---|---|---|
@@ -180,7 +186,10 @@ already closed.
 6. Page closes when the worksheet returns `ready: true`. Then set the page status:
    `done` if content is live, `code` if the route works but the CMS has nothing
    published.
-7. Next page.
+7. Refresh the board (`parity plan board`, with `--board studio` when that is the
+   destination) so the closed page moves lane and the client sees it. Then next
+   page — **one page at a time**: do not open work on the next until this one
+   closes or the user explicitly deprioritizes it.
 
 **Cap.** Same 5-issues-per-round ceiling as `fix`. What does not fit stays on the
 worksheet, which is derived from the plan and regenerates — it is not a queue that
@@ -230,6 +239,7 @@ view.
   // components + their porting status live in <target.dir>/.parity/migration-plan.json,
   // NOT here. Flip status via `parity plan set-status` (see "Plan file" above).
   "stage": "components",          // components | pages | polish — scopes what triage reports
+  "board": { "destination": "terminal" },  // terminal | studio — where the per-page kanban goes
   "currentPage": null,            // stage `pages` only: the ONE page being closed right now
   "budget": { "fixRounds": 6, "used": 0, "stackPrs": false },
   "stack": [],                    // stack mode only: [{issue, pr, branch, base}] bottom→top
@@ -249,7 +259,21 @@ uploaded via the Content Platform (`vtex content` / `yarn cms:content`; Headless
 `cms-sync` is legacy) + a `faststore` custom app on the orderForm. Preview real
 content locally via `/api/preview` against a CP branch.** For a no-account/live-only
 migration, faststore-v4 yields buildable, locally-runnable code but no real content.
-See `skills/target-faststore-v4/SKILL.md`. Set `source.prodUrl` if not found automatically.
+See `skills/target-faststore-v4/SKILL.md`. Set `source.prodUrl` if not found automatically. Ask for `target.dir` when it does
+not resolve from `cwd` and `--target-dir` was not passed — guessing the candidate
+repo writes work into the wrong tree.
+
+**Board destination.** Ask where the per-page kanban should go — `terminal` (default)
+or `studio`, which mirrors one card per page into the client's deco Studio task
+board so they can watch progress without reading a terminal. Set
+`state.board.destination`.
+
+Choosing `studio` needs `PARITY_STUDIO_URL` and `PARITY_STUDIO_TOKEN` in the
+environment. **The token decides the organization** — the task board tools take no
+org parameter and resolve it from the caller's auth, so pointing at another org
+means using that org's token. Do not ask the user to paste a token into the chat;
+tell them to export the two vars and re-run. If they are unset, say so once and
+continue in `terminal` — a board is reporting, never a prerequisite.
 
 **PR mode.** If the user asked to stack fixes, review one combined preview, or
 not auto-merge, set `budget.stackPrs: true` (see `fix` / `stack-review`).
@@ -315,11 +339,25 @@ not porting. Say so to the user.
    stage floods the queue with work you explicitly deferred and starves the
    actual gap. Items that do not match the stage stay in the file — do not
    import them "for later".
-7. **Report the inventory before doing any work.** Run
-   `parity plan status --dir <target.dir>/.parity` via `runner` and show the user:
-   components settled (no work needed) vs remaining, pages done vs awaiting CMS
-   content. This is the answer to "what's left?" — surface it, then pick the
-   stage with the user if it is not already set.
+7. **Report the inventory before doing any work.** Run BOTH via `runner` and show
+   the user:
+   - `parity plan status --dir <target.dir>/.parity` — components settled (no work
+     needed) vs remaining, pages done vs awaiting CMS content.
+   - `parity plan board --dir <target.dir>/.parity` — the same migration as a
+     per-page kanban: each sampled page in a lane (`triage`/`backlog`/`building`/
+     `review`/`done`) with what blocks it, plus `shell` (globals, which block every
+     page) and `no page` (components no sampled page uses).
+
+   This is the answer to "what's left?" — surface it, then pick the stage with the
+   user if it is not already set. The board is also how you pick what to work on:
+   **the next page is the one furthest along that is not `done`** (`building`
+   before `backlog`), because finishing a page beats starting three.
+
+   Add `--board studio` when `state.board.destination` is `studio` (see
+   `discovery`) to mirror the cards into the client's task board. It is reporting
+   only: if the Studio is unset or unreachable the command still prints the
+   terminal board and exits 0 — never treat a board failure as a migration
+   failure, and never retry it in a loop.
 8. `pendingComponents` = plan rows still `pending`/`partial`.
 
 ### repo-setup / template-bootstrap
