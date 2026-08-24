@@ -325,7 +325,8 @@ The board covers the pages the capture **sampled**, not every URL on the site.
 #### Mirroring the board into the deco Studio
 
 ```bash
-export PARITY_STUDIO_URL=https://<studio host>
+# Full org-scoped endpoint (the org lives in the URL), or a bare host for the root endpoint:
+export PARITY_STUDIO_URL=https://studio.decocms.com/api/<org>/mcp/self
 export PARITY_STUDIO_TOKEN=<token>
 parity plan board --dir <target>/.parity --board studio
 ```
