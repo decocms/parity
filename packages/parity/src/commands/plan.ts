@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 /**
  * `parity plan set-status <name> <status>` — the orchestrator's API for
  * marking a component's porting progress in `migration-plan.json`, instead of
@@ -7,7 +8,12 @@
  */
 
 import chalk from "chalk";
-import { studioConfigFromEnv, syncBoardToStudio } from "../board/studio.ts";
+import {
+  fetchClientNotes,
+  postParityComment,
+  studioConfigFromEnv,
+  syncBoardToStudio,
+} from "../board/studio.ts";
 import {
   type ComponentStatus,
   type Disposition,
@@ -22,6 +28,7 @@ import {
   setComponentReference,
   setComponentStatus,
   setComponentVerified,
+  setPageBoardItemId,
   setPageStatus,
 } from "../migrate/plan.ts";
 
@@ -340,7 +347,7 @@ const COLUMN_STYLE: Record<PageColumn, (s: string) => string> = {
  */
 export async function planBoardCommand(
   dir: string,
-  opts: { cand?: string; json?: boolean; board?: string },
+  opts: { cand?: string; json?: boolean; board?: string; repo?: string; fixes?: string },
 ): Promise<number> {
   const plan = loadPlan(dir);
   if (!plan) {
@@ -411,7 +418,15 @@ export async function planBoardCommand(
       return 0;
     }
     try {
-      const synced = await syncBoardToStudio(board, cfg);
+      const fixes = opts.fixes ? JSON.parse(readFileSync(opts.fixes, "utf8")) : undefined;
+      const synced = await syncBoardToStudio(board, cfg, { repo: opts.repo, fixes });
+      // Persist the card ids: the link has to survive a re-capture, or the next sync builds a
+      // second board and the client's comments are orphaned on the old cards.
+      let stored = 0;
+      for (const [path, id] of Object.entries(synced.ids)) {
+        if (setPageBoardItemId(plan, path, id)) stored += 1;
+      }
+      if (stored) savePlan(dir, plan);
       console.log(
         chalk.green(
           `Studio board synced — ${synced.created} created, ${synced.updated} updated, ${synced.skipped} skipped.\n`,
@@ -425,5 +440,76 @@ export async function planBoardCommand(
       );
     }
   }
+  return 0;
+}
+
+/**
+ * `parity plan notes` — the client's input channel. They comment on a page's card in the Studio
+ * ("this component should match the Brazil site, not Ecuador"); this reads those comments back so
+ * the orchestrator can propose the matching plan change. With `--post`, writes a confirmation
+ * back on the card so the client sees their note turned into a decision.
+ */
+export async function planNotesCommand(
+  dir: string,
+  opts: { json?: boolean; page?: string; post?: string },
+): Promise<number> {
+  const plan = loadPlan(dir);
+  if (!plan) {
+    console.error(chalk.red(`No migration-plan.json found in ${dir}`));
+    return 1;
+  }
+  const cfg = studioConfigFromEnv();
+  if (!cfg) {
+    console.error(
+      chalk.yellow("Studio not configured — set PARITY_STUDIO_URL and PARITY_STUDIO_TOKEN."),
+    );
+    return 1;
+  }
+
+  if (opts.post) {
+    const page = plan.pages.find((p) => p.path === opts.page);
+    if (!page?.boardItemId) {
+      console.error(
+        chalk.red(
+          `No synced card for page "${opts.page}" — run \`parity plan board --board studio\` first`,
+        ),
+      );
+      return 1;
+    }
+    await postParityComment(page.boardItemId, opts.post, cfg);
+    console.log(`${chalk.green("✓")} comment posted on ${page.path}`);
+    return 0;
+  }
+
+  const pages = plan.pages
+    .filter((p) => p.boardItemId)
+    .filter((p) => !opts.page || p.path === opts.page)
+    .map((p) => ({ path: p.path, boardItemId: p.boardItemId as string }));
+  if (!pages.length) {
+    console.error(
+      chalk.yellow("No page has a synced card yet — run `parity plan board --board studio` first."),
+    );
+    return 1;
+  }
+
+  const notes = await fetchClientNotes(pages, cfg);
+  if (opts.json) {
+    console.log(JSON.stringify({ notes }, null, 2));
+    return 0;
+  }
+  if (!notes.length) {
+    console.log(chalk.gray("\nNo open client notes.\n"));
+    return 0;
+  }
+  console.log(chalk.bold(`\nClient notes (${notes.length})`));
+  for (const n of notes) {
+    console.log(`\n  ${chalk.cyan(n.path)} ${chalk.gray(n.createdAt)}`);
+    for (const line of n.body.split("\n")) console.log(`    ${line}`);
+  }
+  console.log(
+    chalk.gray(
+      '\nThese are PROPOSALS. Apply with `parity plan set-reference` / `set-status`, then confirm with `parity plan notes --page <path> --post "<what you did>"`.\n',
+    ),
+  );
   return 0;
 }

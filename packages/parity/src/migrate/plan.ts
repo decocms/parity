@@ -82,6 +82,12 @@ export interface PlanPage {
    * written before page/component edges — read as "unknown", not "none".
    */
   components?: string[];
+  /**
+   * Task board card for this page, when the board is mirrored to the Studio. Stored so the
+   * card↔page link is an id, not a title match: the client can rename a card, and reading their
+   * comments back has to keep working when they do.
+   */
+  boardItemId?: string;
 }
 
 export interface PlanComponent {
@@ -225,6 +231,9 @@ export function mergePlanDecisions(
   for (const page of fresh.pages) {
     const prev = prevPages.get(page.path);
     if (prev?.status && prev.status !== "pending") page.status = prev.status;
+    // The card outlives the capture. Losing this link would orphan the client's comments and
+    // make the next sync create a duplicate board.
+    if (prev?.boardItemId) page.boardItemId = prev.boardItemId;
   }
 
   return { plan: fresh, carried, droppedWithDecisions };
@@ -294,6 +303,18 @@ function findPage(plan: MigrationPlan, path: string): PlanPage | null {
     plan.pages.find((p) => norm(p.path) === target) ??
     null
   );
+}
+
+/** Remember which card mirrors a page. Returns the page, or null when the path is unknown. */
+export function setPageBoardItemId(
+  plan: MigrationPlan,
+  path: string,
+  boardItemId: string,
+): PlanPage | null {
+  const page = findPage(plan, path);
+  if (!page) return null;
+  page.boardItemId = boardItemId;
+  return page;
 }
 
 export interface PlanProgress {
@@ -522,6 +543,8 @@ export interface BoardCard {
   blockers: string[];
   counts: Record<Disposition, number>;
   ready: boolean;
+  /** Existing card for this page, when the board was already mirrored. */
+  boardItemId?: string;
 }
 
 export interface Board {
@@ -579,6 +602,7 @@ export function planBoard(plan: MigrationPlan, candUrl?: string): Board {
         .map((t) => t.name),
       counts: page.counts,
       ready: page.ready,
+      boardItemId: p.boardItemId,
     });
   }
 

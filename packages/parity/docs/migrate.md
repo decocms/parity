@@ -345,6 +345,39 @@ terminal. Lanes map onto the board's five fixed columns — `triage`→`triage`,
 - **It never fails the run.** Unset or unreachable Studio prints the terminal board
   with a warning and exits 0. A board is reporting, not a gate.
 
+Cards carry `--repo <owner/name>` so the board knows where the work lives, and the
+card id is stored back on the page in the plan — the link is an id, not a title
+match, so it survives the client renaming a card and survives a re-capture.
+
+Pass `--fixes <file>` to mirror the fixes a client would recognise, as their own
+cards (`closed` renders as `done`):
+
+```json
+[{ "title": "Corrigido: CLS no banner", "prUrl": "https://github.com/o/r/pull/9", "state": "closed" }]
+```
+
+Mirror only what a client reads — lint, bundle and infra findings bury the board
+that is supposed to show progress.
+
+#### `parity plan notes` — the client's input channel
+
+```bash
+parity plan notes --dir <target>/.parity --json
+parity plan notes --dir <target>/.parity --page /p --post "referência apontada para o site BR"
+```
+
+The board is not one-way. A client comments on a page's card — *"this product card
+should match the Brazil site, not Ecuador"* — and `notes` reads it back so the
+migration can act on it. The usual outcome is `set-reference` + `set-status upgrade`,
+which is exactly what those exist for: the component stops being reported as a
+defect and starts being compared against the right site.
+
+Notes are **proposals**. `as-is` and `upgrade` mean "stop opening work for this",
+and only the user decides that — a client comment raises the question. After
+applying, `--post` a confirmation so the client sees their note became a decision.
+Comments we write are prefixed and skipped on the next read, so a confirmation
+never comes back as fresh input.
+
 ### What to commit
 
 **Commit `migration-plan.json`. Ignore everything else parity writes.**
