@@ -17,6 +17,7 @@ import { learnedStats, learnedValidate } from "./commands/learned.ts";
 import { listCommand, listModulesCommand } from "./commands/list.ts";
 import { migrateCommand } from "./commands/migrate.ts";
 import {
+  planBoardCommand,
   planMergeCommand,
   planPageCommand,
   planSetPageStatusCommand,
@@ -395,6 +396,33 @@ program
       .action((path, opts) => {
         process.exit(
           planPageCommand(opts.dir, path, { cand: opts.cand, json: Boolean(opts.json) }),
+        );
+      }),
+  )
+  .addCommand(
+    new Command("board")
+      .description(
+        "Per-page kanban: every sampled page in a derived lane (triage | backlog | building | review | done) with what blocks it. Lanes come from each page's components, so a page cannot read as done while a component it needs is missing.",
+      )
+      .option(
+        "--dir <path>",
+        "Directory holding migration-plan.json (default: the target repo's .parity/)",
+        ".parity",
+      )
+      .option("--cand <url>", "Candidate base URL — enriches cards with validation state")
+      .option(
+        "--board <where>",
+        "terminal (default) | studio — push one card per page to the deco Studio task board (needs PARITY_STUDIO_URL + PARITY_STUDIO_TOKEN; falls back to terminal when unset or unreachable)",
+        "terminal",
+      )
+      .option("--json", "Emit structured JSON instead of human-readable text", false)
+      .action(async (opts) => {
+        process.exit(
+          await planBoardCommand(opts.dir, {
+            cand: opts.cand,
+            json: Boolean(opts.json),
+            board: opts.board,
+          }),
         );
       }),
   )

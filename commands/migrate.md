@@ -13,6 +13,8 @@ phase in `.parity/migration.json` (or from `discovery` if no state exists).
 - `--source <dir>` — path to the source repo (skips repo detection)
 - `--target <name>` — `tanstack-deco` or `faststore-v4` (skips the question)
 - `--target-dir <dir>` — path to the candidate repo (skips repo-setup)
+- `--stage <name>` — `components` | `pages` | `polish` (skips the stage question)
+- `--board <where>` — `terminal` (default) | `studio` (per-page kanban destination)
 - `--resume` — force resume even if last phase is ambiguous
 
 ## First turn

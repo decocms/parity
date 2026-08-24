@@ -7,13 +7,16 @@
  */
 
 import chalk from "chalk";
+import { studioConfigFromEnv, syncBoardToStudio } from "../board/studio.ts";
 import {
   type ComponentStatus,
   type Disposition,
+  type PageColumn,
   type PageStatus,
   loadPlan,
   mergePlanDecisions,
   pagePlan,
+  planBoard,
   planProgress,
   savePlan,
   setComponentReference,
@@ -316,5 +319,111 @@ export function planStatusCommand(dir: string, asJson: boolean): number {
     console.log(`  ${chalk.red("pending")}  ${r.path} ${chalk.gray(`(${r.kind})`)}`);
   }
   console.log("");
+  return 0;
+}
+
+const COLUMN_ORDER: PageColumn[] = ["triage", "backlog", "building", "review", "done"];
+
+const COLUMN_STYLE: Record<PageColumn, (s: string) => string> = {
+  triage: chalk.magenta,
+  backlog: chalk.red,
+  building: chalk.yellow,
+  review: chalk.cyan,
+  done: chalk.green,
+  skipped: chalk.gray,
+};
+
+/**
+ * `parity plan board` — the migration as a per-page kanban. Lanes are DERIVED from each page's
+ * components (see `pageColumn`), so the board cannot claim a page is done while a component it
+ * needs is still missing. Read-only.
+ */
+export async function planBoardCommand(
+  dir: string,
+  opts: { cand?: string; json?: boolean; board?: string },
+): Promise<number> {
+  const plan = loadPlan(dir);
+  if (!plan) {
+    console.error(chalk.red(`No migration-plan.json found in ${dir}`));
+    console.error(chalk.yellow("Run `parity migrate --url <prod>` first — no plan, no board."));
+    return 1;
+  }
+
+  const board = planBoard(plan, opts.cand);
+  if (opts.json) {
+    console.log(JSON.stringify(board, null, 2));
+    return 0;
+  }
+
+  console.log(chalk.bold(`\nBoard — ${board.url}`));
+  console.log(
+    chalk.gray(
+      `${board.sampled} sampled page(s) — the capture's sample, not every URL on the site.`,
+    ),
+  );
+
+  if (board.shell.length) {
+    console.log(
+      `\n${chalk.bold("shell")} ${chalk.gray("(global — blocks every page)")}: ${chalk.yellow(
+        board.shell.join(", "),
+      )}`,
+    );
+  }
+
+  for (const column of COLUMN_ORDER) {
+    const cards = board.columns[column];
+    if (!cards.length) continue;
+    console.log(`\n${COLUMN_STYLE[column](chalk.bold(column))} (${cards.length})`);
+    for (const card of cards) {
+      console.log(`  ${card.path} ${chalk.gray(`(${card.kind})`)}`);
+      if (card.blockers.length) {
+        console.log(chalk.gray(`    blocked by: ${card.blockers.join(", ")}`));
+      }
+    }
+  }
+
+  const skipped = board.columns.skipped;
+  if (skipped.length) {
+    console.log(
+      `\n${chalk.gray(`skipped (${skipped.length}): ${skipped.map((c) => c.path).join(", ")}`)}`,
+    );
+  }
+
+  if (board.unassigned.length) {
+    console.log(
+      `\n${chalk.bold("no page")} ${chalk.gray(
+        "(in the code, not seen on any sampled page)",
+      )}\n  ${chalk.gray(board.unassigned.join(", "))}`,
+    );
+  }
+  console.log("");
+
+  // The Studio push is reporting, never a gate: a board nobody can reach must not fail a
+  // migration, so every failure degrades to the terminal render above and still exits 0.
+  if (opts.board === "studio") {
+    const cfg = studioConfigFromEnv();
+    if (!cfg) {
+      console.log(
+        chalk.yellow(
+          "Studio board skipped — set PARITY_STUDIO_URL and PARITY_STUDIO_TOKEN. Showing the terminal board instead.\n",
+        ),
+      );
+      return 0;
+    }
+    try {
+      const synced = await syncBoardToStudio(board, cfg);
+      console.log(
+        chalk.green(
+          `Studio board synced — ${synced.created} created, ${synced.updated} updated, ${synced.skipped} skipped.\n`,
+        ),
+      );
+    } catch (err) {
+      console.log(
+        chalk.yellow(
+          `Studio board unavailable (${err instanceof Error ? err.message : String(err)}). Showing the terminal board instead.\n`,
+        ),
+      );
+    }
+  }
   return 0;
 }
