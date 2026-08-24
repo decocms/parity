@@ -503,6 +503,100 @@ export function pagePlan(plan: MigrationPlan, path: string, candUrl?: string): P
 }
 
 /**
+ * Kanban lane for a page. Derived from {@link pagePlan} — never stored — so it cannot drift
+ * from the components' real state the way a hand-typed page status does.
+ *
+ * `triage` means the scope is unknown (the plan predates page edges, or the capture saw no
+ * components), which is NOT the same as "nothing to do" — it needs a human to confirm.
+ */
+export type PageColumn = "triage" | "backlog" | "building" | "review" | "done" | "skipped";
+
+export interface BoardCard {
+  path: string;
+  kind: string;
+  column: PageColumn;
+  /**
+   * Page-scope components still to build — this page's actual work queue. Globals are excluded
+   * on purpose: they block every page, so repeating them per card is noise (see `Board.shell`).
+   */
+  blockers: string[];
+  counts: Record<Disposition, number>;
+  ready: boolean;
+}
+
+export interface Board {
+  url: string;
+  columns: Record<PageColumn, BoardCard[]>;
+  /** Shared shell (global scope) still to build — blocks every page at once. */
+  shell: string[];
+  /**
+   * Components the code defines that no captured page uses. Common on `deco-fresh`, whose source
+   * inventory walks `sections/*.tsx` with no page association. Listed rather than hidden — they
+   * are real work with no lane.
+   */
+  unassigned: string[];
+  /** How many pages the capture SAMPLED. Not the site's total URL count. */
+  sampled: number;
+}
+
+/** Pure lane derivation. See {@link PageColumn}. */
+export function pageColumn(page: PagePlan): PageColumn {
+  if (page.status === "skipped") return "skipped";
+  if (page.status === "done") return "done";
+  // No edges (old plan) or the capture saw nothing — scope unconfirmed, not "done".
+  if (page.tasks === null || page.tasks.length === 0) return "triage";
+  if (page.ready) return "review";
+  const started =
+    page.counts.settled + page.counts.validate + page.counts["as-is"] + page.counts.upgrade;
+  return started > 0 ? "building" : "backlog";
+}
+
+/**
+ * The whole migration as a per-page board: every sampled page in its lane, with what is blocking
+ * it. This is the view that answers "what is done, what is in flight, what is next" — per page,
+ * which is how the work is actually done and how a client reads progress.
+ */
+export function planBoard(plan: MigrationPlan, candUrl?: string): Board {
+  const columns: Record<PageColumn, BoardCard[]> = {
+    triage: [],
+    backlog: [],
+    building: [],
+    review: [],
+    done: [],
+    skipped: [],
+  };
+
+  for (const p of plan.pages) {
+    const page = pagePlan(plan, p.path, candUrl);
+    if (!page) continue;
+    const column = pageColumn(page);
+    columns[column].push({
+      path: page.path,
+      kind: page.kind,
+      column,
+      blockers: (page.tasks ?? [])
+        .filter((t) => t.disposition === "build" && t.scope !== "global")
+        .map((t) => t.name),
+      counts: page.counts,
+      ready: page.ready,
+    });
+  }
+
+  const onAnyPage = new Set(plan.pages.flatMap((p) => (p.components ?? []).map(key)));
+  const shell: string[] = [];
+  const unassigned: string[] = [];
+  for (const c of plan.components) {
+    if (c.scope === "global") {
+      if (disposition(c) === "build") shell.push(c.name);
+    } else if (!onAnyPage.has(key(c.name))) {
+      unassigned.push(c.name);
+    }
+  }
+
+  return { url: plan.url, columns, shell, unassigned, sampled: plan.pages.length };
+}
+
+/**
  * Record a validation result. A `done` component with no verification is not the same as a
  * checked one, and `against` is what makes a pass mean anything.
  */

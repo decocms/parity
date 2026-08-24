@@ -7,7 +7,9 @@ import {
   buildMigrationPlan,
   loadPlan,
   mergePlanDecisions,
+  pageColumn,
   pagePlan,
+  planBoard,
   planProgress,
   savePlan,
   setComponentReference,
@@ -565,5 +567,93 @@ describe("mergePlanDecisions", () => {
 
     const out = mergePlanDecisions(f, previous);
     expect(out.plan.components[0]?.status).toBe("done");
+  });
+});
+
+describe("pageColumn — raia derivada", () => {
+  function columnOf(names: string[], mutate?: (p: MigrationPlan) => void): string {
+    const plan = planWith(names);
+    mutate?.(plan);
+    return pageColumn(pagePlan(plan, "/p")!);
+  }
+
+  it("backlog quando nada começou", () => {
+    expect(columnOf(["a", "b"])).toBe("backlog");
+  });
+
+  it("building quando algum componente já andou", () => {
+    expect(
+      columnOf(["a", "b"], (p) => {
+        setComponentStatus(p, "a", "done");
+      }),
+    ).toBe("building");
+  });
+
+  it("review quando não sobra build nem validate, mas a página não foi fechada", () => {
+    expect(
+      columnOf(["a"], (p) => {
+        setComponentStatus(p, "a", "done");
+        setComponentVerified(p, "a", "pass", "2026-08-21T00:00:00.000Z");
+      }),
+    ).toBe("review");
+  });
+
+  it("done e skipped vêm do status explícito da página", () => {
+    expect(columnOf(["a"], (p) => void setPageStatus(p, "/p", "done"))).toBe("done");
+    expect(columnOf(["a"], (p) => void setPageStatus(p, "/p", "skipped"))).toBe("skipped");
+  });
+
+  it("triage quando o plano não tem aresta (plano antigo)", () => {
+    const plan = planWith(["a"]);
+    for (const page of plan.pages) page.components = undefined;
+    expect(pageColumn(pagePlan(plan, "/p")!)).toBe("triage");
+  });
+
+  it("triage quando a captura não viu componente nenhum — não é 'pronto'", () => {
+    const plan = planWith(["a"]);
+    for (const page of plan.pages) page.components = [];
+    expect(pageColumn(pagePlan(plan, "/p")!)).toBe("triage");
+  });
+});
+
+describe("planBoard", () => {
+  it("agrupa páginas por raia e lista o que bloqueia cada uma", () => {
+    const header = live("header", "global");
+    const shelf = live("product-shelf", "page");
+    const hero = live("hero", "page");
+    const plan = buildMigrationPlan({
+      bundle: bundleOf(
+        [header, shelf, hero],
+        [
+          { path: "/", kind: "home", components: [header, hero] },
+          { path: "/p", kind: "pdp", components: [header, shelf] },
+        ],
+      ),
+      source: { kind: "vtex-io", label: "VTEX IO", dir: null },
+      inventory: inv([]),
+    });
+
+    const board = planBoard(plan);
+    expect(board.sampled).toBe(2);
+    expect(board.columns.backlog.map((c) => c.path).sort()).toEqual(["/", "/p"]);
+
+    // Globais não poluem cada card — saem uma vez em `shell`.
+    expect(board.shell).toEqual(["header"]);
+    const pdp = board.columns.backlog.find((c) => c.path === "/p")!;
+    expect(pdp.blockers).toEqual(["product-shelf"]);
+    expect(pdp.blockers).not.toContain("header");
+  });
+
+  it("lista em `unassigned` o componente do código que nenhuma página amostrada usa", () => {
+    const seen = live("hero", "page");
+    const plan = buildMigrationPlan({
+      bundle: bundleOf([seen], [{ path: "/", kind: "home", components: [seen] }]),
+      source: { kind: "deco-fresh", label: "Deco/Fresh", dir: "/repo" },
+      inventory: inv([src("OrphanSection", "section", "page")]),
+    });
+
+    const board = planBoard(plan);
+    expect(board.unassigned).toContain("OrphanSection");
+    expect(board.unassigned).not.toContain("hero");
   });
 });

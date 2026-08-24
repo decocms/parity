@@ -293,6 +293,35 @@ Note that **global components (header, footer, nav) are not page members** in th
 capture, so they never appear in a page worksheet. Order globals first by
 `scope`, before walking pages, or a global fix reopens pages already closed.
 
+### `parity plan board` — the per-page kanban
+
+```bash
+parity plan board --dir <target>/.parity
+parity plan board --dir <target>/.parity --json
+```
+
+Every sampled page in a lane, plus what blocks it. Lanes are **derived** from the
+page's components (never stored), so a page cannot read as done while a component
+it needs is still missing:
+
+| lane | Derived from |
+| --- | --- |
+| `triage` | no page/component edges, or the capture saw no components — scope unconfirmed, which is **not** "nothing to do" |
+| `backlog` | components to build, none started |
+| `building` | components to build, some already moved |
+| `review` | nothing left to build or validate (`ready`), page not closed yet |
+| `done` / `skipped` | the page's explicit status |
+
+Two lists sit outside the lanes:
+
+- **`shell`** — global components still to build. They block every page at once,
+  so they are reported once instead of repeated on each card.
+- **`no page`** — components the code defines that no sampled page uses. Common on
+  `deco-fresh`, whose source inventory walks `sections/*.tsx` with no page
+  association. Listed rather than hidden: real work with no lane.
+
+The board covers the pages the capture **sampled**, not every URL on the site.
+
 ### What to commit
 
 **Commit `migration-plan.json`. Ignore everything else parity writes.**

@@ -25,6 +25,7 @@
 | `parity extract` | Single-site AI-ready component extraction (no prod×cand) — see `docs/extract.md` |
 | `parity plan status` | Migration inventory: components settled vs remaining, pages done vs awaiting CMS content (`--dir`, `--json`). Read this before triaging — see `docs/migrate.md` |
 | `parity plan page` | Per-page worksheet: what to build, what to validate, what is deliberately divergent, with a runnable `parity section` per checkable component (`--cand`, `--json`) |
+| `parity plan board` | Per-page kanban: every sampled page in a derived lane (triage \| backlog \| building \| review \| done) plus what blocks it (`--cand`, `--json`) |
 | `parity plan set-reference` | Point a component's comparison at a non-prod reference and record why it diverges — keeps an intentional improvement from being reported as a defect on every run |
 | `parity plan verify` | Record that a component was actually compared, and against what |
 | `parity plan merge` | Bring a freshly captured plan into the canonical one keeping every recorded decision — use instead of copying the file |

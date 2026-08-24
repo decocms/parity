@@ -10,10 +10,12 @@ import chalk from "chalk";
 import {
   type ComponentStatus,
   type Disposition,
+  type PageColumn,
   type PageStatus,
   loadPlan,
   mergePlanDecisions,
   pagePlan,
+  planBoard,
   planProgress,
   savePlan,
   setComponentReference,
@@ -314,6 +316,81 @@ export function planStatusCommand(dir: string, asJson: boolean): number {
   }
   for (const r of pg.remaining.filter((r) => r.status === "pending")) {
     console.log(`  ${chalk.red("pending")}  ${r.path} ${chalk.gray(`(${r.kind})`)}`);
+  }
+  console.log("");
+  return 0;
+}
+
+const COLUMN_ORDER: PageColumn[] = ["triage", "backlog", "building", "review", "done"];
+
+const COLUMN_STYLE: Record<PageColumn, (s: string) => string> = {
+  triage: chalk.magenta,
+  backlog: chalk.red,
+  building: chalk.yellow,
+  review: chalk.cyan,
+  done: chalk.green,
+  skipped: chalk.gray,
+};
+
+/**
+ * `parity plan board` — the migration as a per-page kanban. Lanes are DERIVED from each page's
+ * components (see `pageColumn`), so the board cannot claim a page is done while a component it
+ * needs is still missing. Read-only.
+ */
+export function planBoardCommand(dir: string, opts: { cand?: string; json?: boolean }): number {
+  const plan = loadPlan(dir);
+  if (!plan) {
+    console.error(chalk.red(`No migration-plan.json found in ${dir}`));
+    console.error(chalk.yellow("Run `parity migrate --url <prod>` first — no plan, no board."));
+    return 1;
+  }
+
+  const board = planBoard(plan, opts.cand);
+  if (opts.json) {
+    console.log(JSON.stringify(board, null, 2));
+    return 0;
+  }
+
+  console.log(chalk.bold(`\nBoard — ${board.url}`));
+  console.log(
+    chalk.gray(
+      `${board.sampled} sampled page(s) — the capture's sample, not every URL on the site.`,
+    ),
+  );
+
+  if (board.shell.length) {
+    console.log(
+      `\n${chalk.bold("shell")} ${chalk.gray("(global — blocks every page)")}: ${chalk.yellow(
+        board.shell.join(", "),
+      )}`,
+    );
+  }
+
+  for (const column of COLUMN_ORDER) {
+    const cards = board.columns[column];
+    if (!cards.length) continue;
+    console.log(`\n${COLUMN_STYLE[column](chalk.bold(column))} (${cards.length})`);
+    for (const card of cards) {
+      console.log(`  ${card.path} ${chalk.gray(`(${card.kind})`)}`);
+      if (card.blockers.length) {
+        console.log(chalk.gray(`    blocked by: ${card.blockers.join(", ")}`));
+      }
+    }
+  }
+
+  const skipped = board.columns.skipped;
+  if (skipped.length) {
+    console.log(
+      `\n${chalk.gray(`skipped (${skipped.length}): ${skipped.map((c) => c.path).join(", ")}`)}`,
+    );
+  }
+
+  if (board.unassigned.length) {
+    console.log(
+      `\n${chalk.bold("no page")} ${chalk.gray(
+        "(in the code, not seen on any sampled page)",
+      )}\n  ${chalk.gray(board.unassigned.join(", "))}`,
+    );
   }
   console.log("");
   return 0;

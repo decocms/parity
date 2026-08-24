@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.27.0] — 2026-08-21
+
+### Added
+
+* **`parity plan board` — the migration as a per-page kanban.** Every sampled page
+  sits in a lane (`triage` | `backlog` | `building` | `review` | `done` | `skipped`)
+  with the components blocking it. Lanes are **derived** from `pagePlan`, never
+  stored, so a page cannot read as done while a component it needs is missing —
+  the failure mode of the hand-typed page status. Two lists sit outside the lanes:
+  `shell` (global components, reported once because they block every page instead
+  of repeated per card) and `no page` (components the code defines that no sampled
+  page uses — common on `deco-fresh`, whose source inventory walks `sections/*.tsx`
+  with no page association; listed rather than hidden). `--json` for the
+  orchestrator. Plans predating page/component edges degrade to `triage` rather
+  than claiming false readiness.
+
 ## [0.26.0] — 2026-08-21
 
 Fixes the failure mode found running the plugin on a mature FastStore target
