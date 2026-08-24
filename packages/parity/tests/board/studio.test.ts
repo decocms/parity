@@ -7,6 +7,7 @@ import {
   cardDescription,
   cardTitle,
   fetchClientNotes,
+  mcpEndpoint,
   parseRpcBody,
   postParityComment,
   studioConfigFromEnv,
@@ -63,12 +64,20 @@ describe("studioConfigFromEnv", () => {
     expect(studioConfigFromEnv({ PARITY_STUDIO_TOKEN: "y" } as NodeJS.ProcessEnv)).toBeNull();
   });
 
-  it("tira a barra final da url", () => {
+  it("completa um host simples com o endpoint raiz", () => {
     const c = studioConfigFromEnv({
       PARITY_STUDIO_URL: "https://s.example/",
       PARITY_STUDIO_TOKEN: "y",
     } as NodeJS.ProcessEnv);
-    expect(c).toEqual({ url: "https://s.example", token: "y" });
+    expect(c).toEqual({ url: "https://s.example/mcp/self", token: "y" });
+  });
+
+  it("respeita um endpoint org-scoped completo — a org vive na URL, não só no token", () => {
+    const c = studioConfigFromEnv({
+      PARITY_STUDIO_URL: "https://studio.decocms.com/api/electrolux/mcp/self",
+      PARITY_STUDIO_TOKEN: "y",
+    } as NodeJS.ProcessEnv);
+    expect(c?.url).toBe("https://studio.decocms.com/api/electrolux/mcp/self");
   });
 });
 
@@ -226,5 +235,19 @@ describe("fetchClientNotes / postParityComment", () => {
     await postParityComment("i1", "referência apontada para o site BR", cfg, call);
     const body = String(calls[0]?.args.body);
     expect(body.startsWith(PARITY_COMMENT_PREFIX)).toBe(true);
+  });
+});
+
+describe("mcpEndpoint", () => {
+  it.each([
+    ["https://studio.decocms.com", "https://studio.decocms.com/mcp/self"],
+    ["https://studio.decocms.com/", "https://studio.decocms.com/mcp/self"],
+    [
+      "https://studio.decocms.com/api/electrolux/mcp/self",
+      "https://studio.decocms.com/api/electrolux/mcp/self",
+    ],
+    ["https://studio.decocms.com/api/org/mcp/self/", "https://studio.decocms.com/api/org/mcp/self"],
+  ])("%s -> %s", (input, expected) => {
+    expect(mcpEndpoint(input)).toBe(expected);
   });
 });

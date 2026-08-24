@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.28.1] — 2026-08-24
+
+### Fixed
+
+* **`PARITY_STUDIO_URL` accepts a full MCP endpoint.** Studio deployments are
+  org-scoped (`https://studio.decocms.com/api/<org>/mcp/self`), and the client
+  appended `/mcp/self` to whatever was set — hitting the root path instead, which
+  404s on a real deployment. It now uses the value as-is when it already points at
+  an `/mcp/` endpoint and only appends for a bare host. Note that on an org-scoped
+  URL the **organization comes from the URL**, not only from the token.
+
 ## [0.28.0] — 2026-08-24
 
 The Studio board stops being a one-way report: the client can now see the fixes

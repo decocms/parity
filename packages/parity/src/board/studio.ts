@@ -41,7 +41,18 @@ export function studioConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Studi
   const url = env.PARITY_STUDIO_URL;
   const token = env.PARITY_STUDIO_TOKEN;
   if (!url || !token) return null;
-  return { url: url.replace(/\/+$/, ""), token };
+  return { url: mcpEndpoint(url), token };
+}
+
+/**
+ * Accept either a host or a full MCP endpoint. Deployments are org-scoped
+ * (`https://studio.decocms.com/api/<org>/mcp/self`), so appending `/mcp/self` to whatever the
+ * user pasted would hit the wrong path — and there the ORG lives in the URL, not only in the
+ * token. A bare host still gets the root endpoint appended.
+ */
+export function mcpEndpoint(url: string): string {
+  const trimmed = url.replace(/\/+$/, "");
+  return /\/mcp(\/|$)/.test(trimmed) ? trimmed : `${trimmed}/mcp/self`;
 }
 
 /**
@@ -103,7 +114,7 @@ export const callTool: ToolCaller = async <T>(
   name: string,
   args: unknown,
 ): Promise<T> => {
-  const res = await fetch(`${cfg.url}/mcp/self`, {
+  const res = await fetch(cfg.url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
