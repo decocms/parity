@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.28.0] — 2026-08-24
+
+The Studio board stops being a one-way report: the client can now see the fixes
+that landed and talk back on a card, and what they say enters the flow.
+
+### Added
+
+* **`parity plan notes` — the client's input channel.** Reads the comments the
+  client leaves on a page's card (`TASK_BOARD_COMMENT_LIST`), so *"this product
+  card should match the Brazil site, not Ecuador"* becomes a proposed
+  `set-reference` + `set-status upgrade` — exactly what those exist for. `--post`
+  writes a confirmation back on the card so the client sees their note became a
+  decision; our comments are prefixed and skipped on the next read, so a
+  confirmation never returns as fresh input. Notes are **proposals**: `as-is` and
+  `upgrade` still need the user, since only they get to say "stop working on this".
+* **Fix cards (`parity plan board --fixes <file>`).** Mirrors the fixes a client
+  would recognise as their own cards, with the PR URL in the description and
+  `closed` rendering as `done` — "we fixed X" without them reading GitHub. Scoped
+  on purpose: lint, bundle and infra findings bury the board that is supposed to
+  show progress.
+* **`--repo <owner/name>`** stored on each card, so the board knows where the work
+  lives.
+
+### Changed
+
+* **Cards are anchored by id, not title.** The card id is stored on the page
+  (`PlanPage.boardItemId`) and carried across a re-capture by `mergePlanDecisions`.
+  Without it, renaming a card orphaned the client's comments and the next sync
+  built a second board. Titles are now the plain page path — the previous
+  `[host] /path` prefix existed only because the item was thought to have no repo
+  field; it does.
+* **Orchestrator: a `client-notes` step** at the start of each page cycle when the
+  board goes to the Studio — read notes, propose the plan change, ask, apply,
+  confirm on the card. A note that cannot be acted on is answered, never left
+  silently unread: the client is watching that card to know they were heard.
+  (`migration-orchestrator`)
+
 ## [0.27.0] — 2026-08-21
 
 ### Added

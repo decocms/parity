@@ -19,6 +19,7 @@ import { migrateCommand } from "./commands/migrate.ts";
 import {
   planBoardCommand,
   planMergeCommand,
+  planNotesCommand,
   planPageCommand,
   planSetPageStatusCommand,
   planSetReferenceCommand,
@@ -415,6 +416,14 @@ program
         "terminal (default) | studio — push one card per page to the deco Studio task board (needs PARITY_STUDIO_URL + PARITY_STUDIO_TOKEN; falls back to terminal when unset or unreachable)",
         "terminal",
       )
+      .option(
+        "--repo <owner/name>",
+        "Repository stored on each card, so the board knows where the work lives",
+      )
+      .option(
+        "--fixes <path>",
+        "JSON file of client-legible fixes to mirror as cards: [{title, body?, prUrl?, state: open|in_review|closed}]",
+      )
       .option("--json", "Emit structured JSON instead of human-readable text", false)
       .action(async (opts) => {
         process.exit(
@@ -422,6 +431,31 @@ program
             cand: opts.cand,
             json: Boolean(opts.json),
             board: opts.board,
+            repo: opts.repo,
+            fixes: opts.fixes,
+          }),
+        );
+      }),
+  )
+  .addCommand(
+    new Command("notes")
+      .description(
+        "Read the client's comments off the Studio cards — the input channel for 'compare this component against site X instead'. They are proposals: apply with set-reference/set-status, then --post a confirmation back.",
+      )
+      .option(
+        "--dir <path>",
+        "Directory holding migration-plan.json (default: the target repo's .parity/)",
+        ".parity",
+      )
+      .option("--page <path>", "Only this page")
+      .option("--post <body>", "Post a confirmation comment on --page instead of reading")
+      .option("--json", "Emit structured JSON instead of human-readable text", false)
+      .action(async (opts) => {
+        process.exit(
+          await planNotesCommand(opts.dir, {
+            json: Boolean(opts.json),
+            page: opts.page,
+            post: opts.post,
           }),
         );
       }),

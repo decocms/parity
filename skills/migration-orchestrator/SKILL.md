@@ -81,7 +81,8 @@ Never hand-edit the JSON. Flip a component's status through the CLI, via `runner
 parity plan set-status <name> <pending|partial|done|as-is|upgrade|skipped> --dir <target.dir>/.parity
 parity plan verify     <name> <pass|fail> [--note "<what you saw>"] --dir <target.dir>/.parity
 parity plan page       <path> --cand <cand url> --json              --dir <target.dir>/.parity
-parity plan board      [--board studio] [--json]                     --dir <target.dir>/.parity
+parity plan board      [--board studio] [--repo <owner/name>] [--fixes <file>]  --dir <target.dir>/.parity
+parity plan notes      [--page <path>] [--post "<text>"] [--json]    --dir <target.dir>/.parity
 ```
 
 Name matching is case- and separator-insensitive (`product-shelf` == `ProductShelf`).
@@ -354,11 +355,46 @@ not porting. Say so to the user.
    before `backlog`), because finishing a page beats starting three.
 
    Add `--board studio` when `state.board.destination` is `studio` (see
-   `discovery`) to mirror the cards into the client's task board. It is reporting
+   `discovery`) to mirror the cards into the client's task board, with
+   `--repo <owner/name>` so each card knows where the work lives. It is reporting
    only: if the Studio is unset or unreachable the command still prints the
    terminal board and exits 0 — never treat a board failure as a migration
    failure, and never retry it in a loop.
+
+   **Mirror the fixes the client would recognise**, so they see work landing
+   without reading GitHub. Build a `--fixes` JSON file from the issues you have
+   labelled `client-visible` (`gh issue list --label client-visible --json
+   title,body,state,url`), mapping each to `{title, body, prUrl, state}` —
+   `closed` renders as `done` on their board. Do NOT mirror lint, bundle, or infra
+   findings: they mean nothing to a client and bury the board that is supposed to
+   show progress.
 8. `pendingComponents` = plan rows still `pending`/`partial`.
+
+### client-notes  *(whenever the board destination is `studio`)*
+The board is not a one-way report. The client comments on a page's card — *"this
+product card should match the Brazil site, not Ecuador"* — and that has to enter
+the flow instead of dying on a card nobody reads back.
+
+Run at the START of each page cycle, via `runner`:
+`parity plan notes --dir <target.dir>/.parity --json`
+
+Each note is a **proposal**, never an instruction to apply:
+
+1. Read the note and say which plan change it implies. The usual one is a
+   component that should be compared against a DIFFERENT site — that is exactly
+   what `upgrade` + a reference exist for:
+   `parity plan set-reference <name> --url <that site> --note "<client's words>"`
+   then `parity plan set-status <name> upgrade`.
+2. **Ask the user before applying.** `as-is` and `upgrade` mean "stop opening work
+   for this", and the rule above stands: only the user gets to say that. A client
+   comment raises the question; it does not answer it.
+3. After applying, confirm on the card so the client sees their note became a
+   decision:
+   `parity plan notes --page <path> --post "referência apontada para <site> — <what changed>"`
+   Our comments are prefixed, so they never come back as fresh input next cycle.
+4. A note you cannot act on (a question, a design opinion) → surface it to the
+   user and answer it with `--post`. Never leave a note silently unread; the
+   client is watching that card to know they were heard.
 
 ### repo-setup / template-bootstrap
 **Skip this whole phase in reconcile-only mode** (the target the user pointed at

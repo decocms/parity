@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   LANE_TO_STUDIO,
+  PARITY_COMMENT_PREFIX,
   type StudioConfig,
   type ToolCaller,
   cardDescription,
   cardTitle,
+  fetchClientNotes,
   parseRpcBody,
+  postParityComment,
   studioConfigFromEnv,
   syncBoardToStudio,
 } from "../../src/board/studio.ts";
@@ -83,8 +86,8 @@ describe("mapeamento de raia", () => {
 });
 
 describe("cardTitle / cardDescription", () => {
-  it("prefixa o host — o item é org-scoped e não tem campo de site", () => {
-    expect(cardTitle("shop.example", "/p")).toBe("[shop.example] /p");
+  it("usa o path puro — o repo vai no campo próprio do card", () => {
+    expect(cardTitle("/p")).toBe("/p");
   });
 
   it("descreve o que bloqueia a página", () => {
@@ -111,19 +114,117 @@ describe("syncBoardToStudio", () => {
     const res = await syncBoardToStudio(
       boardWith([card("/a", "backlog"), card("/b", "done"), card("/c", "skipped")]),
       cfg,
+      {},
       call,
     );
-    expect(res).toEqual({ created: 2, updated: 0, skipped: 1 });
+    expect(res).toMatchObject({ created: 2, updated: 0, skipped: 1 });
     const created = calls.filter((c) => c.name === "TASK_BOARD_ITEM_CREATE");
     expect(created.map((c) => c.args.status).sort()).toEqual(["done", "todo"]);
   });
 
   it("atualiza em vez de duplicar quando o card já existe — rodar duas vezes não duplica", async () => {
-    const { calls, call } = recorder([{ id: "id-1", title: "[shop.example] /a", status: "todo" }]);
-    const res = await syncBoardToStudio(boardWith([card("/a", "building", ["hero"])]), cfg, call);
-    expect(res).toEqual({ created: 0, updated: 1, skipped: 0 });
+    const { calls, call } = recorder([{ id: "id-1", title: "/a", status: "todo" }]);
+    const res = await syncBoardToStudio(
+      boardWith([card("/a", "building", ["hero"])]),
+      cfg,
+      {},
+      call,
+    );
+    expect(res).toMatchObject({ created: 0, updated: 1, skipped: 0 });
     const update = calls.find((c) => c.name === "TASK_BOARD_ITEM_UPDATE");
     expect(update?.args).toMatchObject({ id: "id-1", status: "in_progress" });
     expect(calls.some((c) => c.name === "TASK_BOARD_ITEM_CREATE")).toBe(false);
+  });
+});
+
+describe("syncBoardToStudio — âncora por id e fixes", () => {
+  it("prefere o boardItemId guardado ao título — sobrevive a renomear o card", async () => {
+    const { calls, call } = recorder([{ id: "kept", title: "outro nome", status: "todo" }]);
+    const c = { ...card("/a", "building"), boardItemId: "kept" };
+    const res = await syncBoardToStudio(boardWith([c]), cfg, {}, call);
+    expect(res).toMatchObject({ created: 0, updated: 1 });
+    expect(calls.find((x) => x.name === "TASK_BOARD_ITEM_UPDATE")?.args).toMatchObject({
+      id: "kept",
+    });
+  });
+
+  it("devolve o id por página pra quem chama persistir no plano", async () => {
+    const call: ToolCaller = async <T>(_c: StudioConfig, name: string) =>
+      (name === "TASK_BOARD_ITEM_LIST" ? { items: [] } : { item: { id: "novo" } }) as T;
+    const res = await syncBoardToStudio(boardWith([card("/a", "backlog")]), cfg, {}, call);
+    expect(res.ids).toEqual({ "/a": "novo" });
+  });
+
+  it("manda o repo no create — o card sabe onde o trabalho vive", async () => {
+    const { calls, call } = recorder();
+    await syncBoardToStudio(boardWith([card("/a", "backlog")]), cfg, { repo: "org/site" }, call);
+    expect(calls.find((c) => c.name === "TASK_BOARD_ITEM_CREATE")?.args).toMatchObject({
+      repo: "org/site",
+    });
+  });
+
+  it("espelha fixes com o PR na descrição e fechado vira done", async () => {
+    const { calls, call } = recorder();
+    await syncBoardToStudio(
+      boardWith([]),
+      cfg,
+      {
+        fixes: [
+          {
+            title: "Corrigido: CLS no banner",
+            prUrl: "https://github.com/o/r/pull/9",
+            state: "closed",
+          },
+        ],
+      },
+      call,
+    );
+    const created = calls.find((c) => c.name === "TASK_BOARD_ITEM_CREATE");
+    expect(created?.args).toMatchObject({ status: "done" });
+    expect(String(created?.args.description)).toContain("https://github.com/o/r/pull/9");
+  });
+});
+
+describe("fetchClientNotes / postParityComment", () => {
+  it("lê nota do cliente e ignora as nossas e as resolvidas", async () => {
+    const call: ToolCaller = async <T>() =>
+      ({
+        comments: [
+          {
+            id: "c1",
+            taskBoardItemId: "i1",
+            authorId: "u",
+            body: "usar o componente do site BR",
+            resolved: false,
+            createdAt: "t",
+          },
+          {
+            id: "c2",
+            taskBoardItemId: "i1",
+            authorId: "u",
+            body: "[parity] aplicado: referência → BR",
+            resolved: false,
+            createdAt: "t",
+          },
+          {
+            id: "c3",
+            taskBoardItemId: "i1",
+            authorId: "u",
+            body: "já resolvido",
+            resolved: true,
+            createdAt: "t",
+          },
+        ],
+      }) as T;
+    const notes = await fetchClientNotes([{ path: "/p", boardItemId: "i1" }], cfg, call);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ path: "/p", commentId: "c1" });
+  });
+
+  it("prefixa o que escrevemos, pra não virar insumo de novo no ciclo seguinte", async () => {
+    const { calls, call } = recorder();
+    await postParityComment("i1", "referência apontada para o site BR", cfg, call);
+    const body = String(calls[0]?.args.body);
+    expect(body.startsWith(PARITY_COMMENT_PREFIX)).toBe(true);
   });
 });
