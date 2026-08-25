@@ -1447,11 +1447,14 @@ export async function runSideBenchmark(opts: RunSideOptions): Promise<SideBenchm
         id: `${opts.side}-${opts.viewport}-${id}`,
         formFactor: ff,
       });
-    const [home, plp, pdp] = await Promise.all([
-      lh("home", opts.base),
-      lh("plp", targets.category),
-      lh("pdp", targets.product),
-    ]);
+    // Sequential, not Promise.all: Lighthouse measures CPU, so running the three
+    // pages at once both inflates their own numbers and starves Chrome's launch
+    // handshake while Playwright still holds browsers open — which fails all
+    // three attempts with "Unable to connect to Chrome". Same reasoning the
+    // vitals command encodes in its cores/2-capped-2 --lighthouse-concurrency.
+    const home = await lh("home", opts.base);
+    const plp = await lh("plp", targets.category);
+    const pdp = await lh("pdp", targets.product);
     vitals = { home, plp, pdp };
   }
 
@@ -1785,11 +1788,10 @@ export async function runSideBenchmarkContent(
         id: `${opts.side}-${opts.viewport}-${id}`,
         formFactor: ff,
       });
-    const [home, plp, pdp] = await Promise.all([
-      lh("home", opts.base),
-      lh("page1", new URL(opts.contentPaths.pageA, opts.base).toString()),
-      lh("page2", new URL(opts.contentPaths.pageB, opts.base).toString()),
-    ]);
+    // Sequential for the same reason as the commerce path above.
+    const home = await lh("home", opts.base);
+    const plp = await lh("page1", new URL(opts.contentPaths.pageA, opts.base).toString());
+    const pdp = await lh("page2", new URL(opts.contentPaths.pageB, opts.base).toString());
     vitals = { home, plp, pdp };
   }
 
