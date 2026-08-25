@@ -41,6 +41,10 @@ describe("pctChange", () => {
   it("is a dash when a side is missing", () => {
     expect(pctChange(0, 500)).toBe("—");
   });
+  it("keeps a decimal below 1% so a green cell never reads -0%", () => {
+    expect(pctChange(1000, 997)).toBe("-0.3%");
+    expect(pctChange(1000, 1003)).toBe("+0.3%");
+  });
 });
 
 describe("deltaTone", () => {
@@ -51,6 +55,14 @@ describe("deltaTone", () => {
   });
   it("reds a meaningfully slower candidate", () => {
     expect(deltaTone(1000, 1200)).toBe(RED);
+  });
+  it("greens a win however small — a win is never yellow", () => {
+    expect(deltaTone(1000, 999)).toBe(GREEN);
+    expect(deltaTone(1000, 980)).toBe(GREEN);
+  });
+  it("yellows a small loss, reds a meaningful one", () => {
+    expect(deltaTone(1000, 1020)).not.toBe(GREEN);
+    expect(deltaTone(1000, 1020)).not.toBe(RED);
   });
   it("stays neutral for a roughly-even result", () => {
     expect(deltaTone(1000, 1000)).not.toBe(GREEN);
