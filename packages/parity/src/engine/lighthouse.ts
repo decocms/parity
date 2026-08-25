@@ -13,7 +13,7 @@
 //     run gets its own writable TEMP.
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { AgentA11yAudit, LhOpportunity, LhScores } from "../types/schema.ts";
 
 export type { AgentA11yAudit, LhOpportunity, LhScores };
@@ -173,7 +173,12 @@ async function measureLighthouseOnce(
   // dir and can hit EPERM there (Windows AV/ACL flakiness) — give this run its
   // own writable TEMP so chrome-launcher's tmp dir creation lands somewhere
   // uncontended instead of fighting --chrome-flags quoting.
-  const runTemp = join(opts.outDir, `.tmp-${opts.id}-a${attempt}`);
+  // MUST be absolute: this becomes TEMP/TMP for the spawned lighthouse, whose
+  // chrome-launcher feeds os.tmpdir() straight into Chrome's --user-data-dir.
+  // outDir descends from --output, which defaults to the RELATIVE "./parity-output",
+  // and Chrome cannot resolve a relative profile dir — it dies on launch and
+  // chrome-launcher reports the misleading "Unable to connect to Chrome".
+  const runTemp = resolve(opts.outDir, `.tmp-${opts.id}-a${attempt}`);
   mkdirSync(runTemp, { recursive: true });
   const args = [
     "--yes",
