@@ -41,6 +41,10 @@ describe("pctChange", () => {
   it("is a dash when a side is missing", () => {
     expect(pctChange(0, 500)).toBe("—");
   });
+  it("keeps a decimal below 1% so a green cell never reads -0%", () => {
+    expect(pctChange(1000, 997)).toBe("-0.3%");
+    expect(pctChange(1000, 1003)).toBe("+0.3%");
+  });
 });
 
 describe("deltaTone", () => {

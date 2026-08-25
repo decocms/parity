@@ -103,7 +103,9 @@ export function pctChange(prodMs: number, candMs: number): string {
   if (prodMs <= 0 || candMs <= 0) return "—";
   const change = ((candMs - prodMs) / prodMs) * 100;
   const sign = change > 0 ? "+" : "";
-  return `${sign}${change.toFixed(0)}%`;
+  // Sub-1% deltas get a decimal: `deltaTone` greens ANY win, so rounding a -0.3%
+  // win to "-0%" would print a win-green cell whose own digits say "no change".
+  return `${sign}${change.toFixed(Math.abs(change) < 1 ? 1 : 0)}%`;
 }
 
 // ── framed screenshot (the "imagens em destaque" payoff) ─────────────────────
