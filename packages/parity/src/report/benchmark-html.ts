@@ -93,9 +93,9 @@ export function speedup(prodMs: number, candMs: number): number {
 /** tone for a "lower is better" comparison of cand vs prod */
 export function deltaTone(prodMs: number, candMs: number): string {
   if (prodMs <= 0 || candMs <= 0) return DECK.muted;
-  if (candMs < prodMs * 0.95) return DECK.soft; // meaningfully faster
+  if (candMs < prodMs) return DECK.soft; // ANY win, however small — never yellow
   if (candMs > prodMs * 1.05) return DECK.bad; // meaningfully slower
-  return DECK.warn; // roughly even
+  return DECK.warn; // tie, or a loss too small to call meaningful
 }
 
 /** signed percent change of cand vs prod, e.g. "-42%" (cand faster). */
