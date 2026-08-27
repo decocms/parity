@@ -10,6 +10,7 @@ The **parity** plugin is active. It orchestrates site migrations end-to-end.
 | `/parity:status` | Show the current phase and score of an active migration |
 | `/parity:validate` | Run parity (prod × cand) on demand and report the score |
 | `/parity:resume` | Resume from the last saved `.parity/migration.json` |
+| `/parity:report` | Build a stakeholder report — deck or executive one-pager |
 
 ## Critical rule: dispatch — never work inline
 
