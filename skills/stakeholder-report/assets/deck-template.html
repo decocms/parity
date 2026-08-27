@@ -1,0 +1,72 @@
+<!doctype html>
+<!-- Runnable skeleton. Inline deck.css into the style block and deck.js into the
+     script block, so the report stays a single portable file. One .page per
+     topic; the dot count must match the page count. -->
+<html lang="pt-BR"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>deco × CLIENT — migration report</title>
+<link rel="icon" type="image/png" sizes="48x48" href="data:image/png;base64,REPLACE_ME"/>
+<style>/* inline assets/deck.css here */</style>
+</head><body>
+
+<div class="nav">
+  <b>deco × CLIENT</b>
+  <span class="spacer"></span>
+  <div class="dots">
+    <button class="dot" aria-label="1"></button>
+    <button class="dot" aria-label="2"></button>
+    <button class="dot" aria-label="3"></button>
+  </div>
+  <span class="counter"></span>
+</div>
+
+<main class="deck">
+
+  <section class="page cover" id="p1"><div class="page-inner">
+    <p class="eyebrow">Report · WINDOW</p>
+    <h1 class="cover-h1">site.example.com<br/>
+      <span class="dim">FROM STACK</span> → <span class="lime-ink">TO STACK</span></h1>
+    <p class="cover-lead">One sentence on what changed. No adjectives.</p>
+    <div class="cover-meta">
+      <div><b class="num">0</b><small>label</small></div>
+      <div><b class="num">0</b><small>label</small></div>
+    </div>
+    <p class="hint">→ scroll sideways, or use the arrow keys</p>
+  </div></section>
+
+  <section class="page" id="p2"><div class="page-inner">
+    <p class="eyebrow">Overview</p>
+    <h2 class="page-title">The numbers</h2>
+    <div class="stat-grid" style="margin-top:22px">
+      <div class="tile"><div class="tile-val t-good">0</div>
+        <div class="tile-label">what it counts</div>
+        <div class="tile-sub">before value, for contrast</div></div>
+    </div>
+    <h3 class="sub">How to read these</h3>
+    <p class="annotation">Scope: whose work, which window, what is excluded.</p>
+  </div></section>
+
+  <section class="page" id="p3"><div class="page-inner">
+    <p class="eyebrow">Visual</p>
+    <h2 class="page-title">Before and after</h2>
+    <div class="pair">
+      <div class="pair-head"><b>Subject</b><span>what was wrong · PR #0</span></div>
+      <div class="side-by-side">
+        <figure class="shot shot-scroll">
+          <span class="shot-tag rel-from">before · vX</span>
+          <div class="shot-view"><div class="shot-ph tall">capture pending</div></div>
+        </figure>
+        <figure class="shot shot-scroll">
+          <span class="shot-tag rel-to">after · vY</span>
+          <div class="shot-view"><div class="shot-ph tall">capture pending</div></div>
+        </figure>
+      </div>
+    </div>
+    <h3 class="sub">How this was measured</h3>
+    <p class="annotation">Tool, build type, viewport, same product on both sides.</p>
+  </div></section>
+
+</main>
+<script>/* inline assets/deck.js here */</script>
+</body></html>

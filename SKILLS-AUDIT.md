@@ -15,6 +15,7 @@ Sources surveyed: `decocms/skills` (86), `decocms/blocks .agents/skills/` (6),
 | source-vtex-io | `skills/source-vtex-io/SKILL.md` | Source: VTEX IO block trees |
 | target-tanstack-deco | `skills/target-tanstack-deco/SKILL.md` | Target: TanStack + Deco CMS |
 | target-faststore-v4 | `skills/target-faststore-v4/SKILL.md` | Target: FastStore v4 3-point invariant |
+| stakeholder-report | `skills/stakeholder-report/SKILL.md` | Phase: reporting — deck / one-pager kit + evidence rules |
 
 ## Kept as knowledge references (load by explicit path)
 

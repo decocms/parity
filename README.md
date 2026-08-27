@@ -37,7 +37,7 @@ claude plugin details parity  # command/agent/skill inventory + token cost
 # inside a Claude Code session, /help lists the /parity:* commands below
 ```
 
-Once installed, four slash commands drive a migration:
+Once installed, five slash commands drive a migration:
 
 | Command | What it does |
 | --- | --- |
@@ -45,6 +45,7 @@ Once installed, four slash commands drive a migration:
 | `/parity:status` | Show the current phase and score of an active migration |
 | `/parity:validate` | Run parity (prod × candidate) on demand and report the score |
 | `/parity:resume` | Resume from the last saved `.parity/migration.json` |
+| `/parity:report` | Build a stakeholder report — deck or executive one-pager |
 
 ## Getting started
 
