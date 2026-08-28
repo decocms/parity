@@ -91,8 +91,8 @@ const PREMIUM_FEATURE_TIER: Partial<Record<Feature, ModelTier>> = {
 export const PROVIDER_MODELS: Record<Provider, Record<ModelTier, string>> = {
   anthropic: {
     haiku: "claude-haiku-4-5",
-    sonnet: "claude-sonnet-4-6",
-    opus: "claude-opus-4-7",
+    sonnet: "claude-sonnet-5",
+    opus: "claude-opus-5",
   },
   openrouter: {
     haiku: process.env.PARITY_OPENROUTER_MODEL_HAIKU ?? "anthropic/claude-haiku-4.5",
@@ -101,8 +101,8 @@ export const PROVIDER_MODELS: Record<Provider, Record<ModelTier, string>> = {
   },
   "claude-agent-sdk": {
     haiku: "claude-haiku-4-5",
-    sonnet: "claude-sonnet-4-6",
-    opus: "claude-opus-4-7",
+    sonnet: "claude-sonnet-5",
+    opus: "claude-opus-5",
   },
 };
 

@@ -1,6 +1,6 @@
 ---
 name: parity-specialist
-model: claude-sonnet-4-6
+model: claude-sonnet-5
 tools: [Read, Grep]
 ---
 

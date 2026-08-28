@@ -174,7 +174,7 @@ program
   )
   .option(
     "--llm-model <overrides>",
-    "Per-feature model override, e.g. visual-diff=claude-opus-4-7,explain=claude-opus-4-7. Features: selector-discovery, step-recovery, search-terms, plp-matching, pdp-matching, section-understanding, visual-diff, issue-aggregation, explain, component-detection. Issue #66.",
+    "Per-feature model override, e.g. visual-diff=claude-opus-5,explain=claude-opus-5. Features: selector-discovery, step-recovery, search-terms, plp-matching, pdp-matching, section-understanding, visual-diff, issue-aggregation, explain, component-detection. Issue #66.",
   )
   .option(
     "--llm-tier-default <tier>",

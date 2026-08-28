@@ -149,7 +149,7 @@ describe("callTool — Anthropic branch", () => {
       tool: { name: "t", description: "d", inputSchema: { type: "object" } },
     });
     const call = mockCreate.mock.calls[0]?.[0];
-    expect(call.model).toBe("claude-sonnet-4-6");
+    expect(call.model).toBe("claude-sonnet-5");
     expect(call.max_tokens).toBe(2000);
   });
 
@@ -180,7 +180,7 @@ describe("callTool — Anthropic branch", () => {
       tool: { name: "t", description: "d", inputSchema: { type: "object" } },
     });
     const call = mockCreate.mock.calls[0]?.[0];
-    expect(call.model).toBe("claude-sonnet-4-6");
+    expect(call.model).toBe("claude-sonnet-5");
   });
 
   it("passes AbortSignal for timeout enforcement", async () => {

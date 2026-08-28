@@ -104,6 +104,17 @@ Run any command with `--help` for the full flag list.
 | `--llm-model <overrides>` | Per-feature model override string (see `--help` for syntax) |
 | `--llm-tier-default <tier>` | Default model tier (`haiku`/`sonnet`/`opus`) when a feature has no explicit override |
 | `--llm-model-default <model>` | Default concrete model id, overriding the tier |
+
+Tiers resolve to these concrete models on the `anthropic` and `claude-agent-sdk`
+providers (`openrouter` uses its own slugs, overridable via
+`PARITY_OPENROUTER_MODEL*` env vars):
+
+| tier | model |
+|---|---|
+| `haiku` | `claude-haiku-4-5` |
+| `sonnet` | `claude-sonnet-5` |
+| `opus` | `claude-opus-5` |
+
 | `--llm-premium` | Bump the reasoning-heavy features (`explain`/`issue-aggregation`/`visual-diff`) to opus. Defaults are sonnet-first for cost/latency (opus blew the 60s timeout on most runs); opt into opus for hard fixes (#256) |
 | `--refresh-selectors` | Bypass the selector-discovery cache and re-run LLM discovery |
 | `--no-learn` | Skip learned-selectors promotion for this run |

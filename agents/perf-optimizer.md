@@ -1,6 +1,6 @@
 ---
 name: perf-optimizer
-model: claude-sonnet-4-6
+model: claude-sonnet-5
 tools: [Bash, Read, Write, Edit, Grep, Glob]
 ---
 
