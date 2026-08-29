@@ -139,15 +139,30 @@ export async function listEntries(
   return res.entries ?? [];
 }
 
+/**
+ * A branch only carries entries somebody changed on it; everything else it inherits from `main`.
+ * Asking for an untouched entry answers `404 ENTRY_VERSIONS_NOT_FOUND`, which reads like the entry
+ * does not exist. It does — so fall back to `main` and report where the content came from, because
+ * that is the normal state for the first edit of any entry on a fresh branch.
+ */
 export async function getLastVersion(
   cfg: CmsConfig,
   args: { contentType: string; entryId: string; branchId: string },
   call: CmsCaller = callCms
-): Promise<CmsVersion> {
+): Promise<CmsVersion & { inheritedFromMain?: boolean }> {
   const { contentType, entryId, branchId } = args;
-  return call<CmsVersion>(cfg, {
-    path: `${MANAGE}/${cfg.account}/${cfg.store}/${contentType}/entries/${entryId}/last-version?branchId=${branchId}`,
-  });
+  const at = (branch: string) =>
+    call<CmsVersion>(cfg, {
+      path: `${MANAGE}/${cfg.account}/${cfg.store}/${contentType}/entries/${entryId}/last-version?branchId=${branch}`,
+    });
+  try {
+    return await at(branchId);
+  } catch (err) {
+    const missing = err instanceof Error && /ENTRY_VERSIONS_NOT_FOUND/.test(err.message);
+    if (!missing || branchId === "main") throw err;
+    const base = await at("main");
+    return { ...base, branchId, inheritedFromMain: true };
+  }
 }
 
 export interface CommitInput {

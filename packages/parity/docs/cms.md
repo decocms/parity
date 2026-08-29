@@ -139,6 +139,13 @@ and every leaf as a per-locale switch:
 
 Pulling from delivery and committing that back does not work. `pull` always speaks authoring.
 
+## Driving it from a migration
+
+The orchestrator does not run these commands — it dispatches `cms-writer`, one entry per call.
+That keeps the CMS procedure out of the main skill's context, and it puts the stop conditions
+(login, stale hash, unpublished section) in an agent whose whole job is to report them rather than
+work around them. See `agents/cms-writer.md`.
+
 ## Not here on purpose
 
 **Merging to `main`.** The API supports it; this CLI does not expose it. Promoting content to the

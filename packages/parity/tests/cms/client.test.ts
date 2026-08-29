@@ -5,6 +5,7 @@ import {
   type CmsRequest,
   cmsConfigFromEnv,
   commitEntry,
+  getLastVersion,
   undoEntry,
 } from "../../src/cms/client.ts";
 
@@ -88,5 +89,35 @@ describe("undoEntry", () => {
       method: "DELETE",
       path: "api/content-platform/manage/acme/store1/branches/b1/entries/e1/undo",
     });
+  });
+});
+
+describe("getLastVersion", () => {
+  /** A branch only carries entries somebody changed on it — the first edit always hits this. */
+  function branchWithout(entryOnMain: Record<string, unknown>) {
+    const paths: string[] = [];
+    const call: CmsCaller = async <T>(_c: CmsConfig, req: CmsRequest) => {
+      paths.push(req.path);
+      if (req.path.includes("branchId=main")) return entryOnMain as T;
+      throw new Error('HTTP 404 {"error":{"code":"ENTRY_VERSIONS_NOT_FOUND"}}');
+    };
+    return { paths, call };
+  }
+
+  it("cai para main quando a branch nao tem override, marcando de onde veio", async () => {
+    const { paths, call } = branchWithout({ branchId: "main", baseHash: "h", data: {} });
+    const v = await getLastVersion(cfg, { contentType: "home", entryId: "e1", branchId: "b1" }, call);
+    expect(v.inheritedFromMain).toBe(true);
+    expect(v.branchId).toBe("b1");
+    expect(paths).toHaveLength(2);
+  });
+
+  it("nao mascara um 404 real em main — la nao ha de onde herdar", async () => {
+    const call: CmsCaller = async () => {
+      throw new Error('HTTP 404 {"error":{"code":"ENTRY_VERSIONS_NOT_FOUND"}}');
+    };
+    await expect(
+      getLastVersion(cfg, { contentType: "home", entryId: "e1", branchId: "main" }, call)
+    ).rejects.toThrow(/ENTRY_VERSIONS_NOT_FOUND/);
   });
 });

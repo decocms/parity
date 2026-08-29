@@ -172,6 +172,9 @@ export async function cmsPullCommand(
       return 0;
     }
     console.log(`${chalk.green("✓")} ${out}`);
+    if (version.inheritedFromMain) {
+      console.log(chalk.dim("  (this branch has no changes to this entry yet — content read from main)"));
+    }
     for (const line of summarizeSections(version.data)) console.log(`  ${line}`);
     return 0;
   } catch (err) {

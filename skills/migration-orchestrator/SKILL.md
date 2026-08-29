@@ -26,8 +26,8 @@ and "via X" below all mean exactly one thing:
 > the plan entry). Then read its reply and continue.
 
 The agents are: `scout`, `porter`, `builder`, `spa-strategist`, `triager`,
-`fixer`, `reviewer`, `parity-specialist`, `perf-optimizer`, `fallbacker`, and
-`runner`. Never inline a specialist's job (do not triage, port, or fix in your
+`fixer`, `reviewer`, `parity-specialist`, `perf-optimizer`, `fallbacker`,
+`cms-writer`, and `runner`. Never inline a specialist's job (do not triage, port, or fix in your
 own context) — that defeats the whole design and burns your context window.
 
 **Every shell command goes through the `runner` subagent** — `parity`, `gh`,
@@ -155,49 +155,29 @@ right now — while "component X is not built" and "page Y has no content" never
 surface at all. Deferred items are NOT filed as issues: they stay in the backlog
 file until the stage reaches them. Say what was deferred; never silently drop it.
 
-## CMS content — `parity cms`
+## CMS content — dispatch to `cms-writer`
 
-A page can be `code` (route built) and still be empty, because the content lives in the target's
-CMS and nobody typed it. On a FastStore v4 target that CMS is VTEX's Content Platform, and
-`parity cms` writes to it — so "waiting on CMS content" stops being a phase that ends in the Admin.
+A page can be `code` (route built) and still be empty, because the content lives
+in the target's CMS and nobody typed it. On a FastStore v4 target that CMS is
+VTEX's Content Platform, and `parity cms` writes to it — so "waiting on CMS
+content" stops being a phase that ends in the Admin.
 
-Needs `PARITY_CMS_ACCOUNT`, `PARITY_CMS_STORE` and a `vtex login` session. Full reference in
-`docs/cms.md`.
+**You do not run these commands.** Dispatch `cms-writer`, one entry per call,
+with the content type + entry id (or slug), the branch id, and the change. It
+returns `{ok, entry, commit, signal, blocked}`.
 
-**You cannot log in yourself.** `vtex login` opens a browser for SSO, and the toolbelt token
-expires in about a day — so a migration that resumes the next morning will find it dead. Every
-`parity cms` command detects the state before making a request and prints the command to run:
-toolbelt missing (`npm i -g vtex`), logged out, expired, or logged into the wrong account.
+Two things you own, because they are decisions and not execution:
 
-When you hit one, **stop and ask the human to run the command it printed**, then resume. Do not
-retry, and do not go around it by editing content in the Admin — that is the manual work this
-exists to remove.
+- **The branch.** Pick one working branch for the migration and pass its **id**
+  to every call. Never `main` — promoting content to the live site is a human
+  action in the Admin, where whoever owns the content reviews the diff.
+- **`blocked` replies.** The common one is authentication: the toolbelt token
+  expires in about a day, and `vtex login` opens a browser for SSO that no agent
+  can complete. When `blocked` names a login state, **stop and ask the human to
+  run the command in the message**, then resume. Do not retry, and do not accept
+  "I edited it in the Admin instead" — that is the manual work this removes.
 
-**Run `doctor` before anything else.** A section that exists in the repo but was never uploaded
-commits fine and renders nothing — silent, and it will cost you an afternoon:
-
-```bash
-parity cms doctor --repo <target repo>
-```
-
-Exit 1 means the repo is ahead of the account: upload the schema (`faststore cms-sync`) first.
-
-**The loop, per entry:**
-
-```bash
-parity cms ls --branches                 # branch ids — a branch NAME does not address a branch
-parity cms pull --content-type home --entry <id> --branch <branchId> --out home.json
-# edit home.json
-parity cms diff --file home.json         # exit 1 when it differs
-parity cms push --file home.json         # dry run
-parity cms push --file home.json --yes   # commits
-```
-
-**Never pass `--allow-main`.** Promoting content to the live site is a human action in the Admin,
-where whoever owns the content reviews the diff. Work on a branch and hand the branch over.
-
-If a push goes wrong: `parity cms undo --entry <id> --branch <branchId> --yes`. The remote is
-backed up to `parity-output/cms-backups/` before every write.
+Needs `PARITY_CMS_ACCOUNT` and `PARITY_CMS_STORE`. Reference: `docs/cms.md`.
 
 ## The page loop — `stage: pages`
 
