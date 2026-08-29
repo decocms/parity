@@ -30,6 +30,12 @@
 | `parity plan set-reference` | Point a component's comparison at a non-prod reference and record why it diverges — keeps an intentional improvement from being reported as a defect on every run |
 | `parity plan verify` | Record that a component was actually compared, and against what |
 | `parity plan merge` | Bring a freshly captured plan into the canonical one keeping every recorded decision — use instead of copying the file |
+| `parity cms doctor` | Sections the repo declares vs. published on the account — catches the silent "commits fine, renders nothing" failure |
+| `parity cms ls` | List Content Platform entries, or branches with `--branches` |
+| `parity cms pull` | Write one entry to a local JSON file, in the authoring shape |
+| `parity cms diff` | Compare a pulled file against the branch it came from |
+| `parity cms push` | Commit a pulled file back — dry run unless `--yes`, never `main` by default |
+| `parity cms undo` | Drop an entry's changes on a branch |
 
 ### Missing selectors (#72)
 

@@ -4,6 +4,14 @@ import { baselineList, baselineSet, baselineUnset } from "./commands/baseline.ts
 import { benchmarkCommand } from "./commands/benchmark.ts";
 import { cacheCommand } from "./commands/cache.ts";
 import { checkCommand } from "./commands/check.ts";
+import {
+  cmsDiffCommand,
+  cmsDoctorCommand,
+  cmsLsCommand,
+  cmsPullCommand,
+  cmsPushCommand,
+  cmsUndoCommand,
+} from "./commands/cms.ts";
 import { compareCommand } from "./commands/compare.ts";
 import { consoleCommand } from "./commands/console.ts";
 import { cssTraceCommand } from "./commands/css-trace.ts";
@@ -515,6 +523,117 @@ program
       )
       .action((name, verdict, opts) => {
         process.exit(planVerifyCommand(opts.dir, name, verdict, { note: opts.note, at: opts.at }));
+      }),
+  );
+
+program
+  .command("cms")
+  .description(
+    "Read and write VTEX Content Platform entries — the CMS behind FastStore v4. Every write is a commit on a branch carrying the baseHash it was read at, so a concurrent edit fails the commit instead of silently winning. Needs PARITY_CMS_ACCOUNT + PARITY_CMS_STORE and a `vtex login` session (or PARITY_CMS_TOKEN).",
+  )
+  .addCommand(
+    new Command("doctor")
+      .description(
+        "Compare the sections the repo declares against the ones published on the account. A section that exists in code but was never uploaded commits fine and renders nothing — this is the check that catches it.",
+      )
+      .option("--repo <path>", "Repo holding cms/faststore/pages/", ".")
+      .option("--json", "Emit structured JSON instead of human-readable text", false)
+      .action(async (opts) => {
+        process.exit(await cmsDoctorCommand({ repo: opts.repo, json: Boolean(opts.json) }));
+      }),
+  )
+  .addCommand(
+    new Command("ls")
+      .description("List entries, or branches with --branches. Branch ids are what every write needs.")
+      .option("--content-type <name>", "Filter by content type (home, landingPage, plp, ...)")
+      .option("--branches", "List branches instead of entries", false)
+      .option("--json", "Emit structured JSON instead of human-readable text", false)
+      .action(async (opts) => {
+        process.exit(
+          await cmsLsCommand({
+            contentType: opts.contentType,
+            branches: Boolean(opts.branches),
+            json: Boolean(opts.json),
+          }),
+        );
+      }),
+  )
+  .addCommand(
+    new Command("pull")
+      .description(
+        "Write one entry to a local JSON file, in the authoring shape. The file carries entryId, contentType, branch and baseHash, so push needs no flags.",
+      )
+      .requiredOption("--content-type <name>", "home, landingPage, plp, ...")
+      .requiredOption("--entry <id>", "Entry id (from `parity cms ls`)")
+      .requiredOption("--branch <id>", "Branch id, or main")
+      .option("--out <path>", "Output file (default: parity-output/cms/<contentType>-<entry>.json)")
+      .option("--json", "Emit structured JSON instead of human-readable text", false)
+      .action(async (opts) => {
+        process.exit(
+          await cmsPullCommand({
+            contentType: opts.contentType,
+            entry: opts.entry,
+            branch: opts.branch,
+            out: opts.out,
+            json: Boolean(opts.json),
+          }),
+        );
+      }),
+  )
+  .addCommand(
+    new Command("diff")
+      .description("Compare a pulled file against the branch it came from. Exit 1 when they differ.")
+      .requiredOption("--file <path>", "File written by `parity cms pull`")
+      .option("--branch <id>", "Compare against a different branch")
+      .option("--json", "Emit structured JSON instead of human-readable text", false)
+      .action(async (opts) => {
+        process.exit(
+          await cmsDiffCommand({ file: opts.file, branch: opts.branch, json: Boolean(opts.json) }),
+        );
+      }),
+  )
+  .addCommand(
+    new Command("push")
+      .description(
+        "Commit a pulled file back. Dry run unless --yes. Refuses main without --allow-main, refuses a stale baseHash, refuses sections the account cannot render, and backs the remote up before writing.",
+      )
+      .requiredOption("--file <path>", "File written by `parity cms pull`")
+      .option("--branch <id>", "Target branch (default: the branch in the file)")
+      .option("--message <text>", "Commit message", "parity cms push")
+      .option("--author <email>", "Commit author", "parity")
+      .option("--yes", "Actually write. Without it, this is a dry run.", false)
+      .option("--allow-main", "Permit committing straight to main", false)
+      .option("--json", "Emit structured JSON instead of human-readable text", false)
+      .action(async (opts) => {
+        process.exit(
+          await cmsPushCommand({
+            file: opts.file,
+            branch: opts.branch,
+            message: opts.message,
+            author: opts.author,
+            yes: Boolean(opts.yes),
+            allowMain: Boolean(opts.allowMain),
+            json: Boolean(opts.json),
+          }),
+        );
+      }),
+  )
+  .addCommand(
+    new Command("undo")
+      .description("Drop an entry's changes on a branch — the platform's own rollback. Dry run unless --yes.")
+      .requiredOption("--entry <id>", "Entry id")
+      .requiredOption("--branch <id>", "Branch id")
+      .option("--yes", "Actually revert. Without it, this is a dry run.", false)
+      .option("--allow-main", "Permit reverting on main", false)
+      .action(async (opts) => {
+        process.exit(
+          await cmsUndoCommand({
+            entry: opts.entry,
+            branch: opts.branch,
+            yes: Boolean(opts.yes),
+            allowMain: Boolean(opts.allowMain),
+          }),
+        );
       }),
   );
 

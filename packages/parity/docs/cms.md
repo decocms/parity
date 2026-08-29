@@ -1,0 +1,123 @@
+# `parity cms`
+
+Read and write VTEX Content Platform entries from the terminal — the CMS behind FastStore v4.
+
+A migration used to end here: the code ships, and someone retypes the merchant's pages into the
+Admin. `parity cms` closes that last mile, and it does it on the platform's own safety model
+rather than a bespoke one.
+
+## Setup
+
+```bash
+vtex login <account>          # the toolbelt session is the credential
+export PARITY_CMS_ACCOUNT=electroluxecfaststore
+export PARITY_CMS_STORE=electrolux        # the store id, NOT the account
+```
+
+The token is read from `~/.config/configstore/vtex.json`. `PARITY_CMS_TOKEN` overrides it for CI.
+
+## The model: content is git
+
+Saving is a **commit on a branch**, carrying the `baseHash` the content was read at:
+
+```
+POST .../branches/<branchId>/commits   { data, baseHash, entryId, contentTypeId, ... }
+```
+
+That single fact is what makes automating this safe. A concurrent edit makes the commit fail
+instead of winning. `main` is never the default. Rollback is one call. The same endpoint creates
+and updates, so a brand-new route is a commit with an entry id nobody has used yet.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `parity cms doctor` | Sections the repo declares vs. sections published on the account |
+| `parity cms ls` | Entries, or branches with `--branches` |
+| `parity cms pull` | One entry to a local JSON file |
+| `parity cms diff` | A pulled file against the branch it came from |
+| `parity cms push` | Commit it back — dry run unless `--yes` |
+| `parity cms undo` | Drop an entry's changes on a branch |
+
+### `doctor` — run this first
+
+A section only renders after its schema is uploaded. A repo can be a release ahead: the component
+exists in code, the account has never seen it. Committing content that uses it **succeeds and
+renders nothing** — the worst failure available, because it is silent.
+
+```
+$ parity cms doctor --repo ../electrolux-poc
+✗ landingPage: RichText — in the repo, not on the account. Upload the schema (`faststore cms-sync`) or it renders nothing.
+```
+
+Exits 1 when the repo is ahead. `push` runs the same check and refuses.
+
+### A full round trip
+
+```bash
+parity cms ls --branches
+# 4e3779e5-4065-423d-939f-aaa8675e83cb  test
+
+parity cms pull --content-type home --entry 50434e7b-… --branch 4e3779e5-… --out home.json
+# ✓ home.json
+#   HeroSwiper (slides=12)
+#   CategoryBlocks (categories=8)
+#   …
+
+# edit home.json, then:
+parity cms diff --file home.json
+# remote → local (what push would write)
+#   HeroSwiper (slides=12) → HeroSwiper (slides=13)
+
+parity cms push --file home.json            # dry run
+parity cms push --file home.json --yes      # commits
+parity cms undo --entry 50434e7b-… --branch 4e3779e5-… --yes   # if it went wrong
+```
+
+The pulled file carries `entryId`, `contentType`, `branchId` and `baseHash`, so `push` and `diff`
+need no flags beyond the file.
+
+## Guardrails
+
+They live in the command, not in the caller. This is meant to be driven by an agent, and an agent
+that has to remember `--dry-run` eventually will not.
+
+1. **Dry run by default.** Writes only with `--yes`.
+2. **`main` refused** without `--allow-main`.
+3. **Branch names are refused.** Only ids address a branch — see below.
+4. **Stale `baseHash` refused.** Pull again rather than clobber someone's edit.
+5. **Unpublished sections refused**, with the `doctor` message.
+6. **The remote is backed up** to `parity-output/cms-backups/<entryId>-<hash>.json` before writing.
+
+## Three things that cost real time to find out
+
+**`commitType` is only for restores.** Sending `"update"` on a normal save answers **500** from the
+`INSERT` into the `commits` table — it looks like an outage and is a bad request. The client never
+sends the field.
+
+**A branch name is not an address.** The Admin's own URL `/branches/test/...` redirects to a
+*different* branch. Only uuids resolve; `main` is the one name that works. `push` refuses anything
+else rather than write somewhere surprising.
+
+**The authoring shape is not the delivery shape.** `/data/...` (what the storefront reads) hands out
+flat arrays and plain values. Authoring wraps collections as `{ $fnType, values: { "<id>": … } }`
+and every leaf as a per-locale switch:
+
+```json
+{ "$fnType": "switch", "varyByKeys": ["locale"], "cases": null,
+  "defaultCase": "https://…png", "configurationSourceType": "contexts" }
+```
+
+Pulling from delivery and committing that back does not work. `pull` always speaks authoring.
+
+## Not here on purpose
+
+**Merging to `main`.** The API supports it; this CLI does not expose it. Promoting content to the
+live site stays a human action in the Admin, where the diff is reviewable by whoever owns the
+content.
+
+**Schema upload.** That is `faststore cms-sync`, which already exists and works.
+
+**Media upload.** There is no API for the Media Gallery — seven endpoints were tried against a live
+account with a valid token and all answered 400/404. Images go through the Admin, or stay on their
+original CDN.

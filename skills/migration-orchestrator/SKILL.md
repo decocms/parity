@@ -155,6 +155,41 @@ right now — while "component X is not built" and "page Y has no content" never
 surface at all. Deferred items are NOT filed as issues: they stay in the backlog
 file until the stage reaches them. Say what was deferred; never silently drop it.
 
+## CMS content — `parity cms`
+
+A page can be `code` (route built) and still be empty, because the content lives in the target's
+CMS and nobody typed it. On a FastStore v4 target that CMS is VTEX's Content Platform, and
+`parity cms` writes to it — so "waiting on CMS content" stops being a phase that ends in the Admin.
+
+Needs `PARITY_CMS_ACCOUNT`, `PARITY_CMS_STORE` and a `vtex login` session. Full reference in
+`docs/cms.md`.
+
+**Run `doctor` before anything else.** A section that exists in the repo but was never uploaded
+commits fine and renders nothing — silent, and it will cost you an afternoon:
+
+```bash
+parity cms doctor --repo <target repo>
+```
+
+Exit 1 means the repo is ahead of the account: upload the schema (`faststore cms-sync`) first.
+
+**The loop, per entry:**
+
+```bash
+parity cms ls --branches                 # branch ids — a branch NAME does not address a branch
+parity cms pull --content-type home --entry <id> --branch <branchId> --out home.json
+# edit home.json
+parity cms diff --file home.json         # exit 1 when it differs
+parity cms push --file home.json         # dry run
+parity cms push --file home.json --yes   # commits
+```
+
+**Never pass `--allow-main`.** Promoting content to the live site is a human action in the Admin,
+where whoever owns the content reviews the diff. Work on a branch and hand the branch over.
+
+If a push goes wrong: `parity cms undo --entry <id> --branch <branchId> --yes`. The remote is
+backed up to `parity-output/cms-backups/` before every write.
+
 ## The page loop — `stage: pages`
 
 While the stage is `pages`, the unit of work is **one page**, not a global queue.
