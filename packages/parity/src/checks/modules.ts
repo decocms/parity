@@ -113,7 +113,7 @@ export const MODULES: Record<ModuleName, ModuleDef> = {
   html: {
     name: "html",
     description:
-      "HTML structure — structural diff, lazy sections, image loading health, missing picture dimensions",
+      "HTML structure — structural diff, lazy sections, image loading health, missing picture dimensions, editorial content structure",
     checks: [
       "html-structural-diff",
       "lazy-section-presence",
@@ -122,6 +122,7 @@ export const MODULES: Record<ModuleName, ModuleDef> = {
       "font-parity",
       "ssr-no-js",
       "section-order-parity",
+      "content-structure",
     ],
     flows: ["homepage", "plp", "pdp"],
   },

@@ -13,6 +13,7 @@ import { cacheCoverage } from "./cache-coverage.ts";
 import { cartInteractionsFlow } from "./cart-interactions-flow.ts";
 import { cartRevealModeDivergence } from "./cart-reveal-mode.ts";
 import { consoleErrorsBaseline } from "./console-errors.ts";
+import { contentStructureParity } from "./content-structure.ts";
 import { cookieCepModalCls } from "./cookie-cep-modal-cls.ts";
 import { faviconParity } from "./favicon-parity.ts";
 import { fontParity } from "./font-parity.ts";
@@ -109,6 +110,7 @@ export const ALL_CHECKS: Check[] = [
   // Portal-davinci run gaps
   faviconParity,
   fontParity,
+  contentStructureParity,
   ssrNoJs,
   navLinksHealth,
   // Redirects/3p-scripts/analytics-beacon/section-order gaps
@@ -160,6 +162,7 @@ export const ALL_CHECKS_BY_NAME: Record<string, Check> = {
   "serverfn-hover-flood": serverFnHoverFlood,
   "favicon-parity": faviconParity,
   "font-parity": fontParity,
+  "content-structure": contentStructureParity,
   "ssr-no-js": ssrNoJs,
   "nav-links-health": navLinksHealth,
   "redirects-parity": redirectsParity,
