@@ -16,6 +16,35 @@ export PARITY_CMS_STORE=electrolux        # the store id, NOT the account
 
 The token is read from `~/.config/configstore/vtex.json`. `PARITY_CMS_TOKEN` overrides it for CI.
 
+### When it is not logged in
+
+The toolbelt token **expires in about a day**, and being logged into the *wrong account* answers
+401 exactly like an expired one. Every command tells you which of those it is before making a
+request, because a raw 401 sends people looking in the wrong place:
+
+```
+$ parity cms ls --branches
+Not logged into VTEX.
+  vtex login electroluxecfaststore
+  (opens a browser for SSO — a human has to complete it)
+```
+
+```
+Logged into "acme", but this run targets "electroluxecfaststore". Wrong-account requests answer
+401, which looks like a broken token.
+  vtex login electroluxecfaststore
+```
+
+If the toolbelt itself is missing, it says so and gives both commands (`npm i -g vtex`, then
+`vtex login`). **An agent cannot resolve any of this on its own** — `vtex login` opens a browser
+for SSO. Surface the message and let the human run it.
+
+`parity cms doctor` prints who you are and how long the session has left:
+
+```
+✓ jonas.jesus@electrolux.com on electroluxecfaststore · expires in 23h
+```
+
 ## The model: content is git
 
 Saving is a **commit on a branch**, carrying the `baseHash` the content was read at:

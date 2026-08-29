@@ -164,6 +164,15 @@ CMS and nobody typed it. On a FastStore v4 target that CMS is VTEX's Content Pla
 Needs `PARITY_CMS_ACCOUNT`, `PARITY_CMS_STORE` and a `vtex login` session. Full reference in
 `docs/cms.md`.
 
+**You cannot log in yourself.** `vtex login` opens a browser for SSO, and the toolbelt token
+expires in about a day — so a migration that resumes the next morning will find it dead. Every
+`parity cms` command detects the state before making a request and prints the command to run:
+toolbelt missing (`npm i -g vtex`), logged out, expired, or logged into the wrong account.
+
+When you hit one, **stop and ask the human to run the command it printed**, then resume. Do not
+retry, and do not go around it by editing content in the Admin — that is the manual work this
+exists to remove.
+
 **Run `doctor` before anything else.** A section that exists in the repo but was never uploaded
 commits fine and renders nothing — silent, and it will cost you an afternoon:
 

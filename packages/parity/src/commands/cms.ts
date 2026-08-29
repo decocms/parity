@@ -27,19 +27,33 @@ import {
   undoEntry,
 } from "../cms/client.ts";
 import { sectionsOf, summarizeSections } from "../cms/authoring.ts";
+import { describeSession, sessionAdvice, sessionState } from "../cms/session.ts";
 import { schemaDrift, unrenderableSections } from "../cms/schema.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Name the reason precisely instead of letting a 401 surface. Being logged out, holding a token
+ * that expired overnight and being logged into the wrong account all fail the same way over HTTP,
+ * and only one of them is what the user will guess.
+ */
 function config(): CmsConfig | null {
+  const account = process.env.PARITY_CMS_ACCOUNT;
+  const store = process.env.PARITY_CMS_STORE;
+  if (!account || !store) {
+    console.error(
+      chalk.red("Missing target. Set PARITY_CMS_ACCOUNT and PARITY_CMS_STORE (the store id, not the account).")
+    );
+    return null;
+  }
+  const state = sessionState(account);
+  if (state.status !== "ok" && state.status !== "env-token") {
+    console.error(chalk.red(sessionAdvice(state, account)));
+    return null;
+  }
   const cfg = cmsConfigFromEnv();
   if (!cfg) {
-    console.error(
-      chalk.red(
-        "Missing CMS config. Set PARITY_CMS_ACCOUNT and PARITY_CMS_STORE, and run `vtex login <account>` " +
-          "(or set PARITY_CMS_TOKEN)."
-      )
-    );
+    console.error(chalk.red("Could not read a VTEX token. Run `vtex login` or set PARITY_CMS_TOKEN."));
   }
   return cfg;
 }
@@ -74,13 +88,15 @@ export async function cmsDoctorCommand(
 ): Promise<number> {
   const cfg = config();
   if (!cfg) return 1;
+  const session = describeSession(sessionState(process.env.PARITY_CMS_ACCOUNT));
   try {
     const types = await getContentTypes(cfg, call);
     const drift = schemaDrift(types, opts.repo);
     if (opts.json) {
-      console.log(JSON.stringify({ contentTypes: Object.keys(types), drift }, null, 2));
+      console.log(JSON.stringify({ session, contentTypes: Object.keys(types), drift }, null, 2));
       return drift.some((d) => d.missingOnAccount.length > 0) ? 1 : 0;
     }
+    if (session) console.log(`${chalk.green("✓")} ${session}`);
     const blocking = drift.filter((d) => d.missingOnAccount.length > 0);
     if (blocking.length === 0) {
       console.log(`${chalk.green("✓")} every section the repo declares is published on the account`);
