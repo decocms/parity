@@ -12,6 +12,7 @@ check-name side.
 | HTTP status parity            | Routes that 404 / 500 in cand but worked in prod                       | seo |
 | Console errors                | New hydration mismatches, failed fetches, JS exceptions                | console |
 | HTML structural diff          | Section / structural-tag counts drifting beyond tolerance (image-count deltas are demoted to low+inconclusive with a unique-src count, since deferred-vs-SSR render strategies and carousel clones make raw `<img>` counts unreliable — #252) | html |
+| **Content structure** | Páginas editoriais (políticas, termos, institucionais): compara **estrutura**, não prosa — parágrafos, quebras de linha, trechos em negrito e links. Pega a migração que acerta as palavras e perde a marcação, invisível para um diff de caracteres. Conta negrito por intenção renderizada, não por tag: o VTEX IO emite `<span class="b">`, não `<strong>`. Não é check de estilo — para isso, `parity section --computed-styles` | html |
 | Meta / SEO parity             | `<title>`, `<meta description>`, canonical, og:*, twitter:*, JSON-LD   | seo |
 | **Visual diff (LLM Vision)**  | Sections missing, wrong hero, broken shelf, layout shifts              | visual |
 | Purchase journey              | Home → PLP → PDP → CEP → cart → checkout completes in both             | e2e |
