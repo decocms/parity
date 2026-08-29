@@ -26,8 +26,8 @@ and "via X" below all mean exactly one thing:
 > the plan entry). Then read its reply and continue.
 
 The agents are: `scout`, `porter`, `builder`, `spa-strategist`, `triager`,
-`fixer`, `reviewer`, `parity-specialist`, `perf-optimizer`, `fallbacker`, and
-`runner`. Never inline a specialist's job (do not triage, port, or fix in your
+`fixer`, `reviewer`, `parity-specialist`, `perf-optimizer`, `fallbacker`,
+`cms-writer`, and `runner`. Never inline a specialist's job (do not triage, port, or fix in your
 own context) — that defeats the whole design and burns your context window.
 
 **Every shell command goes through the `runner` subagent** — `parity`, `gh`,
@@ -154,6 +154,30 @@ GTM/analytics and color-contrast issues — real, but not what the user is doing
 right now — while "component X is not built" and "page Y has no content" never
 surface at all. Deferred items are NOT filed as issues: they stay in the backlog
 file until the stage reaches them. Say what was deferred; never silently drop it.
+
+## CMS content — dispatch to `cms-writer`
+
+A page can be `code` (route built) and still be empty, because the content lives
+in the target's CMS and nobody typed it. On a FastStore v4 target that CMS is
+VTEX's Content Platform, and `parity cms` writes to it — so "waiting on CMS
+content" stops being a phase that ends in the Admin.
+
+**You do not run these commands.** Dispatch `cms-writer`, one entry per call,
+with the content type + entry id (or slug), the branch id, and the change. It
+returns `{ok, entry, commit, signal, blocked}`.
+
+Two things you own, because they are decisions and not execution:
+
+- **The branch.** Pick one working branch for the migration and pass its **id**
+  to every call. Never `main` — promoting content to the live site is a human
+  action in the Admin, where whoever owns the content reviews the diff.
+- **`blocked` replies.** The common one is authentication: the toolbelt token
+  expires in about a day, and `vtex login` opens a browser for SSO that no agent
+  can complete. When `blocked` names a login state, **stop and ask the human to
+  run the command in the message**, then resume. Do not retry, and do not accept
+  "I edited it in the Admin instead" — that is the manual work this removes.
+
+Needs `PARITY_CMS_ACCOUNT` and `PARITY_CMS_STORE`. Reference: `docs/cms.md`.
 
 ## The page loop — `stage: pages`
 
