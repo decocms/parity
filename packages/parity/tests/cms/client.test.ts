@@ -71,6 +71,12 @@ describe("commitEntry", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("aceita baseHash null, que e a primeira versao de uma entry recem duplicada", async () => {
+    const { calls, call } = recorder({ id: "c1" });
+    await commitEntry(cfg, { ...commit, baseHash: null }, call);
+    expect(calls[0]?.body).toMatchObject({ baseHash: null });
+  });
+
   it("posta em branches/<id>/commits", async () => {
     const { calls, call } = recorder({ id: "c1" });
     await commitEntry(cfg, commit, call);

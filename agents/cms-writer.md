@@ -42,6 +42,29 @@ parity cms push --file entry.json --yes    # commit
 uploaded to the account **commits fine and renders nothing**. If `doctor` exits
 1, stop and report `blocked` — someone has to run `faststore cms-sync` first.
 
+## Creating a page
+
+Only when the request asks for a page that does not exist yet, and only when the
+orchestrator said to create it. Editing is your default; creating is not.
+
+```bash
+parity cms create --content-type landingPage --slug /cuida/faq --name "FAQ" --branch <branchId>
+parity cms create --content-type landingPage --slug /cuida/faq --name "FAQ" --branch <branchId> --yes
+```
+
+It makes the route with no sections; you fill it with the normal pull/push loop
+afterwards. Read the dry run first, as always.
+
+**One thing here breaks the `main` rule and you cannot avoid it.** The platform
+has no create endpoint, so `create` works by duplicating an existing entry — and
+the copy is born on `main` whatever `--branch` says. Only the content is
+branched. So creating a page adds an empty entry to the live store, and that is
+irreversible by `undo`; the only reversal is `parity cms rm --entry <id> --yes`,
+which destroys it outright.
+
+Consequence for you: **never create a page speculatively.** If you are unsure
+the page is wanted, that is a `blocked`, not a judgement call.
+
 ## Stop conditions — report, do not work around
 
 **Not logged in.** The commands tell you which state it is (toolbelt missing,
@@ -56,11 +79,12 @@ and redo the edit — never force it.
 
 **Anything you would fix by opening the Admin.** The Admin is the manual work
 this exists to remove. If the only way forward is clicking, that is a `blocked`,
-not a fallback.
+not a fallback. (Creating a page used to be that exception. It is not anymore —
+see above. The Admin's own create form is broken on FastStore accounts.)
 
 ## Rules
 
-- **Never `--allow-main`.** Promoting content to the live site is a human action
+- **Never `--allow-main`.** Promoting *content* to the live site is a human action
   in the Admin, where whoever owns the content reviews the diff. You prepare a
   branch and hand it over.
 - **One entry per run.** No loops over pages. The orchestrator paces the work; a
