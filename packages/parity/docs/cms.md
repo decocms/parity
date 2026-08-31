@@ -146,6 +146,25 @@ That keeps the CMS procedure out of the main skill's context, and it puts the st
 (login, stale hash, unpublished section) in an agent whose whole job is to report them rather than
 work around them. See `agents/cms-writer.md`.
 
+## Creating a page is not here yet
+
+`push` edits entries that exist. Pointing it at an entry id nobody has used fails on the read it
+does first — it fetches the current version to compare `baseHash`, and there is no version to fetch:
+
+```
+GET .../landingPage/entries/<new-id>/last-version?branchId=main
+404 ENTRY_VERSIONS_NOT_FOUND
+```
+
+Forcing past that read does not help: the commit endpoint itself answers `404 ENTRY_NOT_FOUND` for
+an unknown entry, so creation is a separate call this client has not mapped. Probing the obvious
+shapes (`POST …/entries`, `POST …/{contentType}/entries`, `PUT …/entries/{id}`) all answer
+`400 Missing account name in URL parameters`, which on this API is a routing miss dressed as a bad
+request — those routes do not exist.
+
+**So: create the page once in the Admin — slug and title, no sections — and everything after that
+is `parity cms`.** `pull` then finds it and the normal loop applies.
+
 ## Not here on purpose
 
 **Merging to `main`.** The API supports it; this CLI does not expose it. Promoting content to the
