@@ -82,21 +82,21 @@ describe("cms push — guardrails", () => {
 
   it("recusa baseHash velho em vez de sobrescrever a edic,ao de outro", async () => {
     const { calls, call } = server({ remoteHash: "hash2" });
-    const code = await cmsPushCommand({ file: fixture(), author: "a@b.com", yes: true }, call);
+    const code = await cmsPushCommand({ file: fixture(), yes: true, author: "a@b.com" }, call);
     expect(code).toBe(1);
     expect(calls.some((c) => c.method === "POST")).toBe(false);
   });
 
   it("recusa section que a conta nao publicou — commitaria e renderizaria nada", async () => {
     const { calls, call } = server({ published: ["CategoryBlocks"] });
-    const code = await cmsPushCommand({ file: fixture(), author: "a@b.com", yes: true }, call);
+    const code = await cmsPushCommand({ file: fixture(), yes: true, author: "a@b.com" }, call);
     expect(code).toBe(1);
     expect(calls.some((c) => c.method === "POST")).toBe(false);
   });
 
   it("commita quando tudo passa", async () => {
     const { calls, call } = server();
-    const code = await cmsPushCommand({ file: fixture(), author: "a@b.com", yes: true }, call);
+    const code = await cmsPushCommand({ file: fixture(), yes: true, author: "a@b.com" }, call);
     expect(code).toBe(0);
     const post = calls.find((c) => c.method === "POST");
     expect(post?.path).toContain(`/branches/${BRANCH}/commits`);
@@ -176,7 +176,7 @@ describe("cms push — author", () => {
 describe("cms create", () => {
   it("e dry run por padrao: nao duplica sem --yes", async () => {
     const { calls, call } = createServer();
-    const code = await cmsCreateCommand({ contentType: "landingPage", slug: "/x", branch: BRANCH, author: "a@b.com" }, call);
+    const code = await cmsCreateCommand({ contentType: "landingPage", slug: "/x", branch: BRANCH }, call);
     expect(code).toBe(0);
     expect(calls.some((c) => c.path.includes("/duplicate"))).toBe(false);
   });

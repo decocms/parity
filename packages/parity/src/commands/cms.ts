@@ -284,8 +284,6 @@ export async function cmsPushCommand(
   if (local instanceof Error) return fail(local);
   const branch = resolveBranch(opts.branch ?? local.branchId, Boolean(opts.allowMain));
   if (branch instanceof Error) return fail(branch);
-  const author = resolveAuthor(opts.author);
-  if (author instanceof Error) return fail(author);
 
   try {
     const types = await getContentTypes(cfg, call);
@@ -318,6 +316,9 @@ export async function cmsPushCommand(
       console.log(chalk.dim(`  branch ${branch} · entry ${local.entryId} · ${local.contentType}`));
       return 0;
     }
+
+    const author = resolveAuthor(opts.author);
+    if (author instanceof Error) return fail(author);
 
     const backup = join(
       "parity-output",
@@ -428,8 +429,6 @@ export async function cmsCreateCommand(
   if (!opts.slug.startsWith("/")) {
     return fail(new Error(`Slug must start with "/" — got "${opts.slug}".`));
   }
-  const author = resolveAuthor(opts.author);
-  if (author instanceof Error) return fail(author);
   const name = opts.name ?? opts.slug;
 
   try {
@@ -482,6 +481,11 @@ export async function cmsCreateCommand(
       console.log(chalk.dim(`  copies entry ${template} · content committed on ${branch}`));
       return 0;
     }
+
+    // After the dry run, because a dry run writes nothing and has no author; before the duplicate,
+    // so a rejected author never leaves a copy behind to roll back.
+    const author = resolveAuthor(opts.author);
+    if (author instanceof Error) return fail(author);
 
     await duplicateEntry(cfg, { entryId: template }, call);
     const after = await listEntries(cfg, { contentType: opts.contentType }, call);
