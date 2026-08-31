@@ -186,7 +186,14 @@ export interface CommitResult {
 }
 
 /**
- * Creates and updates — a new page is the same call with an entryId nobody has used yet.
+ * Updates an entry that already exists. It does NOT create one.
+ *
+ * That distinction was wrong here until it was tested: committing with an entryId nobody has used
+ * answers `404 ENTRY_NOT_FOUND`, even with a payload the endpoint otherwise accepts (verified
+ * against a live account with `identifierKeys: null`, `search_keywords: []` and locale-switched
+ * `data`). Creating an entry is a separate call this client has not mapped — the Admin does it
+ * from a different screen. Until then, a new page is created once in the Admin and everything
+ * after that is `parity cms`.
  *
  * `commitType` is deliberately absent. The Admin only sends it when restoring a version
  * (`"restored"`); sending `"update"` on a normal save fails with a 500 from the INSERT into the
