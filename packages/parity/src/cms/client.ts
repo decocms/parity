@@ -31,7 +31,7 @@ export interface CmsConfig {
 
 export interface CmsRequest {
   path: string;
-  method?: "GET" | "POST" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "DELETE";
   body?: unknown;
 }
 
@@ -170,7 +170,8 @@ export interface CommitInput {
   contentTypeId: string;
   entryId: string;
   entryName: string | null;
-  baseHash: string;
+  /** `null` only for an entry that has no versions yet — see `duplicateEntry`. */
+  baseHash: string | null;
   data: Record<string, unknown>;
   message: string;
   author: string;
@@ -191,9 +192,7 @@ export interface CommitResult {
  * That distinction was wrong here until it was tested: committing with an entryId nobody has used
  * answers `404 ENTRY_NOT_FOUND`, even with a payload the endpoint otherwise accepts (verified
  * against a live account with `identifierKeys: null`, `search_keywords: []` and locale-switched
- * `data`). Creating an entry is a separate call this client has not mapped — the Admin does it
- * from a different screen. Until then, a new page is created once in the Admin and everything
- * after that is `parity cms`.
+ * `data`). The entry has to exist first, and `duplicateEntry` is how it comes to exist.
  *
  * `commitType` is deliberately absent. The Admin only sends it when restoring a version
  * (`"restored"`); sending `"update"` on a normal save fails with a 500 from the INSERT into the
@@ -204,7 +203,9 @@ export async function commitEntry(
   input: CommitInput,
   call: CmsCaller = callCms
 ): Promise<CommitResult> {
-  if (!input.baseHash) {
+  // `null` is the one legitimate absence: an entry that has no version yet. Missing or empty is a
+  // caller that lost the hash, and committing without it would clobber whatever is there.
+  if (input.baseHash === undefined || input.baseHash === "") {
     throw new Error("commitEntry: baseHash is required — it is the lock against clobbering a concurrent edit");
   }
   return call<CommitResult>(cfg, {
@@ -233,6 +234,50 @@ export async function undoEntry(
   await call(cfg, {
     path: `${MANAGE}/${cfg.account}/${cfg.store}/branches/${args.branchId}/entries/${args.entryId}/undo`,
     method: "DELETE",
+  });
+}
+
+/**
+ * The Content Platform has no create-entry endpoint. Duplicating one is the only way an entry
+ * comes into existence — the Admin's own "create" screen is a Next.js form that crashes on this
+ * account (React #185), so this is not a workaround for a broken UI, it is the whole API.
+ *
+ * The copy lands on `main` named `"<source> - Copy"`, carrying the source's versions. It answers
+ * `200` with an empty body, so the caller has to diff the entry list to learn the new id.
+ */
+export async function duplicateEntry(
+  cfg: CmsConfig,
+  args: { entryId: string },
+  call: CmsCaller = callCms
+): Promise<void> {
+  await call(cfg, {
+    path: `${MANAGE}/${cfg.account}/${cfg.store}/entries/${args.entryId}/duplicate`,
+    method: "POST",
+  });
+}
+
+/** Destroys an entry and every version of it, on every branch. The rollback for a failed create. */
+export async function deleteEntry(
+  cfg: CmsConfig,
+  args: { entryId: string },
+  call: CmsCaller = callCms
+): Promise<void> {
+  await call(cfg, {
+    path: `${MANAGE}/${cfg.account}/${cfg.store}/entries/${args.entryId}`,
+    method: "DELETE",
+  });
+}
+
+/** The entry's display name in the Admin listing — not the slug, which lives in the version data. */
+export async function renameEntry(
+  cfg: CmsConfig,
+  args: { entryId: string; name: string },
+  call: CmsCaller = callCms
+): Promise<void> {
+  await call(cfg, {
+    path: `${MANAGE}/${cfg.account}/${cfg.store}/entries/${args.entryId}/rename`,
+    method: "PUT",
+    body: { name: args.name },
   });
 }
 

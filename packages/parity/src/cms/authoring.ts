@@ -8,9 +8,9 @@
  *     { "$fnType": "switch", "varyByKeys": ["locale"], "cases": null,
  *       "defaultCase": "https://…png", "configurationSourceType": "contexts" }
  *
- * Pulling from delivery and committing that back does not work. These helpers only *read* the
- * authoring shape so diffs and listings are legible; nothing here rewrites it. Converting a
- * captured VTEX IO block tree into it is a separate job with its own reviewable plan.
+ * Pulling from delivery and committing that back does not work. These helpers read the authoring
+ * shape so diffs and listings are legible, and `localeSwitch` writes the one leaf a new entry
+ * needs. Converting a captured VTEX IO block tree into it is a separate job with its own plan.
  */
 
 /** A locale switch, or a plain value that was never wrapped. */
@@ -69,4 +69,18 @@ export function summarizeSections(data: Record<string, unknown> | undefined): st
       .map(([k, v]) => `${k}=${collectionToArray(v).length}`);
     return counts.length > 0 ? `${s.componentKey} (${counts.join(", ")})` : s.componentKey;
   });
+}
+
+/**
+ * Wrap a plain value as the locale switch every authoring leaf has to be. `defaultCase` is the
+ * value every locale falls back to, which is what a page with no per-locale overrides wants.
+ */
+export function localeSwitch<T>(value: T): Record<string, unknown> {
+  return {
+    $fnType: "switch",
+    varyByKeys: ["locale"],
+    cases: null,
+    defaultCase: value,
+    configurationSourceType: "contexts",
+  };
 }

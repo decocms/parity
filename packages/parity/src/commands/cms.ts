@@ -20,14 +20,17 @@ import {
   callCms,
   cmsConfigFromEnv,
   commitEntry,
+  deleteEntry,
+  duplicateEntry,
   getContentTypes,
   getLastVersion,
   listBranches,
   listEntries,
+  renameEntry,
   undoEntry,
 } from "../cms/client.ts";
-import { sectionsOf, summarizeSections } from "../cms/authoring.ts";
-import { describeSession, sessionAdvice, sessionState } from "../cms/session.ts";
+import { localeSwitch, sectionsOf, summarizeSections, unwrapValue } from "../cms/authoring.ts";
+import { describeSession, readVtexSession, sessionAdvice, sessionState } from "../cms/session.ts";
 import { schemaDrift, unrenderableSections } from "../cms/schema.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -61,6 +64,24 @@ function config(): CmsConfig | null {
 function fail(err: unknown): number {
   console.error(chalk.red(err instanceof Error ? err.message : String(err)));
   return 1;
+}
+
+/**
+ * The commit author, which the API insists is an email address and rejects anything else for.
+ *
+ * Getting this wrong costs more than it should: a non-email author answers `400 VALIDATION_ERROR
+ * "Invalid request data"`, naming no field, so it reads as a malformed `data` payload and sends you
+ * auditing the content. Default to whoever is logged in, since that is who the commit is really by.
+ */
+function resolveAuthor(explicit: string | undefined): string | Error {
+  const author = explicit ?? readVtexSession()?.login;
+  if (!author) {
+    return new Error("Could not tell who is committing. Pass --author <email>.");
+  }
+  if (!author.includes("@")) {
+    return new Error(`--author must be an email address — "${author}" is rejected as invalid request data.`);
+  }
+  return author;
 }
 
 /**
@@ -296,6 +317,9 @@ export async function cmsPushCommand(
       return 0;
     }
 
+    const author = resolveAuthor(opts.author);
+    if (author instanceof Error) return fail(author);
+
     const backup = join(
       "parity-output",
       "cms-backups",
@@ -314,7 +338,7 @@ export async function cmsPushCommand(
         baseHash: local.baseHash,
         data: local.data,
         message: opts.message ?? "parity cms push",
-        author: opts.author ?? "parity",
+        author,
         identifierKeys: local.identifierKeys,
         searchKeywords: local.searchKeywords,
       },
@@ -348,6 +372,194 @@ export async function cmsUndoCommand(
   try {
     await undoEntry(cfg, { branchId: branch, entryId: opts.entry }, call);
     console.log(`${chalk.green("✓")} ${opts.entry} reverted on ${branch}`);
+    return 0;
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Whether an entry answers no route on `main` — the only kind `create` may copy.
+ *
+ * A duplicate inherits the source's versions and is born on `main` whatever branch the new content
+ * is committed to. Copy a page with a slug and the live store gains a second entry answering that
+ * slug, which this command cannot undo because its own commit lands on the branch. Copy one with
+ * an empty slug and the copy is unreachable until the commit gives it its own.
+ *
+ * Sections deliberately do not count. The platform's own new-page template ships a placeholder
+ * `BannerText` and `FastStore Starter` SEO, and the first commit overwrites all of it — what would
+ * make a copy dangerous is a live route, not leftover content nobody can reach.
+ */
+async function hasNoRoute(cfg: CmsConfig, contentType: string, entryId: string, call: CmsCaller): Promise<boolean> {
+  const version = await getLastVersion(cfg, { contentType, entryId, branchId: "main" }, call).catch(() => null);
+  if (!version) return true;
+  return !unwrapValue(version.data?.slug);
+}
+
+/**
+ * Create a page — a route the storefront will resolve — and nothing else. The sections stay empty
+ * on purpose: `create` makes the address, `pull`/`push` fills it, which keeps the reviewable diff
+ * of the content separate from the irreversible act of adding a page.
+ *
+ * There is no create-entry endpoint on the Content Platform, so this duplicates an existing entry
+ * of the same content type and then overwrites it. Two consequences worth knowing before reading
+ * the code: the copy is born on `main` regardless of `--branch` (only its *content* is branched),
+ * and the API answers the duplicate with an empty body, so the new id has to be found by diffing
+ * the entry list. Anything that fails after the copy exists deletes it again.
+ */
+export async function cmsCreateCommand(
+  opts: {
+    contentType: string;
+    slug: string;
+    name?: string;
+    branch?: string;
+    from?: string;
+    message?: string;
+    author?: string;
+    yes?: boolean;
+    allowMain?: boolean;
+    json?: boolean;
+  },
+  call: CmsCaller = callCms
+): Promise<number> {
+  const cfg = config();
+  if (!cfg) return 1;
+  const branch = resolveBranch(opts.branch, Boolean(opts.allowMain));
+  if (branch instanceof Error) return fail(branch);
+  if (!opts.slug.startsWith("/")) {
+    return fail(new Error(`Slug must start with "/" — got "${opts.slug}".`));
+  }
+  const name = opts.name ?? opts.slug;
+
+  try {
+    const types = await getContentTypes(cfg, call);
+    const type = types[opts.contentType];
+    if (!type) {
+      return fail(
+        new Error(`No content type "${opts.contentType}" on this store. Known: ${Object.keys(types).sort().join(", ")}.`)
+      );
+    }
+    if (type.$singleton) {
+      return fail(
+        new Error(`"${opts.contentType}" is a singleton — its one entry already exists. Edit it with pull/push.`)
+      );
+    }
+
+    const before = await listEntries(cfg, { contentType: opts.contentType }, call);
+    if (before.some((e) => e.name === name)) {
+      return fail(new Error(`An entry named "${name}" already exists. Pick another --name, or edit that one.`));
+    }
+    let template: string | null = null;
+    if (opts.from) {
+      if (!(await hasNoRoute(cfg, opts.contentType, opts.from, call))) {
+        return fail(
+          new Error(
+            `--from ${opts.from} answers a slug on main. A copy inherits it, so this would put a second entry on the live store at that same route. Point --from at an entry with no slug.`
+          )
+        );
+      }
+      template = opts.from;
+    } else {
+      for (const entry of before) {
+        if (await hasNoRoute(cfg, opts.contentType, entry.id, call)) {
+          template = entry.id;
+          break;
+        }
+      }
+    }
+    if (!template) {
+      return fail(
+        new Error(
+          `No routeless "${opts.contentType}" entry to copy. The platform can only create by duplicating, and a copy inherits the source's slug on main — so copying a live page would put a second entry on that same route. Leave one entry of this type with an empty slug for this to copy from.`
+        )
+      );
+    }
+
+    if (!opts.yes) {
+      console.log(chalk.yellow("dry run — nothing written. Pass --yes to create."));
+      console.log(`  ${opts.contentType} ${chalk.bold(opts.slug)} named "${name}"`);
+      console.log(chalk.dim(`  copies entry ${template} · content committed on ${branch}`));
+      return 0;
+    }
+
+    // After the dry run, because a dry run writes nothing and has no author; before the duplicate,
+    // so a rejected author never leaves a copy behind to roll back.
+    const author = resolveAuthor(opts.author);
+    if (author instanceof Error) return fail(author);
+
+    await duplicateEntry(cfg, { entryId: template }, call);
+    const after = await listEntries(cfg, { contentType: opts.contentType }, call);
+    const known = new Set(before.map((e) => e.id));
+    const created = after.filter((e) => !known.has(e.id));
+    if (created.length !== 1) {
+      return fail(
+        new Error(
+          `Duplicated ${template} but found ${created.length} new entries instead of 1 — refusing to guess which is mine. Check the Admin listing.`
+        )
+      );
+    }
+    const entryId = created[0]!.id;
+
+    try {
+      await renameEntry(cfg, { entryId, name }, call);
+      // The copy inherits the template's versions, so its own head — not the template's — is the
+      // baseHash. A template that never had a version leaves the copy at null, its first commit.
+      const head = await getLastVersion(cfg, { contentType: opts.contentType, entryId, branchId: branch }, call)
+        .then((v) => v.baseHash)
+        .catch(() => null);
+      const commit = await commitEntry(
+        cfg,
+        {
+          branchId: branch,
+          contentTypeId: opts.contentType,
+          entryId,
+          entryName: name,
+          baseHash: head,
+          data: {
+            slug: localeSwitch(opts.slug),
+            seo: { slug: localeSwitch(opts.slug), title: localeSwitch(name), description: localeSwitch("") },
+            sections: { $fnType: "array", values: {} },
+          },
+          message: opts.message ?? `parity cms create ${opts.slug}`,
+          author,
+          identifierKeys: null,
+          searchKeywords: null,
+        },
+        call
+      );
+      if (opts.json) {
+        console.log(JSON.stringify({ entryId, slug: opts.slug, branch, commit }, null, 2));
+        return 0;
+      }
+      console.log(`${chalk.green("✓")} ${opts.slug} — entry ${entryId}, commit ${commit.id} on ${branch}`);
+      console.log(chalk.dim(`  fill it:  parity cms pull --entry ${entryId} --content-type ${opts.contentType} --branch ${branch}`));
+      console.log(chalk.dim(`  undo it:  parity cms rm --entry ${entryId} --yes`));
+      return 0;
+    } catch (err) {
+      // The copy is real content on main the moment it exists. Leaving a half-made page behind is
+      // worse than failing, so unwind before reporting.
+      await deleteEntry(cfg, { entryId }, call).catch(() => {});
+      return fail(err);
+    }
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Deletes an entry outright — every version, every branch. `undo` is the reversible one. */
+export async function cmsRmCommand(
+  opts: { entry: string; yes?: boolean },
+  call: CmsCaller = callCms
+): Promise<number> {
+  const cfg = config();
+  if (!cfg) return 1;
+  if (!opts.yes) {
+    console.log(chalk.yellow(`dry run — would destroy ${opts.entry} on every branch. Pass --yes.`));
+    return 0;
+  }
+  try {
+    await deleteEntry(cfg, { entryId: opts.entry }, call);
+    console.log(`${chalk.green("✓")} ${opts.entry} deleted`);
     return 0;
   } catch (err) {
     return fail(err);

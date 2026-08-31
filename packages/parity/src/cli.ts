@@ -5,11 +5,13 @@ import { benchmarkCommand } from "./commands/benchmark.ts";
 import { cacheCommand } from "./commands/cache.ts";
 import { checkCommand } from "./commands/check.ts";
 import {
+  cmsCreateCommand,
   cmsDiffCommand,
   cmsDoctorCommand,
   cmsLsCommand,
   cmsPullCommand,
   cmsPushCommand,
+  cmsRmCommand,
   cmsUndoCommand,
 } from "./commands/cms.ts";
 import { compareCommand } from "./commands/compare.ts";
@@ -600,7 +602,7 @@ program
       .requiredOption("--file <path>", "File written by `parity cms pull`")
       .option("--branch <id>", "Target branch (default: the branch in the file)")
       .option("--message <text>", "Commit message", "parity cms push")
-      .option("--author <email>", "Commit author", "parity")
+      .option("--author <email>", "Commit author (default: the logged-in VTEX user)")
       .option("--yes", "Actually write. Without it, this is a dry run.", false)
       .option("--allow-main", "Permit committing straight to main", false)
       .option("--json", "Emit structured JSON instead of human-readable text", false)
@@ -616,6 +618,47 @@ program
             json: Boolean(opts.json),
           }),
         );
+      }),
+  )
+  .addCommand(
+    new Command("create")
+      .description(
+        "Create a page at a slug, with no sections — `pull`/`push` fills it. Dry run unless --yes. The platform has no create endpoint, so this copies an existing entry of the same type and deletes the copy if anything downstream fails.",
+      )
+      .requiredOption("--content-type <id>", "Content type id, e.g. landingPage")
+      .requiredOption("--slug <path>", "Route the page answers on, e.g. /cuida/preguntas-frecuentes")
+      .option("--name <text>", "Name in the Admin listing (default: the slug)")
+      .option("--branch <id>", "Branch to commit the page on")
+      .option("--from <id>", "Entry to copy (default: any entry of the same content type)")
+      .option("--message <text>", "Commit message")
+      .option("--author <email>", "Commit author (default: the logged-in VTEX user)")
+      .option("--yes", "Actually create. Without it, this is a dry run.", false)
+      .option("--allow-main", "Permit committing straight to main", false)
+      .option("--json", "Emit structured JSON instead of human-readable text", false)
+      .action(async (opts) => {
+        process.exit(
+          await cmsCreateCommand({
+            contentType: opts.contentType,
+            slug: opts.slug,
+            name: opts.name,
+            branch: opts.branch,
+            from: opts.from,
+            message: opts.message,
+            author: opts.author,
+            yes: Boolean(opts.yes),
+            allowMain: Boolean(opts.allowMain),
+            json: Boolean(opts.json),
+          }),
+        );
+      }),
+  )
+  .addCommand(
+    new Command("rm")
+      .description("Destroy an entry and every version of it, on every branch. Dry run unless --yes.")
+      .requiredOption("--entry <id>", "Entry id")
+      .option("--yes", "Actually delete. Without it, this is a dry run.", false)
+      .action(async (opts) => {
+        process.exit(await cmsRmCommand({ entry: opts.entry, yes: Boolean(opts.yes) }));
       }),
   )
   .addCommand(

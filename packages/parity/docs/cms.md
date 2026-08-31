@@ -146,24 +146,60 @@ That keeps the CMS procedure out of the main skill's context, and it puts the st
 (login, stale hash, unpublished section) in an agent whose whole job is to report them rather than
 work around them. See `agents/cms-writer.md`.
 
-## Creating a page is not here yet
+## Creating a page
 
-`push` edits entries that exist. Pointing it at an entry id nobody has used fails on the read it
-does first — it fetches the current version to compare `baseHash`, and there is no version to fetch:
-
-```
-GET .../landingPage/entries/<new-id>/last-version?branchId=main
-404 ENTRY_VERSIONS_NOT_FOUND
+```bash
+parity cms create --content-type landingPage --slug /cuida/preguntas-frecuentes \
+  --name "Preguntas Frecuentes" --branch <id> --yes
 ```
 
-Forcing past that read does not help: the commit endpoint itself answers `404 ENTRY_NOT_FOUND` for
-an unknown entry, so creation is a separate call this client has not mapped. Probing the obvious
-shapes (`POST …/entries`, `POST …/{contentType}/entries`, `PUT …/entries/{id}`) all answer
-`400 Missing account name in URL parameters`, which on this API is a routing miss dressed as a bad
-request — those routes do not exist.
+That makes the route and nothing else — no sections. `pull` then finds it and the normal edit loop
+applies. The split is deliberate: adding a page to a live store is irreversible in a way that
+editing one is not, so it is its own command with its own dry run.
 
-**So: create the page once in the Admin — slug and title, no sections — and everything after that
-is `parity cms`.** `pull` then finds it and the normal loop applies.
+### Why it works by copying
+
+**The Content Platform has no create-entry endpoint.** Duplicating an existing entry is the only
+call that brings one into existence, and the Admin's own create screen is a Next.js form that
+crashes before it can save (`React #185`, a render loop) — so this is not a workaround for a broken
+UI, it is the entire API. The probes that look like they should work all answer `400 Missing account
+name in URL parameters`, which on this API is a routing miss dressed as a bad request:
+
+```
+POST …/entries              POST …/{contentType}/entries              PUT …/entries/{id}
+```
+
+What does exist:
+
+```
+POST   …/{account}/{store}/entries/{id}/duplicate   → 200, empty body, copy named "<source> - Copy"
+PUT    …/{account}/{store}/entries/{id}/rename      → the Admin listing name
+DELETE …/{account}/{store}/entries/{id}             → destroys it, every version, every branch
+```
+
+Three consequences the command has to absorb, and you should know about:
+
+- **The copy is born on `main`**, whatever `--branch` says. Only its *content* is branched. There is
+  no branch in the duplicate URL and no header carrying one.
+- **The duplicate answers with an empty body**, so the new id is found by diffing the entry list
+  before and after. If that diff is not exactly one new entry the command stops rather than guess.
+- **It will only copy an entry with no slug.** A copy inherits the source's slug on `main`, so
+  duplicating a live page would put a second entry on that same route — and `create` cannot undo
+  that, because its own commit lands on the branch. Leave one routeless entry of each type around
+  for this to copy from; the platform's default new-page entry (`slug: ""`, a placeholder
+  `BannerText`) is exactly that, and the first commit overwrites its content anyway.
+- **A store with zero entries of the type cannot bootstrap one** — there is nothing to copy. That
+  first entry has to come from somewhere else.
+
+Anything that fails after the copy exists deletes it again, because a half-made page on `main` is
+worse than a failed command.
+
+## `author` has to be an email
+
+The commit endpoint rejects any author that is not an email address, and it does so as
+`400 VALIDATION_ERROR "Invalid request data"` — naming no field. That reads like a malformed `data`
+payload and sends you auditing the content, which is why `push` and `create` default the author to
+the logged-in VTEX user and refuse a non-email `--author` before going near the network.
 
 ## Not here on purpose
 
