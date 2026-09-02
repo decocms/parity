@@ -43,3 +43,24 @@ Return JSON: `{"ok": true, "files": ["<rel path>", ...], "gates": "pass|fail", "
    when the section sits inside a `webRendering/Lazy.tsx` wrapper (where
    `data-manifest-key` is not on the rendered root), and gives e2e tests a
    selector that survives CSS refactors instead of hashed classes / nth-child.
+7. **Responsive layout is CSS, not JS** — render both variants and let Tailwind
+   pick (`md:hidden` / `hidden md:flex`); two image sources = `<picture>` +
+   `<source media>`. Never branch markup on `useDevice`/`isMobile`: UA-derived HTML
+   behind a device-blind edge cache serves the mobile page to desktop visitors, and
+   the client re-render has no request context, so it mismatches and shifts. Full
+   reasoning + the one legitimate exception (server-injected `/** @hide */` prop):
+   `skills/knowledge/tanstack/responsive-device.md`.
+8. **Images are born measured** — every `<img>`/`<picture>` gets `width` + `height`.
+   The first above-the-fold hero (carousel `index === 0` included) is
+   `loading="eager"` + `fetchpriority="high"`; everything else `loading="lazy"`.
+   Getting this right at port time is free; getting it flagged by Lighthouse later
+   costs a whole issue → fix → re-score round.
+9. **Reserve the space** — banners, carousels and deferred sections need an
+   aspect-ratio box or `min-h-[Npx]` (with a `md:` variant when the desktop height
+   differs). A section that renders blank until hydration IS the CLS.
+10. **The schema is an admin interface, not a type** — `@title` on every field,
+   group past ~8 fields, a union instead of a free string when the values are known,
+   and no visible copy hardcoded past ~25 chars (it belongs in the schema so the
+   client can edit it). This is the exact ruler `triager` grades you with
+   (`agents/triager.md`, editability + CMS-legibility checks) — meet it now, not
+   after it becomes an issue.

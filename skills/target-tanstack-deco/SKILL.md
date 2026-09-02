@@ -35,6 +35,12 @@ After adding a section: `bun run predev` regenerates manifests.
 Tailwind utilities + CSS Modules for overrides. **NOT** SCSS tokens like FastStore.
 Captured Tailwind classes from the bundle are the starting point.
 
+**Responsive is CSS, never a JS device branch** — `md:hidden` / `hidden md:flex`,
+`<picture>` + `<source media>` for two image sources. A `useDevice`/`isMobile`
+branch poisons the edge cache and mismatches on hydration; see
+`skills/knowledge/tanstack/responsive-device.md` for the reasoning and the one
+legitimate exception.
+
 ## Commerce
 
 ```ts
@@ -51,6 +57,11 @@ import { useProduct } from "@decocms/apps-vtex/hooks/useProduct.ts";
 
 ## References (load only what you need)
 
+- `skills/knowledge/tanstack/responsive-device.md` — device/responsive, CLS, cache
+- `skills/knowledge/tanstack/jsx-migration.md` — Preact → React JSX
+- `skills/knowledge/tanstack/react-hooks-patterns.md` — signals → React state
+- `skills/knowledge/perf/payload-trim.md` — heavy SSR payload
+- `skills/knowledge/perf/n-plus-1.md` — API call per item in a loader
 - `skills/knowledge/tanstack/hydration-fixes.md`
 - `skills/knowledge/tanstack/navigation.md`
 - `skills/knowledge/tanstack/search.md`

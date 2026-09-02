@@ -154,14 +154,20 @@ configured programmatically:
 
 ---
 
-## 7. `perf/n-plus-1.md` and `perf/variant-selection.md`
+## 7. `perf/n-plus-1.md` and `perf/variant-selection.md` — RESOLVED
 
-These two knowledge files were listed in `knowledge/INDEX.md` but not written
-(they're in the index as forward references). Write them:
-- `n-plus-1.md`: from `decocms/skills deco-loader-n-plus-1-detector` + the
-  batching patterns from `@decocms/apps-vtex`.
-- `variant-selection.md`: from `decocms/skills deco-variant-selection-perf` +
-  the `replaceState` pattern.
+**RESOLVED** (v0.32.0): both written, condensed from
+`deco-loader-n-plus-1-detector` and `deco-variant-selection-perf`. `n-plus-1.md`
+leads with the "is this data already in the product object?" table (most N+1s
+delete rather than batch); `variant-selection.md` splits same-product
+(`replaceState`, zero fetch) from cross-product, and kills the
+`preload="intent"` double-fetch. `triager` check 15 now greps for the N+1
+pattern, so the doc has a consumer.
+
+Still open in the same area (no reported symptom yet, so not written):
+a SEO/head/JSON-LD knowledge doc, and analytics/GTM porting guidance —
+both confirmed absent, both currently only measured (`parity` checks), never
+explained to an agent that has to write the code.
 
 ---
 
