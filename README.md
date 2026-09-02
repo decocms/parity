@@ -29,6 +29,17 @@ claude plugin marketplace add decocms/parity
 claude plugin install parity@parity
 ```
 
+To update later:
+
+```bash
+claude plugin marketplace update parity   # refresh the marketplace clone
+claude plugin update parity@parity        # then update the plugin
+```
+
+Note the asymmetry: the *marketplace* is `parity`, the *plugin* is
+`parity@parity`. `claude plugin update parity` fails with "Plugin not found".
+Restart Claude Code afterwards to load the new version.
+
 Confirm it installed:
 
 ```bash

@@ -260,7 +260,7 @@ jobs:
                    },
                    {
                      name: "Plugin do Claude Code",
-                     value: "```\nclaude plugin marketplace update parity\nclaude plugin update parity\n```\nReinicie o Claude Code para aplicar."
+                     value: "```\nclaude plugin marketplace update parity\nclaude plugin update parity@parity\n```\nReinicie o Claude Code para aplicar."
                    }
                  ]
                }]
