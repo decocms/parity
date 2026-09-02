@@ -24,6 +24,9 @@ runtime (`useTranslation`), worked `src/components/sections/` patterns, `cms/fas
 schemas + whitelists, `scripts/` (sort-cms-whitelists, guards), `docs/` playbooks, and
 `.github/` gates — so ports **compose over shared organisms/atoms instead of reinventing**.
 
+The repo itself (does it exist? create it private?) is `repo-setup` step 0 in
+`skills/migration-orchestrator/SKILL.md` — check before copying anything.
+
 Do NOT use the bare `vtex-sites/starter.store` unless the template is unavailable — it
 has none of the above (only `src/fonts` + `src/themes`), so ports come out monolithic
 and can't close the 3-point invariant cleanly (there's no `cms/` tree to write into).

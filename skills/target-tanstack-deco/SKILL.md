@@ -16,6 +16,9 @@ remote). Do **not** use `gh repo create --template` — the template keeps
 improving, and each new migration should pick up those improvements by copying
 its current `main`, not forking a point-in-time snapshot.
 
+The repo itself (does it exist? create it private?) is `repo-setup` step 0 in
+`skills/migration-orchestrator/SKILL.md` — check before copying anything.
+
 ## Section contract (3 things must be in sync)
 
 1. **Component file**: `src/components/sections/<Name>.tsx`

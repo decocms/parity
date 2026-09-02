@@ -1,7 +1,7 @@
 {
   "name": "parity",
   "description": "Orchestrates site migrations (VTEX IO → FastStore v4, deco/Fresh → TanStack) end-to-end: capture prod, reconcile against the candidate, port components, measure parity score, file issues, fix, repeat.",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "author": {
     "name": "deco CMS",
     "email": "hi@deco.cx"

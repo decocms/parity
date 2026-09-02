@@ -286,7 +286,11 @@ content locally via `/api/preview` against a CP branch.** For a no-account/live-
 migration, faststore-v4 yields buildable, locally-runnable code but no real content.
 See `skills/target-faststore-v4/SKILL.md`. Set `source.prodUrl` if not found automatically. Ask for `target.dir` when it does
 not resolve from `cwd` and `--target-dir` was not passed — guessing the candidate
-repo writes work into the wrong tree.
+repo writes work into the wrong tree. **If the candidate repo does not exist yet,
+that is normal and NOT a question for the user here** — leave `target.dir`/
+`target.repo` null and let `repo-setup` create the repo (step 0 there). Never
+invent a bare local dir to move on: a tree with no remote scaffolds fine and then
+dies at the first `gh pr create`, six phases later.
 
 **Board destination.** Ask where the per-page kanban should go — `terminal` (default)
 or `studio`, which mirrors one card per page into the client's deco Studio task
@@ -425,6 +429,33 @@ Each note is a **proposal**, never an instruction to apply:
 is already a scaffolded `faststore-v4`/`tanstack-deco` repo — see `reconcile`).
 Also skip when the source is `deco-fresh` (`deco-migrate` scaffolds instead).
 Only scaffold when creating a brand-new target repo from a source/live capture.
+
+**Step 0 — does the target repo already exist?** Do this BEFORE copying any
+template. The phases after this one open PRs, so the candidate must be a real
+GitHub repo with a remote, not a loose local tree.
+
+1. Derive the slug from the live host: `www.acme.com.br` → `acme`. Default full
+   name `deco-sites/<slug>-tanstack` (or `-faststore` for the FastStore targets).
+2. Check it, via `runner`: `gh repo view <owner>/<slug> --json name,url` (and try
+   the client's own org if the user named one).
+3. **Exists** → clone it (`gh repo clone <owner>/<slug> <dir>`) and set
+   `target.dir`/`target.repo`. If the clone is already a scaffolded target, you
+   are in reconcile-only mode — go back to `reconcile` and skip the rest of this
+   phase. If it is empty, continue to the template copy below.
+4. **Does not exist** → confirm with the user in ONE message, then create it:
+
+   > No repo found for `acme`. I'll create `deco-sites/acme-tanstack` (private)
+   > and scaffold it from `deco-sites/storefront-tanstack`. Different name, owner,
+   > or should it be public?
+
+   After the template copy + first commit, via `runner`:
+   `gh repo create <owner>/<slug> --private --source <dir> --remote origin --push`
+   Then set `target.repo`/`target.dir` in state and write it.
+   **Private is the default** — a client's storefront is their code, and a repo
+   created public cannot be un-leaked. Only go public if the user says so.
+5. Creating the repo needs `gh auth` with write access to that org. If `gh repo
+   create` fails on permissions, say which org and stop — do not fall back to a
+   remote-less local dir, which just moves the failure to the `fix` phase.
 
 - **TanStack**: scaffold by **copying the code** from `deco-sites/storefront-tanstack`
   (public) into the new repo — `git clone` it, copy the tree, re-init git and set
