@@ -181,13 +181,19 @@ jobs:
             echo "plugin.json already at $VERSION — nothing to sync."
             exit 0
           fi
+          # `Set version` deliberately leaves an uncommitted bump to
+          # packages/parity/package.json in the tree — npm already has it and it
+          # is never committed. Drop it here: a dirty tree makes the rebase below
+          # abort with "cannot pull with rebase", which is what broke v0.33.9.
+          git checkout -- packages/parity/package.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .claude-plugin/plugin.json
           git commit -m "chore(release): plugin v$VERSION"
           # Another merge may have landed while we were publishing; rebase onto
-          # it rather than clobbering it.
-          git pull --rebase origin main
+          # it rather than clobbering it. autoStash so a stray build artifact
+          # can never abort the rebase the way the package.json bump did.
+          git -c rebase.autoStash=true pull --rebase origin main
           git push origin HEAD:main
           echo "plugin.json synced to $VERSION"
 
