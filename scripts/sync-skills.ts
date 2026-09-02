@@ -45,6 +45,30 @@ const ENTRIES: SyncEntry[] = [
     repo: "decocms/blocks",
     path: ".cursor/skills/deco-server-functions-invoke/SKILL.md",
   },
+  // invoke.md is vendorized verbatim, and upstream's "Sub-documents" table links
+  // these four as siblings (./problem.md, …). Vendorize them too so those links
+  // resolve — hand-editing the table out of invoke.md would just drift on the
+  // next sync.
+  {
+    dest: "skills/knowledge/vtex/problem.md",
+    repo: "decocms/blocks",
+    path: ".cursor/skills/deco-server-functions-invoke/problem.md",
+  },
+  {
+    dest: "skills/knowledge/vtex/architecture.md",
+    repo: "decocms/blocks",
+    path: ".cursor/skills/deco-server-functions-invoke/architecture.md",
+  },
+  {
+    dest: "skills/knowledge/vtex/generator.md",
+    repo: "decocms/blocks",
+    path: ".cursor/skills/deco-server-functions-invoke/generator.md",
+  },
+  {
+    dest: "skills/knowledge/vtex/troubleshooting.md",
+    repo: "decocms/blocks",
+    path: ".cursor/skills/deco-server-functions-invoke/troubleshooting.md",
+  },
   {
     dest: "skills/knowledge/vtex/fetch-cache.md",
     repo: "decocms/blocks",

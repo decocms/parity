@@ -96,6 +96,14 @@ for a `package.json` that matches `target.repo`, or ask explicitly.
 **Why:** There are zero tests for the plugin layer (agents, skills, orchestrator).
 The parity CLI has 1131 tests; the plugin has none.
 
+**Partially covered (v0.33.0):** `scripts/check-refs.ts`, wired into `ci.yml`,
+fails when a `skills/**`/`agents/**` path, a relative `](./x.md)` link, a
+`packages/parity/src/**` path or a `subagent_type` mentioned in the prose does not
+exist. That is the one failure mode the plugin layer actually had in the wild
+(INDEX rows for unwritten files; `invoke.md`'s four phantom sub-documents) and it
+was invisible: a broken path makes an agent work without the knowledge instead of
+erroring. 4a-4d below are still open.
+
 **What to add:**
 
 ### 4a. Unit tests for `migration-plan.ts`

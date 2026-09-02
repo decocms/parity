@@ -121,7 +121,7 @@ whole message is JSON.
 ```
 discovery → reconcile → repo-setup → template-bootstrap → workflows
 → [migrate-script | porting] → build-green → nav-strategy → triage → fix → parity
-→ [loop back to triage if score < target] → benchmark → done
+→ [loop back to triage if score < target] → performance → benchmark → done
 
   fix, when budget.stackPrs → stack-review → done   (nothing merged; user lands the stack)
 ```
@@ -626,6 +626,19 @@ Two modes, chosen by `budget.stackPrs` (see "PR mode" below). Default is **merge
 mode**. In both, the review gate is identical — only the base branch and the
 merge step differ.
 
+**Not every issue goes to `fixer`.** Two kinds have a specialist that already
+knows the transform — dispatching the generalist at them means it re-derives from
+scratch, usually worse:
+- **"deferred section without LoadingFallback" / CLS from a blank render** →
+  `fallbacker` (it measures the real rect in prod with `parity section` and sizes
+  the skeleton to it). Pass `{section: {name, file, manifestKey}}`, `prodUrl`,
+  `candUrl`, `parity_cli`.
+- **A Lighthouse opportunity** (`render-blocking-resources`, `lcp-lazy-loaded`,
+  `unused-javascript`, …) → `perf-optimizer` in the `performance` phase, not a
+  `fixer` in this one. If such an issue is open here, defer it and say so.
+Everything else is the `fixer`'s. The review + merge gates below are identical
+whichever specialist produced the branch.
+
 **Merge mode (`budget.stackPrs: false`, default).** Independent PRs off `main`,
 merged one at a time. For each open `parity-migrate` issue (up to 5 per round):
 1. Spawn `fixer` with the issue body and `base_branch: <target default branch>`
@@ -684,6 +697,34 @@ Update `parity.lastScore`.
 - If `score >= parity.target` → advance to `benchmark`.
 - If `round < budget.fixRounds` → go back to `triage`.
 - Else → ask the user whether to raise the round budget or accept the score.
+
+### performance
+**Runs only when `stage === "polish"`** — perf is explicitly deferred in the
+`components` and `pages` stages (see the stage table), and optimizing a site whose
+components are not built yet measures the wrong thing. In any other stage, say in
+one line that perf is deferred to the polish stage and advance to `benchmark`.
+
+The score is already at target here, so this is the pass that turns Lighthouse
+opportunities into code — the work the `polish` stage promises and that nothing
+was doing.
+
+1. Via `runner`: `parity vitals --prod <prodUrl> --cand <candUrl> --json 2>&1 | tail -40`
+   (Lighthouse mode, ~40s/page — scope it to the pages that matter). Read
+   `opportunities` from `runs/<id>/vitals.json`, deduped and biggest-first.
+2. Nothing over the noise floor (no opportunity worth more than ~200ms or ~50KB)
+   → skip to `benchmark`. Do not invent work to fill the phase.
+3. Otherwise spawn `perf-optimizer` with `target_dir`, `conventions`, `build_cmd`,
+   `prodUrl`, `candUrl` and the `opportunities` array. It matches each audit id to
+   a transform from its catalog and applies one per commit; it is told to skip
+   what it cannot attribute to our own code (third-party JS is parity, not waste).
+4. Read its `{applied, skipped, gates}`. Open ONE PR for the batch (perf
+   transforms are independent and individually small), then the same review +
+   merge gate as `fix`.
+5. Re-run `parity vitals` once after the merge to confirm the opportunities are
+   gone. A transform that did not move the metric gets reverted, not kept.
+
+Cap it at one round. A second perf round belongs to a new run with a fresh
+`parity vitals`, not to a loop here.
 
 ### benchmark
 Via `runner`: `parity benchmark --prod <prodUrl> --cand <candUrl> 2>&1 | tail -60`

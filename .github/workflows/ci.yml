@@ -26,6 +26,12 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # The plugin is its cross-references: a skill path that does not resolve
+      # means an agent silently works without that knowledge. Cheap to verify,
+      # invisible when it breaks.
+      - name: Plugin references resolve
+        run: bun run check-refs
+
       # `--changed` resolves paths against the vitest root, which after the
       # monorepo move is packages/parity. Running this from the repo root would
       # find no test files at all.
