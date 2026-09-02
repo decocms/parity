@@ -13,11 +13,16 @@ name: Publish
 #     in the PR and CI respects it.
 #   - Otherwise auto-increment the PATCH from the latest published version.
 # Either way the next version is always > npm, so every merge publishes exactly
-# once. `main` is branch-protected, so CI does NOT commit the bump back — npm is
-# the source of truth and the version is recomputed from it each run. The git tag
-# + GitHub release are created via `gh release create --target <sha>` (tag
-# creation isn't blocked by branch protection), so the repo package.json version
-# just acts as a floor / manual minor-major override, and may lag npm.
+# once. packages/parity/package.json is NOT committed back — npm is the source of
+# truth for the CLI and the version is recomputed from it each run, so that file
+# just acts as a floor / manual minor-major override and may lag npm.
+#
+# .claude-plugin/plugin.json IS committed back (see "Sync plugin version"), and
+# it has to be: the Claude Code marketplace serves the plugin from this repo, and
+# `claude plugin update` compares that version field against the installed one.
+# Leave it stale and the updater is blind — it pulls the new commits, sees the
+# same version, and no-ops while reporting success. That happened for v0.33.1
+# through v0.33.8 (plugin.json sat at 0.33.0 the whole time).
 #
 # DO NOT RENAME THIS FILE: the npm trusted-publisher rule is bound to the
 # workflow *filename* (publish.yml) — renaming it breaks OIDC publishing.
@@ -139,13 +144,10 @@ jobs:
         run: npm publish
 
       - name: Tag + GitHub release
-        # `main` is branch-protected, so pushing the version bump back is
-        # blocked. We don't need it: npm is the source of truth and the
-        # Compute step derives the next version from npm every run (the repo's
-        # package.json version is just a floor / manual minor-major override).
-        # `gh release create --target <sha>` creates the tag ref remotely at the
-        # published commit — tag creation is NOT blocked by branch protection —
-        # and the release in one call, no `git push` to main required.
+        # `gh release create --target <sha>` creates the tag ref at the published
+        # commit and the release in one call. The tag deliberately points at the
+        # code that was published, not at the plugin-version bookkeeping commit
+        # the next step pushes.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -153,6 +155,41 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "${{ steps.version.outputs.tag }}" \
             --generate-notes
+
+      - name: Sync plugin version
+        # The CLI's version lives on npm, but the plugin's lives in this file:
+        # the marketplace serves the plugin straight from this repo, so
+        # `claude plugin update` has nothing to compare against except
+        # .claude-plugin/plugin.json. It must move every release or the updater
+        # silently no-ops.
+        #
+        # Safe to push to main: `main` is not a protected branch, and a push made
+        # with GITHUB_TOKEN does not trigger workflows, so this cannot loop. The
+        # `chore(release):` guard in the job's `if:` is a second belt.
+        env:
+          VERSION: ${{ steps.version.outputs.next }}
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("node:fs");
+            const p = ".claude-plugin/plugin.json";
+            const j = JSON.parse(fs.readFileSync(p, "utf8"));
+            j.version = process.argv[1];
+            fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
+          ' "$VERSION"
+          if git diff --quiet -- .claude-plugin/plugin.json; then
+            echo "plugin.json already at $VERSION — nothing to sync."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .claude-plugin/plugin.json
+          git commit -m "chore(release): plugin v$VERSION"
+          # Another merge may have landed while we were publishing; rebase onto
+          # it rather than clobbering it.
+          git pull --rebase origin main
+          git push origin HEAD:main
+          echo "plugin.json synced to $VERSION"
 
       - name: Notify Discord
         # Lives here rather than in its own `on: release` workflow so it reuses
