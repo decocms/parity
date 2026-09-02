@@ -523,7 +523,26 @@ The target repo should be **born with CI/CD**. Where it comes from depends on th
   `"name"` (top level) and `"vars".DECO_SITE_NAME`. Leave `account_id`,
   `kv_namespaces` and `tail_consumers` untouched. Commit with the first PR.
 
-  **Step 2 — Connect the repo in Cloudflare (this is the whole deploy setup).**
+  **Step 2 — Point the site at the right deploy platform.** The site record on the
+  deco platform carries a `platform` setting that decides who deploys it; for a
+  migrated TanStack site it must be **`cfworkers-builds`**. Left unset, the legacy
+  deco deploy bot picks the site up instead — it does not work for these sites, so
+  the symptom is a deploy that keeps failing for reasons unrelated to the code. Do
+  this **before** Step 3, so the first push is already routed correctly.
+
+  Changing it is a write to deco's production platform data, so it is **not** the
+  agent's call to make unprompted: only attempt it with credentials already present
+  on the machine *and* explicit approval from the user for that specific change.
+  Otherwise — and this is the normal path — ask:
+
+  > This site needs its platform set to `cfworkers-builds` before we connect the
+  > deploy, so the legacy deco deploy bot doesn't try to deploy it (it doesn't work
+  > for migrated sites). If you have access to the deco platform settings, set it
+  > there; otherwise ask someone on the deco team to flip it for this site.
+  >
+  > Confirm when done.
+
+  **Step 3 — Connect the repo in Cloudflare (this is the whole deploy setup).**
   Creating the Workers & Pages app pointed at the repo is the only manual step,
   and it is the user's to do — the agent cannot and should not do it. Ask for it
   explicitly rather than waiting to discover it's missing:
@@ -538,14 +557,16 @@ The target repo should be **born with CI/CD**. Where it comes from depends on th
   > Make sure you're in the **deco account** (top-left account switcher) — not a
   > personal one. Confirm when done and I'll verify the deploy.
 
-  **Step 3 — Verify.**
+  **Step 4 — Verify.**
   1. Via runner: open the first PR. Wait ~3 minutes.
   2. Via runner: `gh pr view <pr> --json comments --jq '.comments[].author.login' | grep cloudflare`
   3. **Bot commented** → Workers Builds is live; the comment carries the preview
      URL to hand to the client. Verify `gh secret list` has `CLOUDFLARE_API_TOKEN`
      and `CLOUDFLARE_ACCOUNT_ID`. Phase done.
-  4. **No comment after 3 min** → the app was not connected. Re-send the Step 2
+  4. **No comment after 3 min** → the app was not connected. Re-send the Step 3
      instructions; do not attempt a deploy on the user's behalf.
+  5. **Deploy runs but fails oddly** (errors that don't match the code) → check
+     Step 2 actually landed before assuming a code problem.
 
   If richer CI (parity/perf/playwright) is wanted, import those yml from the
   blocks-cli migrate templates separately.
