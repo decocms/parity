@@ -506,7 +506,35 @@ The target repo should be **born with CI/CD**. Where it comes from depends on th
   The app detects pushes to `main` and posts per-PR preview links via the
   `cloudflare-workers-and-pages` bot.
 
-  **Verify the app is active:**
+  ⛔ **NEVER run `wrangler deploy` at any point.** NEVER remove or modify the
+  deco-specific bindings in `wrangler.jsonc` (`account_id`, `DECO_KV`, `SITES_KV`,
+  `deco-otel-tail`). These are placeholders that only become valid after the site
+  is registered in deco Admin. Stripping them and deploying raw lands the worker on
+  whatever Cloudflare account `wrangler` is locally authenticated as — not the
+  client's deco account. If `wrangler deploy` fails, **do not attempt to fix it** —
+  guide the user through Step 1 below instead.
+
+  **Step 1 — Create the site in deco Admin (do this first, before anything else):**
+
+  Guide the user:
+
+  > Before connecting Cloudflare Workers Builds, the site must be registered in
+  > deco Admin. This provisions the `account_id`, KV namespaces, and
+  > `*.deco-cx.workers.dev` subdomain that `wrangler.jsonc` expects.
+  >
+  > 1. Go to https://admin.deco.cx → **Sites** → **New Site**
+  > 2. Enter the site slug (e.g. `g-amazonas` — should match the repo name)
+  > 3. Choose **TanStack** as the template if prompted
+  > 4. Wait for provisioning — deco will assign `<slug>-tanstack.deco-cx.workers.dev`
+  > 5. Copy the `account_id` shown in deco Admin into `wrangler.jsonc` in the repo
+  >
+  > Confirm when done to continue.
+
+  After user confirms: verify `wrangler.jsonc` has a real `account_id` (not a
+  placeholder like `"YOUR_ACCOUNT_ID"`). If it's still a placeholder, ask the user
+  to copy it from deco Admin before proceeding.
+
+  **Step 2 — Verify CF Workers Builds is active:**
   1. Via runner: open the first PR.
   2. Wait ~3 minutes.
   3. Via runner: `gh pr view <pr> --json comments --jq '.comments[].author.login' | grep cloudflare`
@@ -518,10 +546,9 @@ The target repo should be **born with CI/CD**. Where it comes from depends on th
      > To enable automatic deploys (PR preview links + push-to-main deploy):
      >
      > 1. Go to https://dash.cloudflare.com → **Workers & Pages**
-     > 2. Click **Create application** → **Connect to Git**
-     > 3. Select the repository `<owner/repo>`
-     > 4. Set build settings (framework: None, build command: empty, output dir: empty)
-     > 5. Click **Save and Deploy**
+     > 2. The worker `<slug>-tanstack` created by deco Admin should already appear
+     > 3. Click on it → **Settings** → **Builds** → **Connect repository**
+     > 4. Select `<owner/repo>` and save
      >
      > Confirm when done to continue the migration.
 
