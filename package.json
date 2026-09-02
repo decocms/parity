@@ -11,6 +11,7 @@
     "lint": "bun run --filter='./packages/*' lint",
     "fmt": "bun run --filter='./packages/*' fmt",
     "deadcode": "bun run --filter='./packages/*' deadcode",
+    "check-refs": "bun run scripts/check-refs.ts",
     "sync-skills": "bun run scripts/sync-skills.ts",
     "sync-skills:check": "bun run scripts/sync-skills.ts --check"
   },
