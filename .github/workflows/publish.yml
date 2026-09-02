@@ -169,11 +169,15 @@ jobs:
           VERSION: ${{ steps.version.outputs.next }}
           TAG: ${{ steps.version.outputs.tag }}
           RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}
-          # Discord fetches embed images itself, so this has to be a public URL
-          # rather than an upload — served from this repo via raw. Pointed at
+          # The bot avatar. Discord fetches it itself, so this has to be a public
+          # URL rather than an upload — served from this repo via raw. Pointed at
           # `main` (not the SHA) so replacing the file replaces the art
           # everywhere; Discord caches per URL, so a swap needs a new filename
           # to show up promptly.
+          #
+          # Deliberately the avatar and NOT an embed `image`: as a body image it
+          # rendered full-width under the commands, pushing the thing people
+          # actually came for out of view on a message that fires every merge.
           IMAGE_URL: https://raw.githubusercontent.com/${{ github.repository }}/main/.github/assets/release-dino.jpg
         run: |
           set -euo pipefail
@@ -200,12 +204,12 @@ jobs:
             --arg image "$IMAGE_URL" \
             '{
                username: "parity",
+               avatar_url: $image,
                embeds: [{
                  title: ("@decocms/parity v" + $version),
                  url: $url,
                  description: "Nova versão publicada.",
                  color: 5814783,
-                 image: { url: $image },
                  fields: [
                    {
                      name: "CLI",
