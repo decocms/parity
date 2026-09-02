@@ -175,6 +175,23 @@ one call that makes a real gap invisible, and it is not yours to make.
     that produced this check). The transform itself is `perf-optimizer.md`'s
     `youtube-facade` row — do not restate it in the issue body, point at it.
 
+14. **Device-branched markup** (any stage; deco/TanStack target): grep the section
+    bodies for `useDevice(`, a ternary on `isMobile`/`device ===`, or
+    `window.innerWidth`/`matchMedia` read during render. Flag when the branch picks
+    JSX or an image `src` — that is edge-cache contamination (mobile HTML cached for
+    desktop visitors) plus a hydration mismatch, and it never re-evaluates on resize
+    or SPA nav. Issue `high`, `category: "runtime"`: replace with a CSS branch
+    (`md:hidden` / `hidden md:flex`, `<picture>` + `<source media>`). Point at
+    `skills/knowledge/tanstack/responsive-device.md`; do not restate the fix.
+    A server-injected `/** @hide */` prop from `registerSectionLoaders` is the
+    legitimate form — do NOT file against that.
+15. **N+1 in a loader** (any stage): grep `src/loaders/` and section loaders for an
+    `await` on an API call inside `.map(`/`for (`/`forEach(` — one request per
+    product before the first byte. Issue `high`, `category: "performance"`, naming
+    the endpoint and the multiplier (24-item shelf = 24 calls). Point at
+    `skills/knowledge/perf/n-plus-1.md`, which has the "is this data already in the
+    product object?" table — most of these delete rather than batch.
+
 
 ## Output
 
