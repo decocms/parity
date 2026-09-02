@@ -44,6 +44,9 @@ rule), observability (OTel), and the WebOps deploy accommodations (see
 Hard rules). See `TEMPLATE.md` in that repo for the exact TODO list —
 grep for `TODO_` after cloning.
 
+The repo itself (does it exist? create it private?) is `repo-setup` step 0 in
+`skills/migration-orchestrator/SKILL.md` — check before copying anything.
+
 Do NOT start from the bare `vtex-sites/starter.store` — it has none of the
 above, and re-deriving the PLP pagination/ISR mechanics or the WebOps
 accommodations from scratch is exactly the work this template exists to
