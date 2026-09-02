@@ -31,4 +31,4 @@ main-thread bash is denied with a reminder to dispatch to `runner` instead
 Migration state lives in `.parity/migration.json` in the TARGET repo being
 migrated — not in this repo. Phases: discovery → reconcile → repo-setup →
 template-bootstrap → workflows → (migrate-script | porting) → build-green →
-triage → fix → parity → benchmark → done.
+nav-strategy → triage → fix → parity → performance → benchmark → done.

@@ -20,8 +20,8 @@ mention it in one line as deferred and move on.
 
 | stage | run checks | skip |
 |---|---|---|
-| `components` | 1, 2, 3, 4, 5, 7, 11 | 6, 8, 9, 12, 13 (polish) |
-| `pages` | 1, 2, 3, 4, 5, 7, 10, 11 | 6, 8, 9, 12, 13 (polish) |
+| `components` | 1, 2, 3, 4, 5, 7, 11 | 6, 8, 9, 12, 13, 16, 17, 18, 19 (polish) |
+| `pages` | 1, 2, 3, 4, 5, 7, 10, 11 | 6, 8, 9, 12, 13, 16, 17, 18, 19 (polish) |
 | `polish` | ALL | — |
 
 Also skip by platform:
@@ -33,6 +33,9 @@ Also skip by platform:
 - Checks 11 and 12 read the Deco decofile model (`.deco/blocks/`,
   `src/sections/`) — same condition as 5/8, **skip when
   `platform === "faststore-v4"`**.
+- Checks 16 and 17 read the same decofile model plus the migration's stubbed deco
+  types — **skip both when `platform === "faststore-v4"`**. Checks 18 and 19 are
+  platform-agnostic.
 
 **If `plan_path` is missing, STOP** and return a single `critical` issue saying
 the migration plan is absent so "what is missing" cannot be determined (running
@@ -192,11 +195,49 @@ one call that makes a real gap invisible, and it is not yours to make.
     `skills/knowledge/perf/n-plus-1.md`, which has the "is this data already in the
     product object?" table — most of these delete rather than batch.
 
+16. **A conditional prop resolved on every request** (polish; deco/TanStack
+    target): in `.deco/blocks/pages-*.json`, find props whose value contains a
+    `__resolveType` and whose name marks a branch the section renders only
+    sometimes — `notFoundSections`, `fallbackSections`, `emptySections`, tab or
+    modal content, the losing arm of a flag. Cross-reference the section body: if
+    it renders that prop behind a condition (`if (!page)`, `{active && …}`) and
+    the section exports no `onBeforeResolveProps` wrapping it in
+    `asResolved(x, true)`, the CMS resolves it on EVERY request and discards the
+    result. Measured on a real PDP: a 404-fallback shelf backed by a full-text
+    search cost 1703ms of the eager critical path of every product page. Issue
+    `high`, `category: "performance"`, naming the prop and the loader it reaches.
+    Point at `skills/knowledge/perf/render-location.md`.
+17. **`asResolved` / `isDeferred` declared as no-ops** (polish; deco/TanStack
+    target): grep `src/types/deco.ts` (or wherever the migration stubbed the deco
+    types) for `asResolved` returning its argument and `isDeferred` returning
+    `false`. Migrations ship these to compile, and then every
+    `asResolved(x, true)` in the repo is decorative — the loader can hold a
+    correct guard and still have nothing to defer, which reads as solved in review
+    and costs seconds in production. Issue `high`, `category: "performance"`, only
+    when the repo actually calls `asResolved` somewhere; otherwise mention it in
+    `deferred`. The fix is a framework bump, not a site edit — say so.
+18. **Tracking denylist applied to only one cache key** (polish; any platform): an
+    unknown query param is injected as a top-level loader prop, so it fragments the
+    LOADER key as well as the edge key — every ad click (`gad_source`, `gbraid`,
+    `_gl`) is a MISS on both. Find the site's denylist (a `blockedQs`-style list)
+    and check it is used twice: once for the edge/CDN key and once to canonicalize
+    loader props. Applied to neither, or to only one → issue `medium`,
+    `category: "performance"`. Point at `skills/knowledge/perf/edge-caching.md`.
+19. **JSON-LD with a `@type` outside schema.org** (polish; any platform): grep the
+    SEO sections for the objects pushed into `ld+json` and flag any `@type` that is
+    not a real schema.org type — a plural invented for a list is the tell
+    (`"Products"`, `"Articles"`). No crawler parses an unknown type, so the node is
+    dead weight for every bot: one site shipped **2.75 MB per PLP** that way. Issue
+    `high`, `category: "performance"`: a listing is `ItemList` of `ListItem` with
+    `url`/`position`; the full `Product` belongs on the PDP. While there, check the
+    `url`/`item` values resolve to the STORE host — loaders are handed the
+    commerce-platform base URL, so JSON-LD routinely indexes
+    `<account>.vtexcommercestable.com.br`.
 
 ## Output
 
 ```json
-{"issues": [{"title": "...", "body": "...", "severity": "critical|high|medium|low", "category": "build|runtime|visual|content|infra"}],
+{"issues": [{"title": "...", "body": "...", "severity": "critical|high|medium|low", "category": "build|runtime|visual|content|infra|performance"}],
  "deferred": ["one line per finding skipped because of the stage"]}
 ```
 

@@ -28,6 +28,7 @@ the whole directory. Each entry: path | when to load.
 
 | Path | When to load |
 |---|---|
+| `skills/knowledge/perf/render-location.md` | Small HTML but seconds of TTFB, SPA nav slower than a reload, data resolved and never rendered |
 | `skills/knowledge/perf/payload-trim.md` | Heavy HTML, large JSON in SSR, product payload |
 | `skills/knowledge/perf/edge-caching.md` | Cache-Control, staleTime, cache profiles |
 | `skills/knowledge/perf/n-plus-1.md` | N+1 API calls in loaders, batching |

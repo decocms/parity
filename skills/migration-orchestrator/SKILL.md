@@ -708,27 +708,57 @@ The score is already at target here, so this is the pass that turns Lighthouse
 opportunities into code — the work the `polish` stage promises and that nothing
 was doing.
 
+**Two legs, and the second one is not optional.** Lighthouse measures the browser,
+so it is blind to server-side work that is resolved and discarded: a conditional
+prop the section never renders, deferral silently off on SPA navigation, a cached
+entry too large to stay cached. Those arrive as one undifferentiated TTFB number
+with no audit id attached, which is why "nothing over the noise floor" must never
+end this phase on its own.
+
 1. Via `runner`: `parity vitals --prod <prodUrl> --cand <candUrl> --json 2>&1 | tail -40`
    (Lighthouse mode, ~40s/page — scope it to the pages that matter). Read
    `opportunities` from `runs/<id>/vitals.json`, deduped and biggest-first.
-2. Nothing over the noise floor (no opportunity worth more than ~200ms or ~50KB)
-   → skip to `benchmark`. Do not invent work to fill the phase.
-3. Otherwise spawn `perf-optimizer` with `target_dir`, `conventions`, `build_cmd`,
-   `prodUrl`, `candUrl` and the `opportunities` array. It matches each audit id to
-   a transform from its catalog and applies one per commit; it is told to skip
-   what it cannot attribute to our own code (third-party JS is parity, not waste).
-4. Read its `{applied, skipped, gates}`. Open ONE PR for the batch (perf
+2. **The render-location leg, always.** Load
+   `skills/knowledge/perf/render-location.md` and check the two signals it opens
+   with — small bytes on the wire against a long wait, and whether the
+   `/_serverFn` navigation response carries the same `data-deferred="true"`
+   skeletons the document does. Also pick up any `category: "performance"` issue
+   the `triager` filed (checks 16-19: eagerly-resolved conditional props, no-op
+   `asResolved` stubs, a tracking denylist applied to only one of the two cache
+   keys, JSON-LD with a `@type` outside schema.org). None of these show up in
+   `opportunities`.
+3. Nothing over the noise floor (no opportunity worth more than ~200ms or ~50KB)
+   AND no finding from leg 2 → skip to `benchmark`. Do not invent work to fill the
+   phase. But a clean Lighthouse pass alone is not a clean phase.
+4. Otherwise spawn `perf-optimizer` with `target_dir`, `conventions`, `build_cmd`,
+   `prodUrl`, `candUrl`, the `opportunities` array, and `findings` (leg 2's
+   `performance` issues). It matches each audit id to a transform from its catalog
+   and applies one per commit; it is told to skip what it cannot attribute to our
+   own code (third-party JS is parity, not waste).
+5. Read its `{applied, skipped, gates}`. Open ONE PR for the batch (perf
    transforms are independent and individually small), then the same review +
    merge gate as `fix`.
-5. Re-run `parity vitals` once after the merge to confirm the opportunities are
+6. Re-run `parity vitals` once after the merge to confirm the opportunities are
    gone. A transform that did not move the metric gets reverted, not kept.
+   **For a leg-2 fix, `vitals` is the wrong instrument** — re-measure what the
+   finding was about: bytes-vs-wait on the affected route, or the cached entry
+   size via `/deco/invoke`. Both commands are in `render-location.md` and
+   `edge-caching.md`.
+
+**Before blaming the page, request the same URL several times.** A route that
+swings between 0.19 s and 3.6 s across requests is cold-start variance, not a
+slow page, and no transform fixes it — see the cold-start section of
+`skills/knowledge/perf/edge-caching.md`. Reporting a per-page cost from a single
+sample is how this phase invents work.
 
 Cap it at one round. A second perf round belongs to a new run with a fresh
 `parity vitals`, not to a loop here.
 
 ### benchmark
 Via `runner`: `parity benchmark --prod <prodUrl> --cand <candUrl> 2>&1 | tail -60`
-Report the result to the user. If there are regressions, loop back to `triage`.
+Report the result to the user. If there are regressions, loop back to
+`performance` — that is where the transforms and the render-location/cache legs
+live; `triage`'s checks are static and will not see a timing regression.
 Otherwise → `done`.
 
 ## Token discipline
