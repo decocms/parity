@@ -153,3 +153,45 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "${{ steps.version.outputs.tag }}" \
             --generate-notes
+
+      - name: Notify Discord
+        # Lives here rather than in its own `on: release` workflow so it reuses
+        # the version this run already computed — no second source of truth for
+        # "what's a new version".
+        #
+        # continue-on-error: a failed notification must never turn a successful
+        # publish red. The package is on npm either way; someone not seeing a
+        # Discord message is not a release failure.
+        if: success()
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          VERSION: ${{ steps.version.outputs.next }}
+          TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Secret absent on forks and for contributors without access — skip
+          # quietly instead of curling to an empty URL.
+          if [ -z "${DISCORD_WEBHOOK:-}" ]; then
+            echo "DISCORD_WEBHOOK not set — skipping notification."
+            exit 0
+          fi
+          # Build the payload with jq: the version flows in from a CI output and
+          # hand-rolled JSON breaks on quotes.
+          jq -n \
+            --arg version "$VERSION" \
+            --arg url "$RELEASE_URL" \
+            '{
+               username: "parity",
+               embeds: [{
+                 title: ("@decocms/parity v" + $version),
+                 url: $url,
+                 description: ("Nova versão publicada no npm.\n```\nnpm i -g @decocms/parity@" + $version + "\n```"),
+                 color: 5814783
+               }]
+             }' \
+            | curl -sS --fail-with-body -X POST "$DISCORD_WEBHOOK" \
+                -H 'Content-Type: application/json' \
+                -d @-
+          echo "Notified Discord: $TAG"
