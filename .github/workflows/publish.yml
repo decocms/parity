@@ -169,6 +169,12 @@ jobs:
           VERSION: ${{ steps.version.outputs.next }}
           TAG: ${{ steps.version.outputs.tag }}
           RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}
+          # Discord fetches embed images itself, so this has to be a public URL
+          # rather than an upload — served from this repo via raw. Pointed at
+          # `main` (not the SHA) so replacing the file replaces the art
+          # everywhere; Discord caches per URL, so a swap needs a new filename
+          # to show up promptly.
+          IMAGE_URL: https://raw.githubusercontent.com/${{ github.repository }}/main/.github/assets/release-dino.jpg
         run: |
           set -euo pipefail
           # Secret absent on forks and for contributors without access — skip
@@ -191,6 +197,7 @@ jobs:
           jq -n \
             --arg version "$VERSION" \
             --arg url "$RELEASE_URL" \
+            --arg image "$IMAGE_URL" \
             '{
                username: "parity",
                embeds: [{
@@ -198,6 +205,7 @@ jobs:
                  url: $url,
                  description: "Nova versão publicada.",
                  color: 5814783,
+                 image: { url: $image },
                  fields: [
                    {
                      name: "CLI",
