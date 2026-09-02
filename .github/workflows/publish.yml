@@ -179,6 +179,15 @@ jobs:
           fi
           # Build the payload with jq: the version flows in from a CI output and
           # hand-rolled JSON breaks on quotes.
+          #
+          # Two things ship from this repo and they update differently:
+          #   - the CLI, from npm, pinned to the version this run published;
+          #   - the Claude Code plugin, served by the marketplace straight from
+          #     this repo (marketplace.json `source: "./"`), so it has no version
+          #     of its own to pin — `marketplace update` is what pulls the new
+          #     commits, and `plugin update` then applies them.
+          # Announcing only the npm line left plugin users with no way to get the
+          # change they were just told about.
           jq -n \
             --arg version "$VERSION" \
             --arg url "$RELEASE_URL" \
@@ -187,8 +196,18 @@ jobs:
                embeds: [{
                  title: ("@decocms/parity v" + $version),
                  url: $url,
-                 description: ("Nova versão publicada no npm.\n```\nnpm i -g @decocms/parity@" + $version + "\n```"),
-                 color: 5814783
+                 description: "Nova versão publicada.",
+                 color: 5814783,
+                 fields: [
+                   {
+                     name: "CLI",
+                     value: ("```\nnpm i -g @decocms/parity@" + $version + "\n```")
+                   },
+                   {
+                     name: "Plugin do Claude Code",
+                     value: "```\nclaude plugin marketplace update parity\nclaude plugin update parity\n```\nReinicie o Claude Code para aplicar."
+                   }
+                 ]
                }]
              }' \
             | curl -sS --fail-with-body -X POST "$DISCORD_WEBHOOK" \
