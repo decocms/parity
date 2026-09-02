@@ -31,6 +31,7 @@ Sources surveyed: `decocms/skills` (86), `decocms/blocks .agents/skills/` (6),
 | `knowledge/vtex/fetch-cache.md` | blocks .cursor | SWR VTEX cache |
 | `knowledge/vtex/apps-porting.md` | written locally (from vtex-commerce.md) | Block→component map |
 | `knowledge/vtex/cart.md` | written locally | useCart, CartSidebar |
+| `knowledge/perf/render-location.md` | written locally | Small HTML, long TTFB; work resolved and discarded |
 | `knowledge/perf/payload-trim.md` | written locally | Heavy HTML |
 | `knowledge/perf/edge-caching.md` | written locally | Cache-Control |
 
