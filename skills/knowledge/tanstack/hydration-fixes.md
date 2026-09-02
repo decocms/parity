@@ -17,7 +17,9 @@
    - Fix: ensure SSR and client use identical data (no `Date.now()`, no `Math.random()`)
 
 3. **`useDevice` mismatch** — server returns one breakpoint, client another
-   - Fix: use `@decocms/start/sdk/device` on TanStack; it aligns SSR/CSR
+   - `@decocms/start/sdk/device` does NOT fix this: it reads `RequestContext`
+     (server-only), so the client re-render falls back to the default
+   - Fix: don't branch markup on device at all — `skills/knowledge/tanstack/responsive-device.md`
 
 4. **Static arrays/objects in module scope** that reference DOM
    - Fix: move inside the component function or to `useMemo`

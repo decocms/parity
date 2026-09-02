@@ -40,6 +40,15 @@ Return JSON: `{"ok": true, "pr_url": "...", "branch": "<branch_prefix>/<issue_nu
 ## Rules
 
 - **Conventions first**: `conventions.rules` always override your own judgment.
+- **Load the knowledge file that matches the symptom** before editing. Match the
+  issue's symptom against a row in `skills/knowledge/INDEX.md` and read THAT file
+  (one, not the directory) — hydration mismatch, device-branched layout, N+1 in a
+  loader and variant double-fetch all have a written fix already. Rediscovering it
+  from the code costs more than reading it.
+- **Verify the symptom, not just the build.** A green build proves you didn't break
+  compilation, not that the issue is fixed. Re-render the page or run
+  `parity section --selector '[data-section="X"]'` on the affected section before
+  opening the PR.
 - One issue = one PR. Never bundle unrelated fixes.
 - If the fix requires a Design decision (color-contrast, token choice), add a
   `// TODO` comment and file a NEW issue instead of guessing.

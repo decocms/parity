@@ -13,6 +13,7 @@ the whole directory. Each entry: path | when to load.
 | `skills/knowledge/tanstack/jsx-migration.md` | Preact → React JSX, class → className, Fragment, forwardRef |
 | `skills/knowledge/tanstack/search.md` | Intelligent Search, autocomplete, useSuggestions, search params |
 | `skills/knowledge/tanstack/typescript-fixes.md` | TS errors that don't break build, gen.ts not to edit |
+| `skills/knowledge/tanstack/responsive-device.md` | Mobile layout on desktop, header wrong for ~5min, React #418/#419, any use of `useDevice`/`isMobile` to pick markup |
 
 ## VTEX
 
